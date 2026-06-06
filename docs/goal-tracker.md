@@ -14,7 +14,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 ## Current Goal State
 
 - Active implementation goal: none.
-- Latest completed formal Goal: implement missing feature coverage for frontend ingestion, recommendation visibility, and feedback reuse.
+- Latest completed tracked goal: refresh README and architecture documentation after the ingestion and learning-loop implementation.
 - Branch workflow rule: work intended for `main` must happen on a feature branch and merge through a PR.
 
 ## Goal Index
@@ -29,6 +29,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 | G-006 | Review ingestion modes, LLM involvement, and continuous-improvement support. | Complete | Identified enabled ingestion modes, LLM call paths, and the gap that feedback was persisted but not yet reused. | PR #3; `docs/progress.md`; `AGENTS.md` |
 | G-007 | Implement missing features from the audits. | Complete | Added frontend ingestion controls, full recommendation detail visibility, detailed engineer feedback capture, and feedback reuse in future recommendations, LLM prompt context, reports, and prediction drivers. | PR #4; commit `75ece10`; `frontend/src/App.tsx`; `backend/app/services/recommendations.py`; `backend/app/services/risk.py` |
 | G-008 | Track all goals from project start in a separate markdown file. | Complete | Created this goal tracker as a standalone goal ledger. | `docs/goal-tracker.md` |
+| G-009 | Review and update README and architecture docs. | Complete | Refreshed user-facing capabilities, ingestion examples, LLM boundaries, continuous-improvement behavior, API surface, data flow, and prototype limits. | `README.md`; `docs/architecture.md` |
 
 ## Detailed Goal Notes
 
@@ -198,6 +199,20 @@ Delivered in this branch:
 
 - Created `docs/goal-tracker.md`.
 - Consolidated formal project goals and major session objectives from the start of the project through PR #4.
+
+Status: `Complete`
+
+### G-009: README And Architecture Refresh
+
+Requested outcome:
+
+- Review and update the README and architecture markdown files.
+
+Delivered in this branch:
+
+- Updated `README.md` to describe the current app as a working prototype rather than a scaffold.
+- Added clearer decision-support features, important docs, ingestion examples, structured record ingestion details, SQLite schema version, LLM boundaries, and learning-loop behavior.
+- Updated `docs/architecture.md` with a more complete diagram, API surface, data flow, LLM boundaries, continuous-improvement behavior, and corrected prototype limits.
 
 Status: `Complete`
 
