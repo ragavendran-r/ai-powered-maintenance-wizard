@@ -272,16 +272,26 @@ Requested outcome:
 - Use an appropriate production-ready broker; NATS JetStream is selected for the first implementation.
 - First fix visibility of the two newly added assets in the UI.
 
-Planned delivery:
+Delivered:
 
 - Document the NATS JetStream ingestion goal and architecture.
 - Make the left-nav priority asset list explicitly show all five tracked assets.
-- Add a backend streaming ingestion worker using a durable NATS JetStream pull consumer.
-- Validate message envelopes, persist supported payloads through existing structured ingestion paths, and route invalid messages to a dead-letter subject.
-- Add streaming status visibility in the API and frontend Ingestion view.
-- Add backend/frontend tests and live verification.
+- Added a backend streaming ingestion worker using a durable NATS JetStream pull consumer.
+- Added deterministic message envelope validation, derived IDs for sensor/alert messages, existing-equipment checks, SQLite persistence through structured ingestion paths, idempotency audit records, retry/nak behavior, and dead-letter publishing for invalid messages.
+- Added `GET /api/streaming/status` and a read-only IoT Stream status panel in the frontend Ingestion view.
+- Added backend/frontend tests and live verification.
 
-Status: `In Progress`
+Verification recorded:
+
+- `PYTHONPYCACHEPREFIX=.pycache .venv/bin/python -m compileall app`
+- `.venv/bin/pytest` passed with 31 tests.
+- `npm run test` passed with 5 tests.
+- `npm run build` passed.
+- Live `GET /api/streaming/status` returned disabled NATS status with stream `MW_IOT`.
+- Live dashboard check returned 5 tracked assets and 5 priority-list entries.
+- Live Vite source check confirmed the `IoT Stream` status panel and `Priority Assets` UI are being served.
+
+Status: `Complete`
 
 ## Maintenance Rules For This File
 

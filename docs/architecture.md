@@ -57,7 +57,7 @@ flowchart LR
 
 - React frontend: operator dashboard, left-nav ingestion view, maintenance chat, asset detail, recommendation, report, and detailed feedback views.
 - FastAPI backend: HTTP API layer for dashboard data, ingestion, diagnosis, prediction, chat, reports, and feedback.
-- Async IoT streaming ingestion: planned NATS JetStream durable consumer for plant applications, PLC gateways, and historians that publish alerts, sensor readings, equipment, spares, and maintenance events.
+- Async IoT streaming ingestion: optional NATS JetStream durable consumer for plant applications, PLC gateways, and historians that publish alerts, sensor readings, equipment, spares, and maintenance events.
 - Data services: seed SQLite from five sample steel-plant assets and expose repository functions for equipment, alerts, sensor readings, spares, maintenance history, documents, document chunks, and feedback.
 - Document parser: extracts text from uploaded text-like files and embedded-text PDFs before indexing.
 - Retrieval service: local chunk index persisted in SQLite with deterministic hashed embeddings and lexical scoring.
@@ -73,7 +73,7 @@ flowchart LR
   - `POST /api/ingest/documents` stores JSON document records and rebuilds retrieval chunks.
   - `POST /api/ingest/document-file` parses and stores uploaded `.txt`, `.md`, `.markdown`, `.csv`, `.log`, `.json`, and embedded-text `.pdf` files.
   - `POST /api/ingest/records` upserts structured equipment, alert, spare, sensor reading, and maintenance event records.
-  - Planned `GET /api/streaming/status` reports NATS JetStream ingestion state, processed count, failed count, last message timestamp, and last error.
+  - `GET /api/streaming/status` reports NATS JetStream ingestion state, processed count, failed count, last message timestamp, and last error.
 - Decision support:
   - `GET /api/dashboard/summary` returns plant-level health and all tracked assets sorted by risk priority.
   - `GET /api/equipment/{equipment_id}/health` returns asset risk, anomalies, alerts, spares constraints, and notes.
@@ -89,7 +89,7 @@ flowchart LR
 1. Sample plant records for the hot strip mill drive, blast furnace blower, caster cooling pump, hydraulic system, and overhead crane are loaded from `assets/sample_data/steel_plant_demo.json` and upserted into SQLite on startup.
 2. File and JSON document ingestion endpoints parse manuals, SOPs, logs, CSVs, JSON, Markdown, text files, and embedded-text PDFs into document records and retrieval chunks.
 3. Structured record ingestion upserts equipment, alerts, spares, sensor readings, and maintenance events.
-4. Planned NATS JetStream ingestion consumes plant IoT messages asynchronously and persists validated payloads through the same repository path.
+4. Optional NATS JetStream ingestion consumes plant IoT messages asynchronously and persists validated payloads through the same repository path.
 5. API endpoints read and write typed records through the repository layer.
 6. Dashboard and equipment endpoints expose plant health, the full priority-sorted asset list, asset risk, anomaly findings, alert context, and spares constraints.
 7. Chat or diagnosis requests trigger local retrieval over persisted document chunks plus matching maintenance history.
@@ -103,7 +103,7 @@ flowchart LR
 
 LLM use is isolated to recommendation generation. Diagnosis, chat, and report endpoints all call the same recommendation pipeline, so they can include optional LLM-generated root causes, immediate actions, planned actions, summaries, and confidence adjustment.
 
-The LLM is not involved in raw ingestion, deterministic anomaly detection, risk scoring, RUL calculation, dashboard aggregation, or feedback persistence. These parts remain deterministic so the demo works without external credentials.
+The LLM is not involved in raw ingestion, NATS streaming ingestion, deterministic anomaly detection, risk scoring, RUL calculation, dashboard aggregation, or feedback persistence. These parts remain deterministic so the demo works without external credentials.
 
 Provider output must validate to the expected structured JSON contract. Missing credentials, network errors, malformed JSON, invalid schema, or provider timeout automatically fall back to deterministic local reasoning.
 
@@ -124,6 +124,7 @@ This is a prototype learning loop based on feedback reuse and ranking influence.
 - Retrieval uses deterministic local embeddings suitable for offline demo use; production should replace this with a stronger embedding model and vector database.
 - LLM providers are optional at runtime. Invalid provider responses, missing credentials, or network failures fall back to deterministic reasoning.
 - SQLite persistence is implemented for the prototype data model. A lightweight startup migration exists for `feedback.equipment_id`; full migration tooling is still a production hardening item.
+- NATS JetStream ingestion is implemented as an optional runtime path and requires an external NATS server when `STREAMING_ENABLED=true`.
 - Live LLM calls are available through provider adapters when configured; deterministic fallback output remains the default local-demo behavior.
 - Anomaly detection and RUL are heuristic and intended for demonstration until richer plant time-series data exists.
 - PDF extraction depends on embedded text; scanned PDFs would need OCR in a production version.

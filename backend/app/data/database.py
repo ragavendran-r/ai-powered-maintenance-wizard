@@ -110,9 +110,20 @@ SCHEMA_STATEMENTS = [
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS streaming_messages (
+        message_id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        message_type TEXT NOT NULL,
+        subject TEXT,
+        status TEXT NOT NULL,
+        error TEXT,
+        received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
 ]
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 
 def get_database_path() -> Path:
@@ -210,6 +221,7 @@ def database_status() -> dict[str, Any]:
         "documents",
         "document_chunks",
         "feedback",
+        "streaming_messages",
     ]
     with connect() as connection:
         version_row = connection.execute(

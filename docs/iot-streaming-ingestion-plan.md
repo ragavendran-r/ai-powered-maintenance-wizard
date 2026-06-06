@@ -70,7 +70,7 @@ For `alert` and `sensor_reading` messages, the backend may derive `payload.id` f
 
 ## Backend Changes
 
-- Add streaming configuration:
+- Implemented streaming configuration:
   - `STREAMING_ENABLED`
   - `NATS_URL`
   - `NATS_STREAM`
@@ -79,14 +79,14 @@ For `alert` and `sensor_reading` messages, the backend may derive `payload.id` f
   - `NATS_DLQ_SUBJECT`
   - auth/TLS settings
   - batch size, ack wait, max deliver, reconnect settings
-- Add a streaming service started from FastAPI lifespan only when `STREAMING_ENABLED=true`.
-- Reuse `repository.add_records` for validated message persistence.
-- Track runtime status: enabled, connected, processed count, failed count, last message timestamp, last error, stream, consumer, and subjects.
-- Add `GET /api/streaming/status`.
+- Added a streaming service started from FastAPI lifespan only when `STREAMING_ENABLED=true`.
+- Reused `repository.add_records` for validated message persistence.
+- Tracked runtime status: enabled, connected, processed count, failed count, last message timestamp, last error, stream, consumer, and subjects.
+- Added `GET /api/streaming/status`.
 
 ## Frontend Changes
 
-- Add read-only streaming ingestion status to the Ingestion view.
+- Added read-only streaming ingestion status to the Ingestion view.
 - Show disabled, connected, or error state.
 - Show processed count, failed count, last message timestamp, and last error.
 

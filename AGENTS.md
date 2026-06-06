@@ -79,3 +79,4 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Added a durable completion-notification rule requiring a desktop notification at the end of every completed task.
 - Moved the complete ingestion section into a dedicated left-nav Ingestion view after merging PR #7, verified the frontend build/tests and browser DOM behavior, and opened PR #8 from `feat/ingestion-view` to `main`.
 - Added two tracked sample assets, `HYD-SYS-04` Hot Rolling Hydraulic System and `OH-CRANE-05` Melt Shop Overhead Crane, with alerts, sensor readings, spares, maintenance history, SOP/manual evidence, dashboard visibility, tests, docs, and PR #9.
+- Merged PR #10 for streaming-goal docs and asset visibility, then implemented optional NATS JetStream IoT streaming ingestion with `/api/streaming/status`, frontend IoT Stream status, schema version 3 audit records, tests, and docs on `feat/nats-iot-streaming-ingestion`.

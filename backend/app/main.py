@@ -16,7 +16,9 @@ from app.models.schemas import (
     HealthSummary,
     PredictionRequest,
     Recommendation,
+    StreamingStatus,
 )
+from app.services.iot_streaming import StreamingIngestionService
 from app.services.recommendations import generate_recommendation
 from app.services.document_parser import parse_upload_to_document
 from app.services.reports import recommendation_to_markdown
@@ -26,9 +28,15 @@ from app.services.anomaly import analyze_anomalies, sensor_readings
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     initialize_database(seed=True)
-    yield
+    streaming_service = StreamingIngestionService()
+    app.state.streaming_service = streaming_service
+    await streaming_service.start()
+    try:
+        yield
+    finally:
+        await streaming_service.stop()
 
 
 app = FastAPI(title="Maintenance Wizard API", version="0.1.0", lifespan=lifespan)
@@ -70,6 +78,14 @@ async def ingest_document_file(
 def ingest_records(payload: Optional[dict[str, list[dict[str, Any]]]] = None) -> dict[str, Any]:
     counts = repository.add_records(payload or {})
     return {"status": "stored", "counts": counts}
+
+
+@app.get("/api/streaming/status", response_model=StreamingStatus)
+def streaming_status():
+    service = getattr(app.state, "streaming_service", None)
+    if not service:
+        service = StreamingIngestionService()
+    return service.status()
 
 
 @app.get("/api/equipment")

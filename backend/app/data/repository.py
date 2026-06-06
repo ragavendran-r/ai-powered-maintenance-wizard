@@ -228,6 +228,43 @@ def list_feedback(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
     return _fetch_all("SELECT * FROM feedback ORDER BY created_at DESC, id DESC")
 
 
+def get_streaming_message(message_id: str) -> Optional[dict[str, Any]]:
+    return _fetch_one("SELECT * FROM streaming_messages WHERE message_id = ?", (message_id,))
+
+
+def save_streaming_message(
+    message_id: str,
+    source: str,
+    message_type: str,
+    subject: Optional[str],
+    status: str,
+    error: Optional[str] = None,
+) -> None:
+    ensure_ready()
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO streaming_messages (
+                message_id,
+                source,
+                message_type,
+                subject,
+                status,
+                error
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(message_id) DO UPDATE SET
+                source=excluded.source,
+                message_type=excluded.message_type,
+                subject=excluded.subject,
+                status=excluded.status,
+                error=excluded.error,
+                received_at=CURRENT_TIMESTAMP
+            """,
+            (message_id, source, message_type, subject, status, error),
+        )
+
+
 def _fetch_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
     ensure_ready()
     with connect() as connection:

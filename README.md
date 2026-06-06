@@ -16,7 +16,7 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 - Markdown maintenance report export.
 - API and frontend ingestion for text/Markdown/CSV/log/JSON and embedded-text PDF documents.
 - Structured JSON record ingestion for equipment, alerts, spares, sensor readings, and maintenance history.
-- Planned async IoT streaming ingestion via NATS JetStream for plant applications and edge gateways.
+- Optional async IoT streaming ingestion via NATS JetStream for plant applications and edge gateways.
 - Engineer feedback capture with equipment-linked root cause, action, outcome, and notes reused in later recommendations and prediction drivers.
 - Backend and frontend tests for core prototype behavior.
 
@@ -79,6 +79,7 @@ Useful API checks:
 ```bash
 curl http://localhost:8000/api/equipment/RM-DRIVE-01/anomalies
 curl http://localhost:8000/api/equipment/RM-DRIVE-01/health
+curl http://localhost:8000/api/streaming/status
 curl http://localhost:8000/api/reports/RM-DRIVE-01/markdown
 curl -X POST http://localhost:8000/api/predict \
   -H "Content-Type: application/json" \
@@ -134,11 +135,15 @@ Document upload supports `.txt`, `.md`, `.markdown`, `.csv`, `.log`, `.json`, an
 
 Structured record ingestion supports `equipment`, `alerts`, `spares`, `sensor_readings`, and `maintenance_events`. Engineer feedback is stored with `equipment_id`, `status`, `corrected_diagnosis`, `actual_root_cause`, `action_taken`, `outcome`, and `notes`.
 
-The current SQLite schema version is `2`. A lightweight startup migration adds `feedback.equipment_id` for older local databases. Full migration tooling is still a production hardening item.
+NATS JetStream streaming ingestion is disabled by default. Set `STREAMING_ENABLED=true` and configure `NATS_URL` to consume IoT envelopes from `steelplant.iot.*` subjects into the same structured record tables used by JSON ingestion. The backend uses the `MW_IOT` stream, `maintenance-wizard-ingestor` durable consumer, explicit acknowledgments after persistence, and `steelplant.iot.dlq` for invalid messages.
+
+The current SQLite schema version is `3`. Lightweight startup migrations add `feedback.equipment_id` and create `streaming_messages` for older local databases. Full migration tooling is still a production hardening item.
 
 ## LLM And Learning Behavior
 
 LLMs are invoked only through recommendation generation, which is used by diagnosis, chat, and report flows. They are not used for raw ingestion, anomaly detection, risk scoring, RUL calculation, or feedback storage.
+
+LLMs are not involved in NATS IoT streaming ingestion. Streaming payloads are validated deterministically and persisted before later diagnosis, chat, report, and recommendation flows use the updated data.
 
 When configured, the LLM prompt includes equipment context, selected alert, symptoms/query, computed risk, failure probability, RUL, retrieved evidence, and recent engineer feedback notes. The backend validates structured JSON before merging LLM suggestions into deterministic recommendations.
 

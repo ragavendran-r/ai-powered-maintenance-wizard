@@ -1,13 +1,44 @@
+import asyncio
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.data import repository
 from app.data.database import database_status, reset_database
 from app.main import app
+from app.services.iot_streaming import (
+    InvalidIoTMessage,
+    StreamingIngestionService,
+    build_dead_letter_payload,
+    process_iot_message,
+)
 from app.services.retrieval import retrieve_evidence
 
 
 client = TestClient(app)
+
+
+class _FakeNatsMessage:
+    def __init__(self, payload, subject: str):
+        self.data = json.dumps(payload).encode("utf-8")
+        self.subject = subject
+        self.acked = False
+        self.nacked = False
+
+    async def ack(self):
+        self.acked = True
+
+    async def nak(self):
+        self.nacked = True
+
+
+class _FakeJetStream:
+    def __init__(self):
+        self.published = []
+
+    async def publish(self, subject: str, payload: bytes):
+        self.published.append((subject, payload.decode("utf-8")))
 
 
 @pytest.fixture(autouse=True)
@@ -23,9 +54,10 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "2"
+    assert status["schema_version"] == "3"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["document_chunks"] >= 8
+    assert "streaming_messages" in status["counts"]
 
 
 def test_dashboard_summary_contains_sample_equipment():
@@ -37,6 +69,148 @@ def test_dashboard_summary_contains_sample_equipment():
     assert len(payload["highest_risk_equipment"]) == 5
     equipment_ids = {item["equipment"]["id"] for item in payload["highest_risk_equipment"]}
     assert {"HYD-SYS-04", "OH-CRANE-05"}.issubset(equipment_ids)
+
+
+def test_streaming_status_is_disabled_by_default():
+    response = client.get("/api/streaming/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["enabled"] is False
+    assert payload["state"] == "disabled"
+    assert payload["stream"] == "MW_IOT"
+    assert "steelplant.iot.sensor_readings" in payload["subjects"]
+
+
+def test_iot_sensor_message_persists_and_is_idempotent():
+    message = {
+        "message_id": "iot-sensor-001",
+        "schema_version": "1",
+        "source": "caster-plc-gateway",
+        "type": "sensor_reading",
+        "timestamp": "2026-06-06T09:00:00+05:30",
+        "payload": {
+            "equipment_id": "CC-PUMP-03",
+            "signal": "cooling_water_flow",
+            "value": 1300.0,
+            "unit": "m3/h",
+            "threshold": 1100.0,
+        },
+    }
+
+    result = process_iot_message(message, "steelplant.iot.sensor_readings")
+    duplicate = process_iot_message(message, "steelplant.iot.sensor_readings")
+
+    assert result.status == "processed"
+    assert duplicate.status == "duplicate"
+    readings = repository.list_sensor_readings("CC-PUMP-03", "cooling_water_flow")
+    derived = [reading for reading in readings if reading["id"].startswith("SR-IOT-")]
+    assert len(derived) == 1
+    anomalies = client.get("/api/equipment/CC-PUMP-03/anomalies").json()
+    assert any(item["signal"] == "cooling_water_flow" for item in anomalies)
+
+
+def test_iot_alert_message_persists_and_affects_health():
+    message = {
+        "message_id": "iot-alert-001",
+        "schema_version": "1",
+        "source": "caster-plc-gateway",
+        "type": "alert",
+        "timestamp": "2026-06-06T09:05:00+05:30",
+        "payload": {
+            "equipment_id": "CC-PUMP-03",
+            "signal": "motor_current",
+            "value": 116.0,
+            "unit": "A",
+            "threshold": 95.0,
+            "severity": "high",
+            "message": "Cooling pump motor current above IoT gateway threshold",
+        },
+    }
+
+    result = process_iot_message(message, "steelplant.iot.alerts")
+
+    assert result.status == "processed"
+    health = client.get("/api/equipment/CC-PUMP-03/health").json()
+    assert any(alert["message"] == "Cooling pump motor current above IoT gateway threshold" for alert in health["active_alerts"])
+
+
+def test_invalid_iot_payload_builds_dead_letter_payload():
+    message = {
+        "message_id": "iot-invalid-001",
+        "schema_version": "1",
+        "source": "caster-plc-gateway",
+        "type": "sensor_reading",
+        "timestamp": "2026-06-06T09:00:00+05:30",
+        "payload": {"signal": "cooling_water_flow"},
+    }
+
+    with pytest.raises(InvalidIoTMessage) as exc_info:
+        process_iot_message(message, "steelplant.iot.sensor_readings")
+
+    dead_letter = build_dead_letter_payload(message, "steelplant.iot.sensor_readings", str(exc_info.value))
+    assert dead_letter["subject"] == "steelplant.iot.sensor_readings"
+    assert "equipment_id" in dead_letter["error"]
+    assert dead_letter["raw_message"]["message_id"] == "iot-invalid-001"
+
+
+def test_invalid_nats_message_is_published_to_dlq_and_acked():
+    message = _FakeNatsMessage(
+        {
+            "message_id": "iot-invalid-nats-001",
+            "schema_version": "1",
+            "source": "caster-plc-gateway",
+            "type": "sensor_reading",
+            "timestamp": "2026-06-06T09:00:00+05:30",
+            "payload": {"signal": "cooling_water_flow"},
+        },
+        "steelplant.iot.sensor_readings",
+    )
+    service = StreamingIngestionService()
+    service._js = _FakeJetStream()
+
+    asyncio.run(service.handle_nats_message(message))
+
+    assert message.acked is True
+    assert message.nacked is False
+    assert service.status().failed_count == 1
+    assert service._js.published
+    dlq_subject, dlq_payload = service._js.published[0]
+    assert dlq_subject == "steelplant.iot.dlq"
+    assert "equipment_id" in json.loads(dlq_payload)["error"]
+
+
+def test_persistence_failure_naks_nats_message(monkeypatch):
+    def fail_add_records(_):
+        raise RuntimeError("database locked")
+
+    monkeypatch.setattr(repository, "add_records", fail_add_records)
+    message = _FakeNatsMessage(
+        {
+            "message_id": "iot-nak-001",
+            "schema_version": "1",
+            "source": "caster-plc-gateway",
+            "type": "alert",
+            "timestamp": "2026-06-06T09:05:00+05:30",
+            "payload": {
+                "equipment_id": "CC-PUMP-03",
+                "signal": "motor_current",
+                "value": 116.0,
+                "unit": "A",
+                "threshold": 95.0,
+                "severity": "high",
+                "message": "Cooling pump motor current above IoT gateway threshold",
+            },
+        },
+        "steelplant.iot.alerts",
+    )
+    service = StreamingIngestionService()
+
+    asyncio.run(service.handle_nats_message(message))
+
+    assert message.acked is False
+    assert message.nacked is True
+    assert service.status().failed_count == 1
+    assert service.status().last_error == "database locked"
 
 
 @pytest.mark.parametrize(

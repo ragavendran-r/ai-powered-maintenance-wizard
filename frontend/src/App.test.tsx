@@ -160,6 +160,25 @@ beforeEach(() => {
       if (url.endsWith('/api/dashboard/summary')) {
         return Promise.resolve(new Response(JSON.stringify(dashboard), { status: 200 }))
       }
+      if (url.endsWith('/api/streaming/status')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              enabled: false,
+              state: 'disabled',
+              broker: 'nats',
+              stream: 'MW_IOT',
+              consumer: 'maintenance-wizard-ingestor',
+              subjects: ['steelplant.iot.sensor_readings'],
+              processed_count: 0,
+              failed_count: 0,
+              last_message_timestamp: null,
+              last_error: null,
+            }),
+            { status: 200 },
+          ),
+        )
+      }
       if (url.endsWith('/api/diagnose')) {
         return Promise.resolve(new Response(JSON.stringify(recommendation), { status: 200 }))
       }
@@ -252,6 +271,8 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Ingestion' }))
+    expect(await screen.findByText('IoT Stream')).toBeInTheDocument()
+    expect(screen.getByText('MW_IOT')).toBeInTheDocument()
     const file = new File(['Inspect bearing housing when vibration increases.'], 'uploaded_sop.txt', { type: 'text/plain' })
     fireEvent.change(await screen.findByLabelText('Ingestion file'), { target: { files: [file] } })
     fireEvent.click(screen.getByRole('button', { name: /upload/i }))

@@ -15,7 +15,7 @@ import {
   Upload,
   Wrench,
 } from 'lucide-react'
-import { api, fallbackDashboard, type DashboardSummary, type Recommendation } from './services/api'
+import { api, fallbackDashboard, type DashboardSummary, type Recommendation, type StreamingStatus } from './services/api'
 
 const riskRank = { low: 1, medium: 2, high: 3, critical: 4 }
 type AppView = 'dashboard' | 'ingestion'
@@ -34,6 +34,7 @@ export function App() {
   const [jsonMode, setJsonMode] = useState<'documents' | 'records'>('documents')
   const [jsonPayload, setJsonPayload] = useState('')
   const [ingestionMessage, setIngestionMessage] = useState('')
+  const [streamingStatus, setStreamingStatus] = useState<StreamingStatus | null>(null)
   const [feedbackMessage, setFeedbackMessage] = useState('')
   const [feedbackRootCause, setFeedbackRootCause] = useState('')
   const [feedbackActionTaken, setFeedbackActionTaken] = useState('')
@@ -56,7 +57,12 @@ export function App() {
 
   useEffect(() => {
     loadDashboard()
+    loadStreamingStatus()
   }, [])
+
+  useEffect(() => {
+    if (activeView === 'ingestion') loadStreamingStatus()
+  }, [activeView])
 
   const selectedHealth = useMemo(
     () => dashboard.highest_risk_equipment.find((item) => item.equipment.id === selectedEquipment) ?? dashboard.highest_risk_equipment[0],
@@ -102,6 +108,13 @@ export function App() {
       })
       .then(() => setFeedbackMessage(`${status} feedback stored`))
       .catch(() => setFeedbackMessage('Feedback could not be stored'))
+  }
+
+  function loadStreamingStatus() {
+    return api
+      .streamingStatus()
+      .then((status) => setStreamingStatus(status))
+      .catch(() => setStreamingStatus(null))
   }
 
   async function ingestSelectedFile() {
@@ -155,6 +168,29 @@ export function App() {
         <span>Target asset</span>
         <strong>{selectedHealth?.equipment.name}</strong>
         <small>{selectedEquipment}</small>
+      </div>
+      <div className="streamingStatusPanel">
+        <div className="sectionHeader compactHeader">
+          <Activity size={18} />
+          <h3>IoT Stream</h3>
+        </div>
+        <div className="streamingStatusGrid">
+          <span>State</span>
+          <strong className={`streamState ${streamingStatus?.state ?? 'error'}`}>{streamingStatus?.state ?? 'unavailable'}</strong>
+          <span>Broker</span>
+          <strong>{streamingStatus?.broker ?? 'nats'}</strong>
+          <span>Stream</span>
+          <strong>{streamingStatus?.stream ?? 'MW_IOT'}</strong>
+          <span>Consumer</span>
+          <strong>{streamingStatus?.consumer ?? 'maintenance-wizard-ingestor'}</strong>
+          <span>Processed</span>
+          <strong>{streamingStatus?.processed_count ?? 0}</strong>
+          <span>Failed</span>
+          <strong>{streamingStatus?.failed_count ?? 0}</strong>
+          <span>Last Message</span>
+          <strong>{streamingStatus?.last_message_timestamp ?? 'None yet'}</strong>
+        </div>
+        {streamingStatus?.last_error && <p className="inlineStatus errorText">{streamingStatus.last_error}</p>}
       </div>
       <div className="ingestionGrid">
         <label className="field">

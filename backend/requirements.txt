@@ -6,4 +6,5 @@ python-dotenv==1.0.1
 httpx==0.28.1
 pypdf==5.1.0
 python-multipart==0.0.20
+nats-py==2.14.0
 pytest==8.3.4
