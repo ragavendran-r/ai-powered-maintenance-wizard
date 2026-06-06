@@ -14,7 +14,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 ## Current Goal State
 
 - Active implementation goal: none.
-- Latest completed tracked goal: refresh README and architecture documentation after the ingestion and learning-loop implementation.
+- Latest completed tracked goal: move ingestion into a separate left-nav view.
 - Branch workflow rule: work intended for `main` must happen on a feature branch and merge through a PR.
 
 ## Goal Index
@@ -30,6 +30,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 | G-007 | Implement missing features from the audits. | Complete | Added frontend ingestion controls, full recommendation detail visibility, detailed engineer feedback capture, and feedback reuse in future recommendations, LLM prompt context, reports, and prediction drivers. | PR #4; commit `75ece10`; `frontend/src/App.tsx`; `backend/app/services/recommendations.py`; `backend/app/services/risk.py` |
 | G-008 | Track all goals from project start in a separate markdown file. | Complete | Created this goal tracker as a standalone goal ledger. | `docs/goal-tracker.md` |
 | G-009 | Review and update README and architecture docs. | Complete | Refreshed user-facing capabilities, ingestion examples, LLM boundaries, continuous-improvement behavior, API surface, data flow, and prototype limits. | `README.md`; `docs/architecture.md` |
+| G-010 | Move ingestion into a separate left-nav view. | Complete | Moved document upload and JSON ingestion out of the asset detail panel into a dedicated Ingestion view accessible from the left navigation. | `frontend/src/App.tsx`; `frontend/src/App.test.tsx`; `frontend/src/styles.css` |
 
 ## Detailed Goal Notes
 
@@ -213,6 +214,24 @@ Delivered in this branch:
 - Updated `README.md` to describe the current app as a working prototype rather than a scaffold.
 - Added clearer decision-support features, important docs, ingestion examples, structured record ingestion details, SQLite schema version, LLM boundaries, and learning-loop behavior.
 - Updated `docs/architecture.md` with a more complete diagram, API surface, data flow, LLM boundaries, continuous-improvement behavior, and corrected prototype limits.
+
+Status: `Complete`
+
+### G-010: Separate Ingestion View
+
+Requested outcome:
+
+- Move the complete ingestion section to a separate new view accessible from the left navigation.
+
+Delivered in this branch:
+
+- Added left navigation with `Dashboard` and `Ingestion` views.
+- Removed the ingestion form from the dashboard asset detail panel.
+- Added a dedicated Ingestion view containing the existing document file upload and JSON document/record import workflows.
+- Kept target equipment context visible in the ingestion view.
+- Updated frontend tests to require navigation before ingestion controls are available.
+- Opened PR #8 from `feat/ingestion-view` to `main`: `https://github.com/ragavendran-r/ai-powered-maintenance-wizard/pull/8`.
+- Verified with `npm run test`, `npm run build`, `git diff --check`, and browser DOM checks at `http://127.0.0.1:5173/`.
 
 Status: `Complete`
 
