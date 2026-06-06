@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     llm_timeout_seconds: float = Field(default=20.0, alias="LLM_TIMEOUT_SECONDS")
+    auth_enabled: bool = Field(default=True, alias="AUTH_ENABLED")
+    jwt_secret_key: str = Field(
+        default="maintenance-wizard-local-dev-secret-change-me",
+        alias="JWT_SECRET_KEY",
+    )
+    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    access_token_expire_minutes: int = Field(default=480, ge=1, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    auth_seed_demo_users: bool = Field(default=True, alias="AUTH_SEED_DEMO_USERS")
     streaming_enabled: bool = Field(default=False, alias="STREAMING_ENABLED")
     nats_url: str = Field(default="nats://localhost:4222", alias="NATS_URL")
     nats_stream: str = Field(default="MW_IOT", alias="NATS_STREAM")

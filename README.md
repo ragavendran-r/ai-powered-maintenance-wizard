@@ -18,7 +18,7 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 - Structured JSON record ingestion for equipment, alerts, spares, sensor readings, and maintenance history.
 - Optional async IoT streaming ingestion via NATS JetStream for plant applications and edge gateways.
 - Engineer feedback capture with equipment-linked root cause, action, outcome, and notes reused in later recommendations and prediction drivers.
-- Planned authentication and role-based authorization for steel-plant users is tracked in `docs/auth-authorization-plan.md`.
+- Local login and role-based authorization for steel-plant users with admin, engineer, planner, operator, and API-only service roles.
 - Backend and frontend tests for core prototype behavior.
 
 ## Decision-Support Features
@@ -44,7 +44,7 @@ docs/                 Architecture, planning, goal tracking, and progress docs
 Important docs:
 
 - `docs/architecture.md`: system architecture and data flow.
-- `docs/auth-authorization-plan.md`: planned local login, roles, permissions, and test strategy.
+- `docs/auth-authorization-plan.md`: local login, roles, permissions, and test strategy.
 - `docs/goal-tracker.md`: durable goal ledger from project start.
 - `docs/progress.md`: session-level progress notes and verification history.
 - `docs/demo_script.md`: suggested demo walkthrough.
@@ -79,14 +79,25 @@ curl http://localhost:8000/api/health
 Useful API checks:
 
 ```bash
-curl http://localhost:8000/api/equipment/RM-DRIVE-01/anomalies
-curl http://localhost:8000/api/equipment/RM-DRIVE-01/health
-curl http://localhost:8000/api/streaming/status
-curl http://localhost:8000/api/reports/RM-DRIVE-01/markdown
+TOKEN=$(curl -s http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@plant.local","password":"DemoPass123!"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+curl http://localhost:8000/api/equipment/RM-DRIVE-01/anomalies \
+  -H "Authorization: Bearer $TOKEN"
+curl http://localhost:8000/api/equipment/RM-DRIVE-01/health \
+  -H "Authorization: Bearer $TOKEN"
+curl http://localhost:8000/api/streaming/status \
+  -H "Authorization: Bearer $TOKEN"
+curl http://localhost:8000/api/reports/RM-DRIVE-01/markdown \
+  -H "Authorization: Bearer $TOKEN"
 curl -X POST http://localhost:8000/api/predict \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"equipment_id":"RM-DRIVE-01"}'
 curl -X POST http://localhost:8000/api/ingest/document-file \
+  -H "Authorization: Bearer $TOKEN" \
   -F source_type=sop \
   -F equipment_id=RM-DRIVE-01 \
   -F title="Uploaded SOP" \
@@ -98,10 +109,12 @@ Structured JSON ingestion examples:
 ```bash
 curl -X POST http://localhost:8000/api/ingest/documents \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"documents":[{"id":"DOC-NEW","source_type":"sop","equipment_id":"RM-DRIVE-01","title":"Inspection SOP","content":"Inspect coupling alignment when vibration rises."}]}'
 
 curl -X POST http://localhost:8000/api/ingest/records \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"alerts":[{"id":"ALT-NEW","equipment_id":"RM-DRIVE-01","timestamp":"2026-06-06T09:00:00+05:30","signal":"drive_end_vibration","value":8.3,"unit":"mm/s","threshold":7.1,"severity":"high","message":"Drive end vibration above advisory threshold"}]}'
 ```
 
@@ -156,13 +169,24 @@ Structured record ingestion supports `equipment`, `alerts`, `spares`, `sensor_re
 
 NATS JetStream streaming ingestion is disabled by default. Set `STREAMING_ENABLED=true` and configure `NATS_URL` to consume IoT envelopes from `steelplant.iot.*` subjects into the same structured record tables used by JSON ingestion. The backend uses the `MW_IOT` stream, `maintenance-wizard-ingestor` durable consumer, explicit acknowledgments after persistence, and `steelplant.iot.dlq` for invalid messages.
 
-The current SQLite schema version is `3`. Lightweight startup migrations add `feedback.equipment_id` and create `streaming_messages` for older local databases. Full migration tooling is still a production hardening item.
+The current SQLite schema version is `4`. Lightweight startup migrations add `feedback.equipment_id`, create `streaming_messages`, and create local auth tables for older local databases. Full migration tooling is still a production hardening item.
 
-## Authentication And Authorization Roadmap
+## Authentication And Authorization
 
-G-013 will add local user login and role-based authorization before the app is exposed to broader plant users. The planned v1 uses SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI role guards, and React role-aware navigation.
+The app uses local SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI role guards, and React role-aware navigation. `/api/health` and `/api/auth/login` are public. Maintenance data, ingestion, diagnosis, reports, feedback, streaming status, and user management require a bearer token and role permission.
 
-Planned roles are `admin`, `maintenance_engineer`, `reliability_engineer`, `planner`, `operator`, and API-only `iot_service`. The implementation will keep `/api/health` and `/api/auth/login` public, then protect maintenance data, ingestion, diagnosis, reports, feedback, streaming status, and user management according to the matrix in `docs/auth-authorization-plan.md`.
+Demo users are seeded when `AUTH_SEED_DEMO_USERS=true`; all use password `DemoPass123!`.
+
+| User | Role |
+| --- | --- |
+| `admin@plant.local` | Full access and user management |
+| `maintenance@plant.local` | Diagnosis, reports, predictions, feedback |
+| `reliability@plant.local` | Diagnosis, reports, feedback, ingestion, streaming status |
+| `planner@plant.local` | Dashboard, predictions, recommendations, reports |
+| `operator@plant.local` | Read-only dashboard, alerts, health, anomalies |
+| `iot-service@plant.local` | API-only ingestion identity |
+
+Set `JWT_SECRET_KEY` to a strong secret outside local demos. External OIDC/SAML SSO remains a production hardening item.
 
 ## LLM And Learning Behavior
 
@@ -192,12 +216,14 @@ npm run build
 
 1. Start the FastAPI backend.
 2. Start the Vite frontend.
-3. Open the dashboard and review high-risk assets.
-4. Select the hot strip mill main drive.
-5. Ask why the drive is vibrating or run diagnosis.
-6. Review sensor anomalies, cited evidence, root causes, immediate and planned actions, spares strategy, feedback controls, and Markdown report export.
-7. Open the Ingestion view from the left navigation and import an SOP/manual/log or paste JSON records/documents.
-8. Submit detailed feedback with actual root cause, action taken, and outcome; run diagnosis again to see learning notes included.
+3. Sign in as `admin@plant.local` with `DemoPass123!`.
+4. Open the dashboard and review high-risk assets.
+5. Select the hot strip mill main drive.
+6. Ask why the drive is vibrating or run diagnosis.
+7. Review sensor anomalies, cited evidence, root causes, immediate and planned actions, spares strategy, feedback controls, and Markdown report export.
+8. Open the Ingestion view from the left navigation and import an SOP/manual/log or paste JSON records/documents.
+9. Open the Users view as admin to review role-based access.
+10. Submit detailed feedback with actual root cause, action taken, and outcome; run diagnosis again to see learning notes included.
 
 ## Progress Tracking
 

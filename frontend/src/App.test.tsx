@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
+import { api, type UserRole } from './services/api'
 
 const dashboard = {
   equipment_count: 5,
@@ -152,11 +153,85 @@ const recommendation = {
   report_summary: 'Critical risk with estimated RUL of 23 days.',
 }
 
+function userFor(email = 'admin@plant.local') {
+  const roles: Record<string, UserRole> = {
+    'admin@plant.local': 'admin',
+    'maintenance@plant.local': 'maintenance_engineer',
+    'reliability@plant.local': 'reliability_engineer',
+    'planner@plant.local': 'planner',
+    'operator@plant.local': 'operator',
+    'iot-service@plant.local': 'iot_service',
+  }
+  const role = roles[email] ?? 'admin'
+  return {
+    id: `USER-${role}`,
+    email,
+    display_name: role === 'operator' ? 'Shift Operator' : 'Plant Admin',
+    role,
+    is_active: true,
+  }
+}
+
+async function signIn(email = 'admin@plant.local') {
+  if (email !== 'admin@plant.local') {
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: email } })
+  }
+  fireEvent.click(await screen.findByRole('button', { name: /sign in/i }))
+  await screen.findByText('API connected')
+}
+
 beforeEach(() => {
+  window.sessionStorage.clear()
+  api.setSession(null)
+  api.onUnauthorized(null)
   vi.stubGlobal(
     'fetch',
-    vi.fn((input: RequestInfo | URL) => {
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString()
+      if (url.endsWith('/api/auth/login')) {
+        const body = JSON.parse((init?.body as string) ?? '{}')
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: `token-${body.email ?? 'admin'}`,
+              token_type: 'bearer',
+              expires_in: 28800,
+              user: userFor(body.email),
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.endsWith('/api/auth/me')) {
+        return Promise.resolve(new Response(JSON.stringify(userFor()), { status: 200 }))
+      }
+      if (url.endsWith('/api/auth/logout')) {
+        return Promise.resolve(new Response(JSON.stringify({ status: 'logged_out' }), { status: 200 }))
+      }
+      if (url.endsWith('/api/users')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse((init.body as string) ?? '{}')
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                id: 'USER-NEW',
+                email: body.email,
+                display_name: body.display_name,
+                role: body.role,
+                is_active: true,
+              }),
+              { status: 201 },
+            ),
+          )
+        }
+        return Promise.resolve(new Response(JSON.stringify([userFor(), userFor('operator@plant.local')]), { status: 200 }))
+      }
+      if (url.includes('/api/users/') && url.endsWith('/reset-password')) {
+        return Promise.resolve(new Response(JSON.stringify(userFor('operator@plant.local')), { status: 200 }))
+      }
+      if (url.includes('/api/users/')) {
+        return Promise.resolve(new Response(JSON.stringify({ ...userFor('operator@plant.local'), is_active: false }), { status: 200 }))
+      }
       if (url.endsWith('/api/dashboard/summary')) {
         return Promise.resolve(new Response(JSON.stringify(dashboard), { status: 200 }))
       }
@@ -196,6 +271,9 @@ beforeEach(() => {
       if (url.endsWith('/feedback')) {
         return Promise.resolve(new Response(JSON.stringify({ stored: true }), { status: 200 }))
       }
+      if (url.endsWith('/api/reports/RM-DRIVE-01/markdown')) {
+        return Promise.resolve(new Response('# Maintenance Decision Report: RM-DRIVE-01', { status: 200 }))
+      }
       return Promise.resolve(new Response('{}', { status: 200 }))
     }),
   )
@@ -203,11 +281,15 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  window.sessionStorage.clear()
+  api.setSession(null)
+  api.onUnauthorized(null)
 })
 
 describe('Maintenance Wizard dashboard', () => {
   it('renders dashboard metrics, anomalies, and selected asset details', async () => {
     render(<App />)
+    await signIn()
 
     expect(await screen.findByText('API connected')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Hot Strip Mill Main Drive Motor' })).toBeInTheDocument()
@@ -218,11 +300,13 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('drive end vibration')).toBeInTheDocument()
     expect(screen.getByText('z 8.35 · baseline 5.24 mm/s')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Ingestion' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Users' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Ingestion file')).not.toBeInTheDocument()
   })
 
-  it('runs diagnosis and exposes report export link', async () => {
+  it('runs diagnosis and exposes report export action', async () => {
     render(<App />)
+    await signIn()
 
     fireEvent.click(await screen.findByText('Diagnose'))
 
@@ -236,14 +320,12 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('77%')).toBeInTheDocument()
     expect(screen.getByText('corrected recommendation feedback; actual root cause: Loose foundation bolt resonance')).toBeInTheDocument()
     expect(screen.getByText('Hot Strip Mill Main Drive Vibration SOP')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /export report/i })).toHaveAttribute(
-      'href',
-      'http://localhost:8000/api/reports/RM-DRIVE-01/markdown',
-    )
+    expect(screen.getByRole('button', { name: /export report/i })).toBeInTheDocument()
   })
 
   it('stores detailed engineer feedback for learning', async () => {
     render(<App />)
+    await signIn()
 
     fireEvent.click(await screen.findByText('Diagnose'))
     await screen.findByText('Actual Root Cause')
@@ -269,6 +351,7 @@ describe('Maintenance Wizard dashboard', () => {
 
   it('uploads document files from the ingestion panel', async () => {
     render(<App />)
+    await signIn()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Ingestion' }))
     expect(await screen.findByText('IoT Stream')).toBeInTheDocument()
@@ -288,6 +371,7 @@ describe('Maintenance Wizard dashboard', () => {
 
   it('imports document JSON from the ingestion panel', async () => {
     render(<App />)
+    await signIn()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Ingestion' }))
     fireEvent.change(await screen.findByLabelText('Ingestion JSON'), {
@@ -305,5 +389,32 @@ describe('Maintenance Wizard dashboard', () => {
       'http://localhost:8000/api/ingest/documents',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('hides restricted actions for operators', async () => {
+    render(<App />)
+    await signIn('operator@plant.local')
+
+    expect(screen.getByText('Shift Operator')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Ingestion' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Users' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Diagnose')).not.toBeInTheDocument()
+    expect(screen.queryByText('Engineer Query')).not.toBeInTheDocument()
+  })
+
+  it('lets admins open the users view and create a user', async () => {
+    render(<App />)
+    await signIn()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Users' }))
+    expect(await screen.findByText('Shift Operator')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new.operator@plant.local' } })
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Operator' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'NewOperator123!' } })
+    fireEvent.click(screen.getByRole('button', { name: /create/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('User created')).toBeInTheDocument()
+    })
   })
 })

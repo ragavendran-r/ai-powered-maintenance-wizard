@@ -13,8 +13,8 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 
 ## Current Goal State
 
-- Active implementation goal: G-013 user login and role-based access control.
-- Latest completed tracked goal: NATS JetStream IoT streaming ingestion and local stack support.
+- Active implementation goal: none.
+- Latest completed tracked goal: G-013 user login and role-based access control.
 - Branch workflow rule: work intended for `main` must happen on a feature branch and merge through a PR.
 
 ## Goal Index
@@ -33,7 +33,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 | G-010 | Move ingestion into a separate left-nav view. | Complete | Moved document upload and JSON ingestion out of the asset detail panel into a dedicated Ingestion view accessible from the left navigation. | `frontend/src/App.tsx`; `frontend/src/App.test.tsx`; `frontend/src/styles.css` |
 | G-011 | Add Hydraulic System and Overhead Crane assets. | Complete | Added two tracked steel-plant assets with alerts, sensor readings, spares, history, SOP/manual evidence, dashboard visibility, tests, and docs. | PR #9; `assets/sample_data/steel_plant_demo.json`; `frontend/src/App.test.tsx` |
 | G-012 | Enable NATS JetStream IoT streaming ingestion. | Complete | Added optional durable NATS JetStream ingestion, validation, DLQ handling, `/api/streaming/status`, frontend status, tests, docs, and local stack runner. | PR #11; PR #12; PR #13; `docs/iot-streaming-ingestion-plan.md`; `scripts/run-local-stack.sh` |
-| G-013 | Implement user login and role-based access control. | In Progress | Auth/RBAC plan created; implementation will add local users, hashed passwords, JWTs, endpoint guards, UI role gating, admin user management, tests, and docs. | `docs/auth-authorization-plan.md` |
+| G-013 | Implement user login and role-based access control. | Complete | Added local SQLite users, bcrypt password hashes, JWT login, endpoint role guards, React login/session handling, role-gated navigation/actions, admin user management, tests, and docs. | `backend/app/core/auth.py`; `frontend/src/App.tsx`; `docs/auth-authorization-plan.md` |
 
 ## Detailed Goal Notes
 
@@ -306,7 +306,7 @@ Requested outcome:
 - Implement authentication and authorization after documenting the plan.
 - Update documentation to GitHub, then proceed with implementation through the branch and PR workflow.
 
-Planned delivery:
+Delivered:
 
 - Local SQLite-backed users with bcrypt password hashes.
 - JWT bearer-token login and current-user session endpoint.
@@ -315,7 +315,15 @@ Planned delivery:
 - Demo user seed data for admin, maintenance engineer, reliability engineer, planner, operator, and API-only IoT service roles.
 - Backend and frontend tests covering `401`, `403`, role access, user management, and UI role gating.
 
-Status: `In Progress`
+Verification recorded:
+
+- `PYTHONPYCACHEPREFIX=.pycache .venv/bin/python -m compileall app`
+- `.venv/bin/pytest` passed with 37 tests.
+- `npm run test` passed with 7 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+Status: `Complete`
 
 ## Maintenance Rules For This File
 

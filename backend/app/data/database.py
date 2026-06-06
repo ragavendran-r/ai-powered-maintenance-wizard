@@ -5,7 +5,49 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from app.core.config import get_settings
+from app.core.security import hash_password
 from app.data.sample_loader import load_sample_data
+
+
+DEMO_USER_PASSWORD = "DemoPass123!"
+DEMO_USERS = [
+    {
+        "id": "USER-ADMIN",
+        "email": "admin@plant.local",
+        "display_name": "Plant Admin",
+        "role": "admin",
+    },
+    {
+        "id": "USER-MAINTENANCE",
+        "email": "maintenance@plant.local",
+        "display_name": "Maintenance Engineer",
+        "role": "maintenance_engineer",
+    },
+    {
+        "id": "USER-RELIABILITY",
+        "email": "reliability@plant.local",
+        "display_name": "Reliability Engineer",
+        "role": "reliability_engineer",
+    },
+    {
+        "id": "USER-PLANNER",
+        "email": "planner@plant.local",
+        "display_name": "Maintenance Planner",
+        "role": "planner",
+    },
+    {
+        "id": "USER-OPERATOR",
+        "email": "operator@plant.local",
+        "display_name": "Shift Operator",
+        "role": "operator",
+    },
+    {
+        "id": "USER-IOT-SERVICE",
+        "email": "iot-service@plant.local",
+        "display_name": "IoT Service Account",
+        "role": "iot_service",
+    },
+]
 
 
 SCHEMA_STATEMENTS = [
@@ -121,9 +163,35 @@ SCHEMA_STATEMENTS = [
         received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_login_at TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS auth_audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT NOT NULL,
+        user_id TEXT,
+        email TEXT,
+        role TEXT,
+        success INTEGER NOT NULL,
+        detail TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+    """,
 ]
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 
 def get_database_path() -> Path:
@@ -158,6 +226,8 @@ def initialize_database(seed: bool = True) -> None:
         )
         if seed:
             seed_from_sample_data(connection)
+            if get_settings().auth_seed_demo_users:
+                seed_demo_users(connection)
 
 
 def seed_from_sample_data(connection: sqlite3.Connection) -> None:
@@ -203,6 +273,34 @@ def seed_from_sample_data(connection: sqlite3.Connection) -> None:
     rebuild_document_chunks(connection)
 
 
+def seed_demo_users(connection: sqlite3.Connection) -> None:
+    password_hash = hash_password(DEMO_USER_PASSWORD)
+    connection.executemany(
+        """
+        INSERT INTO users (
+            id,
+            email,
+            display_name,
+            role,
+            password_hash,
+            is_active
+        )
+        VALUES (?, ?, ?, ?, ?, 1)
+        ON CONFLICT(email) DO NOTHING
+        """,
+        [
+            (
+                user["id"],
+                user["email"],
+                user["display_name"],
+                user["role"],
+                password_hash,
+            )
+            for user in DEMO_USERS
+        ],
+    )
+
+
 def reset_database() -> None:
     db_path = get_database_path()
     if db_path.exists():
@@ -222,6 +320,8 @@ def database_status() -> dict[str, Any]:
         "document_chunks",
         "feedback",
         "streaming_messages",
+        "users",
+        "auth_audit_events",
     ]
     with connect() as connection:
         version_row = connection.execute(

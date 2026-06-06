@@ -5,7 +5,7 @@ This prototype is built for a local hackathon demonstration. Before production u
 ## Security And Configuration
 
 - Store API keys and provider credentials in a managed secret store, not local `.env` files.
-- Add authentication, role-based authorization, and audit logging before exposing plant data.
+- Replace local demo auth with plant SSO/OIDC or SAML, enforce password and session policies, and forward auth audit logs to a central system before production use.
 - Restrict document upload size, accepted MIME types, and scan uploaded files.
 - Run the API behind TLS and a gateway with rate limits.
 
