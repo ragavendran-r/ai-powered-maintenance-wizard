@@ -82,3 +82,4 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Merged PR #10 for streaming-goal docs and asset visibility, then implemented optional NATS JetStream IoT streaming ingestion with `/api/streaming/status`, frontend IoT Stream status, schema version 3 audit records, tests, docs, and PR #11.
 - Live-tested PR #11 with Docker NATS JetStream and `nats-py`; fixed `ack_wait` compatibility, verified valid sensor/alert ingestion, verified invalid-message DLQ handling, and documented the local smoke-test flow.
 - Added `scripts/run-local-stack.sh` as the common local runner for Docker NATS JetStream, streaming-enabled FastAPI, and Vite, plus README/progress documentation and PR #12.
+- Added quick sample NATS alert publish steps to `docs/iot-streaming-ingestion-plan.md` for testing the running IoT ingestion flow.
