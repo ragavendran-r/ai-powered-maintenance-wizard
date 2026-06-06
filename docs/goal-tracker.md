@@ -230,6 +230,8 @@ Delivered in this branch:
 - Added a dedicated Ingestion view containing the existing document file upload and JSON document/record import workflows.
 - Kept target equipment context visible in the ingestion view.
 - Updated frontend tests to require navigation before ingestion controls are available.
+- Opened PR #8 from `feat/ingestion-view` to `main`: `https://github.com/ragavendran-r/ai-powered-maintenance-wizard/pull/8`.
+- Verified with `npm run test`, `npm run build`, `git diff --check`, and browser DOM checks at `http://127.0.0.1:5173/`.
 
 Status: `Complete`
 
