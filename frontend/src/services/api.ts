@@ -136,9 +136,23 @@ export interface RecordIngestResponse {
   counts: Record<string, number>
 }
 
+export interface StreamingStatus {
+  enabled: boolean
+  state: 'disabled' | 'disconnected' | 'connected' | 'error'
+  broker: string
+  stream: string
+  consumer: string
+  subjects: string[]
+  processed_count: number
+  failed_count: number
+  last_message_timestamp?: string
+  last_error?: string
+}
+
 export const api = {
   equipment: () => request<Equipment[]>('/api/equipment'),
   dashboard: () => request<DashboardSummary>('/api/dashboard/summary'),
+  streamingStatus: () => request<StreamingStatus>('/api/streaming/status'),
   health: (equipmentId: string) => request<HealthSummary>(`/api/equipment/${equipmentId}/health`),
   alerts: () => request<Alert[]>('/api/alerts'),
   diagnose: (equipmentId: string, alertId?: string) =>

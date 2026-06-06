@@ -14,6 +14,20 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     llm_timeout_seconds: float = Field(default=20.0, alias="LLM_TIMEOUT_SECONDS")
+    streaming_enabled: bool = Field(default=False, alias="STREAMING_ENABLED")
+    nats_url: str = Field(default="nats://localhost:4222", alias="NATS_URL")
+    nats_stream: str = Field(default="MW_IOT", alias="NATS_STREAM")
+    nats_consumer: str = Field(default="maintenance-wizard-ingestor", alias="NATS_CONSUMER")
+    nats_subject_prefix: str = Field(default="steelplant.iot", alias="NATS_SUBJECT_PREFIX")
+    nats_dlq_subject: str = Field(default="steelplant.iot.dlq", alias="NATS_DLQ_SUBJECT")
+    nats_auth_token: Optional[str] = Field(default=None, alias="NATS_AUTH_TOKEN")
+    nats_credentials_path: Optional[Path] = Field(default=None, alias="NATS_CREDENTIALS_PATH")
+    nats_tls_enabled: bool = Field(default=False, alias="NATS_TLS_ENABLED")
+    nats_batch_size: int = Field(default=20, ge=1, le=500, alias="NATS_BATCH_SIZE")
+    nats_ack_wait_seconds: int = Field(default=30, ge=1, alias="NATS_ACK_WAIT_SECONDS")
+    nats_max_deliver: int = Field(default=3, ge=1, alias="NATS_MAX_DELIVER")
+    nats_reconnect_time_wait_seconds: float = Field(default=2.0, ge=0.1, alias="NATS_RECONNECT_TIME_WAIT_SECONDS")
+    nats_max_reconnect_attempts: int = Field(default=60, ge=0, alias="NATS_MAX_RECONNECT_ATTEMPTS")
     data_dir: Path = Field(
         default=Path(__file__).resolve().parents[3] / "assets" / "sample_data",
         alias="DATA_DIR",

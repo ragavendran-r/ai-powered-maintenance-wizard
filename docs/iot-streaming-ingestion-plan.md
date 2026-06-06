@@ -70,7 +70,7 @@ For `alert` and `sensor_reading` messages, the backend may derive `payload.id` f
 
 ## Backend Changes
 
-- Add streaming configuration:
+- Implemented streaming configuration:
   - `STREAMING_ENABLED`
   - `NATS_URL`
   - `NATS_STREAM`
@@ -79,14 +79,14 @@ For `alert` and `sensor_reading` messages, the backend may derive `payload.id` f
   - `NATS_DLQ_SUBJECT`
   - auth/TLS settings
   - batch size, ack wait, max deliver, reconnect settings
-- Add a streaming service started from FastAPI lifespan only when `STREAMING_ENABLED=true`.
-- Reuse `repository.add_records` for validated message persistence.
-- Track runtime status: enabled, connected, processed count, failed count, last message timestamp, last error, stream, consumer, and subjects.
-- Add `GET /api/streaming/status`.
+- Added a streaming service started from FastAPI lifespan only when `STREAMING_ENABLED=true`.
+- Reused `repository.add_records` for validated message persistence.
+- Tracked runtime status: enabled, connected, processed count, failed count, last message timestamp, last error, stream, consumer, and subjects.
+- Added `GET /api/streaming/status`.
 
 ## Frontend Changes
 
-- Add read-only streaming ingestion status to the Ingestion view.
+- Added read-only streaming ingestion status to the Ingestion view.
 - Show disabled, connected, or error state.
 - Show processed count, failed count, last message timestamp, and last error.
 
@@ -100,3 +100,100 @@ For `alert` and `sensor_reading` messages, the backend may derive `payload.id` f
 - `STREAMING_ENABLED=false` does not connect to NATS.
 - `/api/streaming/status` reports disabled, connected, processed, failed, and error states.
 - Existing HTTP/file/JSON ingestion tests continue to pass.
+
+## Local Smoke Test
+
+Install backend dependencies after pulling this branch:
+
+```bash
+cd backend
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Start a local NATS JetStream server:
+
+```bash
+docker run --rm --name maintenance-wizard-nats \
+  -p 4222:4222 \
+  -p 8222:8222 \
+  nats:2 -js -m 8222
+```
+
+Start the backend with streaming enabled:
+
+```bash
+cd backend
+env STREAMING_ENABLED=true NATS_URL=nats://127.0.0.1:4222 \
+  .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Confirm the backend has connected to NATS:
+
+```bash
+curl http://127.0.0.1:8000/api/streaming/status
+```
+
+Publish a valid sensor reading and alert:
+
+```bash
+cd backend
+.venv/bin/python - <<'PY'
+import asyncio
+import json
+from datetime import datetime
+import nats
+
+async def main():
+    nc = await nats.connect("nats://127.0.0.1:4222")
+    js = nc.jetstream()
+    suffix = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    sensor = {
+        "message_id": f"iot-live-sensor-{suffix}",
+        "schema_version": "1",
+        "source": "live-test-gateway",
+        "type": "sensor_reading",
+        "timestamp": "2026-06-06T09:30:00+05:30",
+        "payload": {
+            "equipment_id": "CC-PUMP-03",
+            "signal": "cooling_water_flow",
+            "value": 1325.0,
+            "unit": "m3/h",
+            "threshold": 1100.0
+        }
+    }
+    alert = {
+        "message_id": f"iot-live-alert-{suffix}",
+        "schema_version": "1",
+        "source": "live-test-gateway",
+        "type": "alert",
+        "timestamp": "2026-06-06T09:35:00+05:30",
+        "payload": {
+            "equipment_id": "CC-PUMP-03",
+            "signal": "motor_current",
+            "value": 118.0,
+            "unit": "A",
+            "threshold": 95.0,
+            "severity": "high",
+            "message": "Live NATS test: cooling pump motor current above threshold"
+        }
+    }
+    await js.publish("steelplant.iot.sensor_readings", json.dumps(sensor).encode())
+    await js.publish("steelplant.iot.alerts", json.dumps(alert).encode())
+    await nc.drain()
+
+asyncio.run(main())
+PY
+```
+
+Verify the messages were consumed and persisted:
+
+```bash
+curl http://127.0.0.1:8000/api/streaming/status
+curl http://127.0.0.1:8000/api/equipment/CC-PUMP-03/health
+curl http://127.0.0.1:8000/api/equipment/CC-PUMP-03/sensor-readings
+```
+
+Expected result: `processed_count` increments, `failed_count` remains `0`, the streamed alert appears in `CC-PUMP-03` health, and the streamed sensor value appears in sensor readings.
+
+To verify the DLQ path, publish an invalid message missing `equipment_id`; `/api/streaming/status` should show `failed_count` incremented and `last_error` set to `Payload is missing equipment_id`.

@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -163,3 +163,29 @@ class DashboardSummary(BaseModel):
     critical_alert_count: int
     average_health_score: int
     highest_risk_equipment: list[HealthSummary]
+
+
+IoTMessageType = Literal["equipment", "alert", "spare", "sensor_reading", "maintenance_event"]
+StreamingState = Literal["disabled", "disconnected", "connected", "error"]
+
+
+class IoTMessageEnvelope(BaseModel):
+    message_id: str = Field(min_length=1)
+    schema_version: str = "1"
+    source: str = Field(min_length=1)
+    type: IoTMessageType
+    timestamp: str
+    payload: dict[str, Any]
+
+
+class StreamingStatus(BaseModel):
+    enabled: bool
+    state: StreamingState
+    broker: str = "nats"
+    stream: str
+    consumer: str
+    subjects: list[str]
+    processed_count: int
+    failed_count: int
+    last_message_timestamp: Optional[str] = None
+    last_error: Optional[str] = None

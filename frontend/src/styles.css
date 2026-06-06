@@ -324,6 +324,45 @@ h3 {
   text-transform: uppercase;
 }
 
+.streamingStatusPanel {
+  border: 1px solid #dfe6ea;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  padding: 12px;
+}
+
+.streamingStatusGrid {
+  display: grid;
+  gap: 8px 12px;
+  grid-template-columns: minmax(110px, auto) minmax(0, 1fr);
+}
+
+.streamingStatusGrid span {
+  color: #60717c;
+}
+
+.streamingStatusGrid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.streamState.connected {
+  color: #2e6f32;
+}
+
+.streamState.disabled,
+.streamState.disconnected {
+  color: #7b5d00;
+}
+
+.streamState.error {
+  color: #a3202b;
+}
+
+.errorText {
+  color: #a3202b;
+}
+
 .ingestionGrid {
   align-items: end;
   display: grid;
