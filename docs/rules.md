@@ -19,6 +19,16 @@ Use this file for durable product and engineering rules. Use `docs/hooks.md` for
   - `cd frontend && npm run build`
 - Documentation-only changes require a link/path sanity check for touched docs.
 - Update `docs/progress.md` at the end of each implementation session with completed work, checks run, next steps, blockers, and decisions.
+- Send a desktop notification when a requested task is complete.
+
+## Completion Notifications
+
+- At the end of every completed task, send a local desktop notification before the final response when the host environment supports it.
+- On macOS, use:
+  ```bash
+  osascript -e 'display notification "Task complete." with title "Maintenance Wizard"'
+  ```
+- If desktop notification fails or is unavailable, mention that in the final response.
 
 ## Product Behavior
 

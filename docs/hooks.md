@@ -80,6 +80,14 @@ After docs or progress changes:
 - Re-read touched docs for stale paths, commands, links, and status language.
 - Ensure `docs/progress.md` records completed work, checks run, and next steps.
 
+After completing any requested task:
+
+```bash
+osascript -e 'display notification "Task complete." with title "Maintenance Wizard"'
+```
+
+If the host does not support desktop notifications or the command fails, note the failure in the final response.
+
 Before demo or handoff:
 
 ```bash
