@@ -29,6 +29,8 @@ def generate_recommendation(request: DiagnosisRequest) -> Recommendation:
     evidence = retrieve_evidence(query, request.equipment_id)
     summary = health_summary(request.equipment_id)
     prediction = predict_failure(request.equipment_id)
+    feedback_records = repository.list_feedback(request.equipment_id)
+    learning_notes = _feedback_notes(feedback_records)
     settings = get_settings()
     llm = build_llm_client(
         settings.llm_provider,
@@ -39,13 +41,16 @@ def generate_recommendation(request: DiagnosisRequest) -> Recommendation:
         settings.openai_base_url,
         settings.llm_timeout_seconds,
     )
-    llm_context = llm.complete_json(_build_llm_prompt(equipment, selected_alert, summary, prediction, evidence, request.symptoms))
+    llm_context = llm.complete_json(
+        _build_llm_prompt(equipment, selected_alert, summary, prediction, evidence, request.symptoms, learning_notes)
+    )
 
     likely_root_causes = [
         "Bearing wear or lubrication degradation",
         "Misalignment under rolling load",
         "Process-induced vibration from unstable operating conditions",
     ]
+    likely_root_causes = _merge_ranked(_feedback_values(feedback_records, "actual_root_cause"), likely_root_causes, limit=5)
     if selected_alert and "temperature" in selected_alert["signal"].lower():
         likely_root_causes.insert(0, "Thermal stress from inadequate cooling or excess friction")
     if llm_context.probable_root_causes:
@@ -56,8 +61,14 @@ def generate_recommendation(request: DiagnosisRequest) -> Recommendation:
         "Check vibration, temperature, lubrication condition, and visible looseness.",
         "Apply the relevant SOP lockout and inspection steps before intrusive maintenance.",
     ]
+    proven_actions = [
+        f"Review prior engineer-confirmed action: {action}"
+        for action in _feedback_values(feedback_records, "action_taken")
+    ]
     if summary.risk_level in {"high", "critical"}:
         immediate_actions.insert(0, "Reduce load or schedule controlled shutdown if abnormal readings persist.")
+    if proven_actions:
+        immediate_actions = _merge_ranked(proven_actions, immediate_actions, limit=6)
     if llm_context.immediate_actions:
         immediate_actions = _merge_ranked(llm_context.immediate_actions, immediate_actions, limit=6)
 
@@ -79,21 +90,28 @@ def generate_recommendation(request: DiagnosisRequest) -> Recommendation:
         confidence=round(min(0.92, max(0.2, 0.62 + len(evidence) * 0.05 + llm_context.confidence_adjustment)), 2),
         immediate_actions=immediate_actions,
         planned_actions=_merge_ranked(
-            llm_context.planned_actions,
+            llm_context.planned_actions + proven_actions,
             [
-            "Trend the abnormal signal for recurrence after corrective action.",
-            "Create a follow-up work order with evidence links and observed condition.",
-            "Update the digital maintenance log with final root cause and outcome.",
+                "Trend the abnormal signal for recurrence after corrective action.",
+                "Create a follow-up work order with evidence links and observed condition.",
+                "Update the digital maintenance log with final root cause and outcome.",
             ],
             limit=5,
         ),
         spares_strategy=spares_strategy,
         evidence=evidence,
-        report_summary=f"{equipment['name']} is classified as {summary.risk_level} risk with estimated RUL of {prediction.remaining_useful_life_days} days. {llm_context.summary}",
+        learning_notes=learning_notes,
+        report_summary=_report_summary(
+            equipment["name"],
+            summary.risk_level,
+            prediction.remaining_useful_life_days,
+            llm_context.summary,
+            learning_notes,
+        ),
     )
 
 
-def _build_llm_prompt(equipment, selected_alert, summary, prediction, evidence, symptoms):
+def _build_llm_prompt(equipment, selected_alert, summary, prediction, evidence, symptoms, learning_notes):
     evidence_lines = [
         f"- {item.source_type} {item.source_id}: {item.title}: {item.excerpt}" for item in evidence[:5]
     ]
@@ -114,6 +132,8 @@ def _build_llm_prompt(equipment, selected_alert, summary, prediction, evidence, 
             f"Failure probability: {prediction.failure_probability}, estimated RUL days: {prediction.remaining_useful_life_days}",
             "Evidence:",
             *evidence_lines,
+            "Engineer feedback history:",
+            *(f"- {note}" for note in learning_notes[:5]),
         ]
     )
 
@@ -127,3 +147,49 @@ def _merge_ranked(primary: list[str], fallback: list[str], limit: int) -> list[s
         if len(merged) >= limit:
             break
     return merged
+
+
+def _feedback_values(feedback_records: list[dict], field: str) -> list[str]:
+    values: list[str] = []
+    for record in feedback_records:
+        if record["status"] not in {"accepted", "corrected"}:
+            continue
+        value = (record.get(field) or "").strip()
+        if value and value not in values:
+            values.append(value)
+    return values[:3]
+
+
+def _feedback_notes(feedback_records: list[dict]) -> list[str]:
+    notes: list[str] = []
+    for record in feedback_records[:5]:
+        parts = [f"{record['status']} recommendation feedback"]
+        if record.get("actual_root_cause"):
+            parts.append(f"actual root cause: {record['actual_root_cause']}")
+        if record.get("action_taken"):
+            parts.append(f"action taken: {record['action_taken']}")
+        if record.get("outcome"):
+            parts.append(f"outcome: {record['outcome']}")
+        if record.get("corrected_diagnosis"):
+            parts.append(f"correction: {record['corrected_diagnosis']}")
+        if record.get("notes"):
+            parts.append(f"notes: {record['notes']}")
+        if len(parts) > 1:
+            notes.append("; ".join(parts))
+    return notes
+
+
+def _report_summary(
+    equipment_name: str,
+    risk_level: str,
+    remaining_useful_life_days: int,
+    llm_summary: str,
+    learning_notes: list[str],
+) -> str:
+    learning_summary = ""
+    if learning_notes:
+        learning_summary = f" {len(learning_notes)} engineer feedback record(s) were considered."
+    return (
+        f"{equipment_name} is classified as {risk_level} risk with estimated RUL of "
+        f"{remaining_useful_life_days} days.{learning_summary} {llm_summary}"
+    )

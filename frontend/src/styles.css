@@ -14,7 +14,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -124,7 +126,7 @@ h3 {
 .workArea {
   display: grid;
   gap: 16px;
-  grid-template-columns: 280px minmax(420px, 1fr) 340px;
+  grid-template-columns: 280px minmax(420px, 1fr) 380px;
 }
 
 .assetList,
@@ -255,6 +257,60 @@ h3 {
   padding-top: 16px;
 }
 
+.ingestionPanel {
+  border-top: 1px solid #dfe6ea;
+  margin-top: 18px;
+  padding-top: 16px;
+}
+
+.ingestionGrid {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 120px 1fr minmax(180px, 1fr) auto;
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+}
+
+.field span {
+  color: #4f6370;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.field input,
+.field select,
+.jsonIngest textarea {
+  border: 1px solid #cfd9de;
+  border-radius: 6px;
+  color: #182029;
+  min-height: 40px;
+  min-width: 0;
+  padding: 9px 10px;
+  width: 100%;
+}
+
+.fileField input {
+  padding: 7px;
+}
+
+.jsonIngest {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 140px 1fr auto;
+  margin-top: 10px;
+}
+
+.jsonIngest textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
 .queryRow {
   display: grid;
   gap: 8px;
@@ -269,6 +325,8 @@ h3 {
 }
 
 .queryRow button,
+.ingestionGrid button,
+.jsonIngest button,
 .feedbackRow button {
   align-items: center;
   background: #1f6f78;
@@ -281,8 +339,10 @@ h3 {
   padding: 0 12px;
 }
 
-.queryRow .textButton {
+.queryRow .textButton,
+.jsonIngest .textButton {
   background: #26343d;
+  gap: 8px;
 }
 
 .answer,
@@ -313,6 +373,45 @@ h3 {
   padding-top: 10px;
 }
 
+.recommendationFacts {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr;
+  margin: 12px 0 16px;
+}
+
+.recommendationFacts span {
+  background: #f4f7f8;
+  border-radius: 6px;
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+}
+
+.recommendationFacts small {
+  color: #60717c;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.recommendationFacts strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.learningNote,
+.inlineStatus {
+  background: #f5f8f9;
+  border-left: 4px solid #8fc3cf;
+  border-radius: 4px;
+  color: #30414d;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 8px 0;
+  padding: 10px;
+}
+
 .evidence strong {
   color: #1f2a31;
   display: block;
@@ -324,6 +423,15 @@ h3 {
   gap: 8px;
   grid-template-columns: repeat(3, 1fr);
   margin-top: 14px;
+}
+
+.feedbackDetails {
+  border-top: 1px solid #e4eaed;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr;
+  margin-top: 12px;
+  padding-top: 12px;
 }
 
 .downloadReport {
@@ -346,7 +454,9 @@ h3 {
 @media (max-width: 1100px) {
   .metricsGrid,
   .workArea,
-  .split {
+  .split,
+  .ingestionGrid,
+  .jsonIngest {
     grid-template-columns: 1fr;
   }
 

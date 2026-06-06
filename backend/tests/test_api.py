@@ -23,7 +23,7 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "1"
+    assert status["schema_version"] == "2"
     assert status["counts"]["equipment"] == 3
     assert status["counts"]["document_chunks"] >= 4
 
@@ -64,12 +64,45 @@ def test_chat_returns_recommendation():
 def test_feedback_is_accepted():
     response = client.post(
         "/api/recommendations/rec-test/feedback",
-        json={"status": "accepted", "notes": "Action matched inspection finding."},
+        json={
+            "equipment_id": "RM-DRIVE-01",
+            "status": "accepted",
+            "actual_root_cause": "Coupling guard looseness from prior repair",
+            "action_taken": "Retightened coupling guard and verified vibration trend",
+            "outcome": "Vibration reduced after retightening",
+            "notes": "Action matched inspection finding.",
+        },
     )
     assert response.status_code == 200
     assert response.json()["stored"] is True
-    stored = repository.list_feedback()
+    stored = repository.list_feedback("RM-DRIVE-01")
     assert any(record["recommendation_id"] == "rec-test" for record in stored)
+    assert any(record["equipment_id"] == "RM-DRIVE-01" for record in stored)
+
+
+def test_feedback_is_reused_in_future_recommendations():
+    client.post(
+        "/api/recommendations/rec-learning/feedback",
+        json={
+            "equipment_id": "RM-DRIVE-01",
+            "status": "corrected",
+            "actual_root_cause": "Loose foundation bolt resonance",
+            "action_taken": "Retorque foundation bolts and recheck alignment",
+            "outcome": "Vibration normalized after bolt retorque",
+        },
+    )
+
+    response = client.post(
+        "/api/diagnose",
+        json={"equipment_id": "RM-DRIVE-01", "alert_id": "ALT-1001"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "Loose foundation bolt resonance" in payload["probable_root_causes"]
+    assert any("Retorque foundation bolts" in action for action in payload["immediate_actions"])
+    assert payload["learning_notes"]
+    assert "engineer feedback record" in payload["report_summary"]
 
 
 def test_document_ingestion_persists_to_repository():
@@ -185,6 +218,25 @@ def test_prediction_drivers_include_anomaly_explanations():
     payload = response.json()
     assert payload["failure_probability"] > 0.5
     assert any("z-score" in driver for driver in payload["drivers"])
+
+
+def test_prediction_drivers_include_feedback_history():
+    client.post(
+        "/api/recommendations/rec-prediction-feedback/feedback",
+        json={
+            "equipment_id": "RM-DRIVE-01",
+            "status": "accepted",
+            "actual_root_cause": "Bearing cage defect confirmed by inspection",
+            "outcome": "Bearing replacement scheduled for next outage",
+        },
+    )
+
+    response = client.post("/api/predict", json={"equipment_id": "RM-DRIVE-01"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert any("engineer feedback" in driver for driver in payload["drivers"])
+    assert any("Bearing cage defect" in driver for driver in payload["drivers"])
 
 
 def test_markdown_report_export_contains_actions_and_evidence():

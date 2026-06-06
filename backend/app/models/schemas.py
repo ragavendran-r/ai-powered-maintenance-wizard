@@ -123,6 +123,7 @@ class Recommendation(BaseModel):
     planned_actions: list[str]
     spares_strategy: list[str]
     evidence: list[Evidence]
+    learning_notes: list[str] = []
     report_summary: str
 
 
@@ -141,6 +142,7 @@ class PredictionResponse(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
+    equipment_id: Optional[str] = None
     status: Literal["accepted", "rejected", "corrected"]
     corrected_diagnosis: Optional[str] = None
     actual_root_cause: Optional[str] = None

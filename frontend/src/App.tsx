@@ -7,10 +7,12 @@ import {
   ClipboardList,
   Database,
   Download,
+  FileJson,
   Gauge,
   MessageSquare,
   Send,
   ShieldAlert,
+  Upload,
   Wrench,
 } from 'lucide-react'
 import { api, fallbackDashboard, type DashboardSummary, type Recommendation } from './services/api'
@@ -24,9 +26,20 @@ export function App() {
   const [question, setQuestion] = useState('Why is the hot strip mill main drive vibrating?')
   const [answer, setAnswer] = useState('')
   const [apiState, setApiState] = useState<'connected' | 'fallback'>('fallback')
+  const [ingestSourceType, setIngestSourceType] = useState('sop')
+  const [ingestTitle, setIngestTitle] = useState('')
+  const [ingestFile, setIngestFile] = useState<File | null>(null)
+  const [jsonMode, setJsonMode] = useState<'documents' | 'records'>('documents')
+  const [jsonPayload, setJsonPayload] = useState('')
+  const [ingestionMessage, setIngestionMessage] = useState('')
+  const [feedbackMessage, setFeedbackMessage] = useState('')
+  const [feedbackRootCause, setFeedbackRootCause] = useState('')
+  const [feedbackActionTaken, setFeedbackActionTaken] = useState('')
+  const [feedbackOutcome, setFeedbackOutcome] = useState('')
+  const [feedbackNotes, setFeedbackNotes] = useState('')
 
-  useEffect(() => {
-    api
+  function loadDashboard() {
+    return api
       .dashboard()
       .then((summary) => {
         setDashboard(summary)
@@ -37,6 +50,10 @@ export function App() {
         if (topAsset) setSelectedEquipment(topAsset.equipment.id)
       })
       .catch(() => setApiState('fallback'))
+  }
+
+  useEffect(() => {
+    loadDashboard()
   }, [])
 
   const selectedHealth = useMemo(
@@ -74,7 +91,56 @@ export function App() {
 
   function sendFeedback(status: 'accepted' | 'rejected' | 'corrected') {
     if (!recommendation) return
-    api.feedback(recommendation.id, status).catch(() => undefined)
+    api
+      .feedback(recommendation.id, status, recommendation.equipment_id, {
+        actualRootCause: feedbackRootCause.trim() || undefined,
+        actionTaken: feedbackActionTaken.trim() || undefined,
+        outcome: feedbackOutcome.trim() || undefined,
+        notes: feedbackNotes.trim() || undefined,
+      })
+      .then(() => setFeedbackMessage(`${status} feedback stored`))
+      .catch(() => setFeedbackMessage('Feedback could not be stored'))
+  }
+
+  async function ingestSelectedFile() {
+    if (!ingestFile) {
+      setIngestionMessage('Select a file before upload')
+      return
+    }
+    try {
+      const result = await api.ingestDocumentFile({
+        file: ingestFile,
+        sourceType: ingestSourceType,
+        equipmentId: selectedEquipment,
+        title: ingestTitle.trim() || undefined,
+      })
+      setIngestionMessage(`Stored ${result.documents} document${result.documents === 1 ? '' : 's'}`)
+      setIngestTitle('')
+      setIngestFile(null)
+      await loadDashboard()
+    } catch {
+      setIngestionMessage('File ingestion failed')
+    }
+  }
+
+  async function ingestJsonPayload() {
+    try {
+      const parsed = JSON.parse(jsonPayload)
+      if (jsonMode === 'documents') {
+        const documents = Array.isArray(parsed) ? parsed : parsed.documents
+        if (!Array.isArray(documents)) throw new Error('documents payload must be an array')
+        const result = await api.ingestDocuments(documents)
+        setIngestionMessage(`Stored ${result.documents} document${result.documents === 1 ? '' : 's'}`)
+      } else {
+        const result = await api.ingestRecords(parsed)
+        const total = Object.values(result.counts).reduce((sum, count) => sum + count, 0)
+        setIngestionMessage(`Stored ${total} record${total === 1 ? '' : 's'}`)
+      }
+      setJsonPayload('')
+      await loadDashboard()
+    } catch {
+      setIngestionMessage('JSON ingestion failed')
+    }
   }
 
   return (
@@ -171,6 +237,63 @@ export function App() {
             </div>
           </div>
 
+          <div className="ingestionPanel">
+            <div className="sectionHeader">
+              <Upload size={18} />
+              <h2>Ingestion</h2>
+            </div>
+            <div className="ingestionGrid">
+              <label className="field">
+                <span>Source</span>
+                <select value={ingestSourceType} onChange={(event) => setIngestSourceType(event.target.value)}>
+                  <option value="manual">Manual</option>
+                  <option value="sop">SOP</option>
+                  <option value="log">Log</option>
+                  <option value="alert">Alert</option>
+                  <option value="spares">Spares</option>
+                  <option value="history">History</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Title</span>
+                <input value={ingestTitle} onChange={(event) => setIngestTitle(event.target.value)} />
+              </label>
+              <label className="field fileField">
+                <span>File</span>
+                <input
+                  aria-label="Ingestion file"
+                  type="file"
+                  accept=".txt,.md,.markdown,.csv,.log,.json,.pdf,text/*,application/pdf"
+                  onChange={(event) => setIngestFile(event.target.files?.[0] ?? null)}
+                />
+              </label>
+              <button onClick={ingestSelectedFile} title="Upload maintenance document">
+                <Upload size={16} />
+                Upload
+              </button>
+            </div>
+            <div className="jsonIngest">
+              <label className="field">
+                <span>Payload</span>
+                <select value={jsonMode} onChange={(event) => setJsonMode(event.target.value as 'documents' | 'records')}>
+                  <option value="documents">Documents</option>
+                  <option value="records">Records</option>
+                </select>
+              </label>
+              <textarea
+                aria-label="Ingestion JSON"
+                value={jsonPayload}
+                onChange={(event) => setJsonPayload(event.target.value)}
+                placeholder={jsonMode === 'documents' ? '{"documents":[...]}' : '{"alerts":[...],"sensor_readings":[...]}'}
+              />
+              <button className="textButton" onClick={ingestJsonPayload}>
+                <FileJson size={16} />
+                Import JSON
+              </button>
+            </div>
+            {ingestionMessage && <p className="inlineStatus">{ingestionMessage}</p>}
+          </div>
+
           <div className="chatPanel">
             <div className="sectionHeader">
               <MessageSquare size={18} />
@@ -198,12 +321,54 @@ export function App() {
             <>
               <p className="diagnosis">{recommendation.diagnosis}</p>
               <span className={`riskBadge ${recommendation.risk_level}`}>{recommendation.risk_level}</span>
+              <div className="recommendationFacts">
+                <span>
+                  <small>Urgency</small>
+                  <strong>{recommendation.urgency}</strong>
+                </span>
+                <span>
+                  <small>RUL</small>
+                  <strong>{recommendation.remaining_useful_life_days ?? 'n/a'} days</strong>
+                </span>
+                <span>
+                  <small>Confidence</small>
+                  <strong>{Math.round(recommendation.confidence * 100)}%</strong>
+                </span>
+              </div>
+              <h3>Probable Root Causes</h3>
+              <ul>
+                {recommendation.probable_root_causes.map((cause) => (
+                  <li key={cause}>{cause}</li>
+                ))}
+              </ul>
               <h3>Immediate Actions</h3>
               <ul>
                 {recommendation.immediate_actions.map((action) => (
                   <li key={action}>{action}</li>
                 ))}
               </ul>
+              <h3>Planned Actions</h3>
+              <ul>
+                {recommendation.planned_actions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ul>
+              <h3>Spares Strategy</h3>
+              <ul>
+                {recommendation.spares_strategy.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ul>
+              {(recommendation.learning_notes ?? []).length > 0 && (
+                <>
+                  <h3>Learning Notes</h3>
+                  {recommendation.learning_notes.map((note) => (
+                    <p className="learningNote" key={note}>
+                      {note}
+                    </p>
+                  ))}
+                </>
+              )}
               <h3>Evidence</h3>
               {recommendation.evidence.slice(0, 3).map((evidence) => (
                 <p className="evidence" key={evidence.source_id}>
@@ -211,11 +376,30 @@ export function App() {
                   {evidence.excerpt}
                 </p>
               ))}
+              <div className="feedbackDetails">
+                <label className="field">
+                  <span>Actual Root Cause</span>
+                  <input value={feedbackRootCause} onChange={(event) => setFeedbackRootCause(event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>Action Taken</span>
+                  <input value={feedbackActionTaken} onChange={(event) => setFeedbackActionTaken(event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>Outcome</span>
+                  <input value={feedbackOutcome} onChange={(event) => setFeedbackOutcome(event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>Notes</span>
+                  <input value={feedbackNotes} onChange={(event) => setFeedbackNotes(event.target.value)} />
+                </label>
+              </div>
               <div className="feedbackRow">
                 <button onClick={() => sendFeedback('accepted')}>Accept</button>
                 <button onClick={() => sendFeedback('corrected')}>Correct</button>
                 <button onClick={() => sendFeedback('rejected')}>Reject</button>
               </div>
+              {feedbackMessage && <p className="inlineStatus">{feedbackMessage}</p>}
               <a className="downloadReport" href={api.reportMarkdownUrl(recommendation.equipment_id)} download>
                 <Download size={16} />
                 Export Report

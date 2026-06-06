@@ -65,12 +65,39 @@ def predict_failure(equipment_id: str) -> PredictionResponse:
     summary = health_summary(equipment_id)
     event_count = len(repository.list_maintenance_events(equipment_id))
     anomalies = analyze_anomalies(equipment_id)
+    feedback_records = repository.list_feedback(equipment_id)
     critical_alerts = len([a for a in summary.active_alerts if a.severity in {"high", "critical"}])
     severe_anomalies = len([item for item in anomalies if item.risk_level in {"high", "critical"}])
     spare_blockers = len([s for s in summary.top_spares_constraints if s.available_qty == 0])
-    probability = min(0.95, 0.12 + critical_alerts * 0.22 + severe_anomalies * 0.12 + event_count * 0.08 + spare_blockers * 0.1)
+    feedback_risk = min(
+        0.08,
+        len(
+            [
+                record
+                for record in feedback_records
+                if record["status"] in {"accepted", "corrected"} and record.get("actual_root_cause")
+            ]
+        )
+        * 0.02,
+    )
+    probability = min(
+        0.95,
+        0.12
+        + critical_alerts * 0.22
+        + severe_anomalies * 0.12
+        + event_count * 0.08
+        + spare_blockers * 0.1
+        + feedback_risk,
+    )
     rul = max(3, int(90 * (1 - probability)))
     drivers = summary.notes + [item.explanation for item in anomalies[:3]] + [f"{event_count} historical maintenance event(s) in sample data."]
+    if feedback_records:
+        drivers.append(f"{len(feedback_records)} engineer feedback record(s) considered for this asset.")
+    for record in feedback_records[:3]:
+        if record.get("actual_root_cause"):
+            drivers.append(f"Engineer-confirmed root cause: {record['actual_root_cause']}.")
+        if record.get("outcome"):
+            drivers.append(f"Recorded maintenance outcome: {record['outcome']}.")
     return PredictionResponse(
         equipment_id=equipment_id,
         risk_level=summary.risk_level,

@@ -25,6 +25,9 @@ def recommendation_to_markdown(recommendation: Recommendation) -> str:
         "## Spares Strategy",
         *_bullets(recommendation.spares_strategy),
         "",
+        "## Learning Notes",
+        *_bullets(recommendation.learning_notes),
+        "",
         "## Evidence",
         *[
             f"- **{item.title}** (`{item.source_type}:{item.source_id}`): {item.excerpt}"

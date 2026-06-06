@@ -85,6 +85,7 @@ export interface Recommendation {
   planned_actions: string[]
   spares_strategy: string[]
   evidence: Evidence[]
+  learning_notes: string[]
   report_summary: string
 }
 
@@ -107,6 +108,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function formRequest<T>(path: string, body: FormData): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    body,
+  })
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`)
+  }
+  return response.json() as Promise<T>
+}
+
+export interface DocumentIngestResponse {
+  status: string
+  documents: number
+  document?: {
+    id: string
+    source_type: string
+    equipment_id?: string
+    title: string
+    content: string
+  }
+}
+
+export interface RecordIngestResponse {
+  status: string
+  counts: Record<string, number>
+}
+
 export const api = {
   equipment: () => request<Equipment[]>('/api/equipment'),
   dashboard: () => request<DashboardSummary>('/api/dashboard/summary'),
@@ -122,10 +151,40 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ equipment_id: equipmentId, message }),
     }),
-  feedback: (recommendationId: string, status: 'accepted' | 'rejected' | 'corrected') =>
+  ingestDocumentFile: (input: { file: File; sourceType: string; equipmentId?: string; title?: string }) => {
+    const body = new FormData()
+    body.append('file', input.file)
+    body.append('source_type', input.sourceType)
+    if (input.equipmentId) body.append('equipment_id', input.equipmentId)
+    if (input.title) body.append('title', input.title)
+    return formRequest<DocumentIngestResponse>('/api/ingest/document-file', body)
+  },
+  ingestDocuments: (documents: unknown[]) =>
+    request<DocumentIngestResponse>('/api/ingest/documents', {
+      method: 'POST',
+      body: JSON.stringify({ documents }),
+    }),
+  ingestRecords: (payload: unknown) =>
+    request<RecordIngestResponse>('/api/ingest/records', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  feedback: (
+    recommendationId: string,
+    status: 'accepted' | 'rejected' | 'corrected',
+    equipmentId?: string,
+    details?: { actualRootCause?: string; actionTaken?: string; outcome?: string; notes?: string },
+  ) =>
     request(`/api/recommendations/${recommendationId}/feedback`, {
       method: 'POST',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({
+        status,
+        equipment_id: equipmentId,
+        actual_root_cause: details?.actualRootCause,
+        action_taken: details?.actionTaken,
+        outcome: details?.outcome,
+        notes: details?.notes,
+      }),
     }),
   reportMarkdownUrl: (equipmentId: string) => `${API_BASE}/api/reports/${equipmentId}/markdown`,
 }
