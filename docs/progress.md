@@ -184,3 +184,4 @@ The active goal is complete for a working hackathon prototype. Remaining items a
 - Created private GitHub repository `ragavendran-r/ai-powered-maintenance-wizard` and pushed initial commit `1eac0cc`.
 - GitHub-side main branch protection could not be enabled because GitHub rejected branch protection and repository rulesets for this private repo on the current plan.
 - Added a versioned local pre-push hook on branch `chore/github-guardrails` to block direct pushes to `main` or `master`.
+- Updated `docs/architecture.md` with a Mermaid system diagram covering frontend, FastAPI APIs, ingestion, retrieval, anomaly/risk services, LLM fallback, SQLite persistence, reports, and feedback.
