@@ -4,18 +4,21 @@
 
 ```mermaid
 flowchart LR
-  engineer["Maintenance Engineer"] --> frontend["React Frontend<br/>Dashboard, ingestion, diagnosis, chat, reports, feedback"]
+  users["Plant Users<br/>Admin, engineers, planners, operators"] --> authUi["Login And Role-Gated UI"]
+  authUi --> frontend["React Frontend<br/>Dashboard, ingestion, diagnosis, chat, reports, feedback"]
   iot["Steel Plant IoT Apps<br/>PLCs, gateways, historians"] --> nats["NATS JetStream<br/>MW_IOT stream"]
   nats --> streamIngest["Async IoT Ingestion Worker<br/>Durable pull consumer"]
   frontend --> api["FastAPI Backend<br/>Typed HTTP API"]
+  api --> auth["Auth/RBAC Layer<br/>JWT validation, current user, role guards"]
 
-  api --> dashboard["Dashboard And Equipment APIs"]
-  api --> ingest["Ingestion APIs<br/>Documents, files, structured records"]
-  api --> streamStatus["Streaming Status API"]
-  api --> diagnosis["Diagnosis, Chat, And Recommendation APIs"]
-  api --> prediction["Prediction API"]
-  api --> report["Markdown Report API"]
-  api --> feedback["Feedback API<br/>Root cause, action, outcome"]
+  auth --> dashboard["Dashboard And Equipment APIs"]
+  auth --> ingest["Ingestion APIs<br/>Documents, files, structured records"]
+  auth --> streamStatus["Streaming Status API"]
+  auth --> diagnosis["Diagnosis, Chat, And Recommendation APIs"]
+  auth --> prediction["Prediction API"]
+  auth --> report["Markdown Report API"]
+  auth --> feedback["Feedback API<br/>Root cause, action, outcome"]
+  auth --> userAdmin["User Management API"]
 
   ingest --> parser["Document Parser<br/>Text files and embedded-text PDFs"]
   parser --> retrieval["Retrieval Service<br/>Chunking, hashed embeddings, lexical scoring"]
@@ -37,12 +40,13 @@ flowchart LR
   learning --> risk
 
   dashboard --> repo["Repository Layer"]
+  userAdmin --> repo
   retrieval --> repo
   anomaly --> repo
   risk --> repo
   report --> repo
   feedback --> repo
-  repo --> sqlite[("SQLite Prototype Store<br/>Equipment, alerts, sensors, spares, history, documents, chunks, feedback")]
+  repo --> sqlite[("SQLite Prototype Store<br/>Equipment, alerts, sensors, spares, history, documents, chunks, feedback, planned users")]
 
   sample["Sample Steel Plant Fixture<br/>assets/sample_data/steel_plant_demo.json"] --> loader["Startup Seeder"]
   loader --> sqlite
@@ -56,6 +60,7 @@ flowchart LR
 ## Components
 
 - React frontend: operator dashboard, left-nav ingestion view, maintenance chat, asset detail, recommendation, report, and detailed feedback views.
+- Planned auth/RBAC layer: local login, JWT validation, current-user context, role guards, and role-aware navigation for admin, maintenance engineer, reliability engineer, planner, operator, and API-only IoT service users.
 - FastAPI backend: HTTP API layer for dashboard data, ingestion, diagnosis, prediction, chat, reports, and feedback.
 - Async IoT streaming ingestion: optional NATS JetStream durable consumer for plant applications, PLC gateways, and historians that publish alerts, sensor readings, equipment, spares, and maintenance events.
 - Data services: seed SQLite from five sample steel-plant assets and expose repository functions for equipment, alerts, sensor readings, spares, maintenance history, documents, document chunks, and feedback.
@@ -68,6 +73,13 @@ flowchart LR
 - LLM adapter: common structured interface for mock, OpenAI-compatible chat completions, and Ollama chat providers.
 
 ## API Surface
+
+- Planned authentication and authorization:
+  - `POST /api/auth/login` returns a JWT bearer token for active users.
+  - `GET /api/auth/me` returns the current authenticated user and role.
+  - `POST /api/auth/logout` lets the frontend clear the current session.
+  - Admin-only user management endpoints create, update, deactivate, and reset users.
+  - `/api/health` remains public; maintenance data and action endpoints require authentication and role checks.
 
 - Ingestion:
   - `POST /api/ingest/documents` stores JSON document records and rebuilds retrieval chunks.
@@ -91,13 +103,14 @@ flowchart LR
 3. Structured record ingestion upserts equipment, alerts, spares, sensor readings, and maintenance events.
 4. Optional NATS JetStream ingestion consumes plant IoT messages asynchronously and persists validated payloads through the same repository path.
 5. API endpoints read and write typed records through the repository layer.
-6. Dashboard and equipment endpoints expose plant health, the full priority-sorted asset list, asset risk, anomaly findings, alert context, and spares constraints.
-7. Chat or diagnosis requests trigger local retrieval over persisted document chunks plus matching maintenance history.
-8. Anomaly service evaluates sensor readings by signal using rolling baseline, z-score, threshold breach, and trend delta.
-9. Risk and prediction services combine alerts, anomaly findings, asset criticality, spares constraints, maintenance history, and feedback signals to compute health score, risk level, failure probability, and estimated RUL.
-10. Recommendation service requests structured LLM context when configured, validates it, merges safe suggestions with deterministic fallback actions and prior engineer feedback, and returns diagnosis, root causes, actions, spares strategy, learning notes, confidence, and evidence.
-11. Report service converts recommendations into Markdown with diagnosis, risk, RUL, actions, spares strategy, learning notes, evidence, and summary.
-12. Feedback is stored in SQLite and reused in future recommendation prompts, deterministic action/root-cause ranking, learning notes, reports, and prediction drivers.
+6. Planned auth/RBAC guards validate JWTs and role permissions before maintenance data or actions are served.
+7. Dashboard and equipment endpoints expose plant health, the full priority-sorted asset list, asset risk, anomaly findings, alert context, and spares constraints.
+8. Chat or diagnosis requests trigger local retrieval over persisted document chunks plus matching maintenance history.
+9. Anomaly service evaluates sensor readings by signal using rolling baseline, z-score, threshold breach, and trend delta.
+10. Risk and prediction services combine alerts, anomaly findings, asset criticality, spares constraints, maintenance history, and feedback signals to compute health score, risk level, failure probability, and estimated RUL.
+11. Recommendation service requests structured LLM context when configured, validates it, merges safe suggestions with deterministic fallback actions and prior engineer feedback, and returns diagnosis, root causes, actions, spares strategy, learning notes, confidence, and evidence.
+12. Report service converts recommendations into Markdown with diagnosis, risk, RUL, actions, spares strategy, learning notes, evidence, and summary.
+13. Feedback is stored in SQLite and reused in future recommendation prompts, deterministic action/root-cause ranking, learning notes, reports, and prediction drivers.
 
 ## LLM Boundaries
 
@@ -125,6 +138,7 @@ This is a prototype learning loop based on feedback reuse and ranking influence.
 - LLM providers are optional at runtime. Invalid provider responses, missing credentials, or network failures fall back to deterministic reasoning.
 - SQLite persistence is implemented for the prototype data model. A lightweight startup migration exists for `feedback.equipment_id`; full migration tooling is still a production hardening item.
 - NATS JetStream ingestion is implemented as an optional runtime path and requires an external NATS server when `STREAMING_ENABLED=true`.
+- Authentication and role-based authorization are planned in G-013 and documented in `docs/auth-authorization-plan.md`.
 - Live LLM calls are available through provider adapters when configured; deterministic fallback output remains the default local-demo behavior.
 - Anomaly detection and RUL are heuristic and intended for demonstration until richer plant time-series data exists.
 - PDF extraction depends on embedded text; scanned PDFs would need OCR in a production version.
