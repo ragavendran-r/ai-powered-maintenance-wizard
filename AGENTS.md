@@ -71,3 +71,5 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - GitHub rejected private-repository branch protection and repository rulesets on the current plan, returning an upgrade requirement.
 - Added a versioned local pre-push hook on branch `chore/github-guardrails`; enable it with `git config core.hooksPath .githooks`.
 - Updated `docs/architecture.md` with a Mermaid system architecture diagram.
+- Reviewed problem-statement feature coverage against the implemented app; backend compile, backend tests, frontend tests, frontend build, and API smoke checks passed. Coverage is complete for the hackathon prototype, with prediction and anomaly detection still heuristic/demo-grade.
+- Reviewed ingestion modes, LLM involvement, and continuous-improvement support. Current ingestion is API/file/startup-seed based; LLM is used in recommendation generation paths; feedback is persisted but not yet fed back into ranking, prompts, or prediction models.
