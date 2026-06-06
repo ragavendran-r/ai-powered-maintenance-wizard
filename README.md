@@ -113,6 +113,23 @@ npm run dev
 
 Frontend URL: `http://localhost:5173`
 
+## Local Full Stack
+
+To run NATS JetStream, the streaming-enabled backend, and the frontend together:
+
+```bash
+scripts/run-local-stack.sh
+```
+
+Useful stack commands:
+
+```bash
+scripts/run-local-stack.sh status
+scripts/run-local-stack.sh stop
+```
+
+The script requires Docker for the temporary `nats:2` container, an installed backend venv, and installed frontend `node_modules`. It writes backend and frontend logs under `.local-stack/`.
+
 ## Configuration
 
 Copy `.env.example` to `.env` when configuring real providers.
