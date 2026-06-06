@@ -182,6 +182,12 @@ h3 {
   margin-bottom: 10px;
 }
 
+.assetListScroller {
+  max-height: min(48vh, 460px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .assetRow {
   align-items: center;
   background: transparent;

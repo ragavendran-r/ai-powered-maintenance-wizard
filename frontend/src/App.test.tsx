@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 
 const dashboard = {
-  equipment_count: 1,
-  active_alert_count: 1,
-  critical_alert_count: 1,
+  equipment_count: 5,
+  active_alert_count: 5,
+  critical_alert_count: 2,
   average_health_score: 18,
   highest_risk_equipment: [
     {
@@ -59,6 +59,70 @@ const dashboard = {
         },
       ],
       notes: ['2 active alert(s) require maintenance review.'],
+    },
+    {
+      equipment: {
+        id: 'OH-CRANE-05',
+        name: 'Melt Shop Overhead Crane',
+        area: 'Melt Shop',
+        process: 'Ladle handling and maintenance lifting',
+        criticality: 5,
+        status: 'watch',
+      },
+      risk_level: 'critical',
+      health_score: 0,
+      active_alerts: [],
+      anomalies: [],
+      top_spares_constraints: [],
+      notes: ['Crane hoist current and brake temperature require review.'],
+    },
+    {
+      equipment: {
+        id: 'HYD-SYS-04',
+        name: 'Hot Rolling Hydraulic System',
+        area: 'Hot Rolling Mill',
+        process: 'AGC and roll gap hydraulic control',
+        criticality: 4,
+        status: 'degraded',
+      },
+      risk_level: 'high',
+      health_score: 22,
+      active_alerts: [],
+      anomalies: [],
+      top_spares_constraints: [],
+      notes: ['Hydraulic oil temperature and pressure pulsation require review.'],
+    },
+    {
+      equipment: {
+        id: 'BF-BLOWER-02',
+        name: 'Blast Furnace Combustion Air Blower',
+        area: 'Blast Furnace',
+        process: 'Combustion air supply',
+        criticality: 5,
+        status: 'watch',
+      },
+      risk_level: 'high',
+      health_score: 29,
+      active_alerts: [],
+      anomalies: [],
+      top_spares_constraints: [],
+      notes: ['Blower pressure variance requires review.'],
+    },
+    {
+      equipment: {
+        id: 'CC-PUMP-03',
+        name: 'Continuous Caster Cooling Water Pump',
+        area: 'Continuous Casting',
+        process: 'Secondary cooling',
+        criticality: 4,
+        status: 'normal',
+      },
+      risk_level: 'low',
+      health_score: 72,
+      active_alerts: [],
+      anomalies: [],
+      top_spares_constraints: [],
+      notes: ['No active abnormality detected in sample data.'],
     },
   ],
 }
@@ -128,6 +192,9 @@ describe('Maintenance Wizard dashboard', () => {
 
     expect(await screen.findByText('API connected')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Hot Strip Mill Main Drive Motor' })).toBeInTheDocument()
+    expect(screen.getByText('Priority Assets (5)')).toBeInTheDocument()
+    expect(screen.getByText('Melt Shop Overhead Crane')).toBeInTheDocument()
+    expect(screen.getByText('Hot Rolling Hydraulic System')).toBeInTheDocument()
     expect(screen.getByText('Sensor Anomalies')).toBeInTheDocument()
     expect(screen.getByText('drive end vibration')).toBeInTheDocument()
     expect(screen.getByText('z 8.35 · baseline 5.24 mm/s')).toBeInTheDocument()

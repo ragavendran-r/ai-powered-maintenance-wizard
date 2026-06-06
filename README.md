@@ -16,6 +16,7 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 - Markdown maintenance report export.
 - API and frontend ingestion for text/Markdown/CSV/log/JSON and embedded-text PDF documents.
 - Structured JSON record ingestion for equipment, alerts, spares, sensor readings, and maintenance history.
+- Planned async IoT streaming ingestion via NATS JetStream for plant applications and edge gateways.
 - Engineer feedback capture with equipment-linked root cause, action, outcome, and notes reused in later recommendations and prediction drivers.
 - Backend and frontend tests for core prototype behavior.
 
@@ -176,3 +177,4 @@ Update `docs/progress.md` at the end of each implementation session with complet
 
 - Hackathon packaging guide: `docs/submission-guide.md`
 - Production hardening notes: `docs/production-hardening.md`
+- IoT streaming ingestion plan: `docs/iot-streaming-ingestion-plan.md`

@@ -5,10 +5,13 @@
 ```mermaid
 flowchart LR
   engineer["Maintenance Engineer"] --> frontend["React Frontend<br/>Dashboard, ingestion, diagnosis, chat, reports, feedback"]
+  iot["Steel Plant IoT Apps<br/>PLCs, gateways, historians"] --> nats["NATS JetStream<br/>MW_IOT stream"]
+  nats --> streamIngest["Async IoT Ingestion Worker<br/>Durable pull consumer"]
   frontend --> api["FastAPI Backend<br/>Typed HTTP API"]
 
   api --> dashboard["Dashboard And Equipment APIs"]
   api --> ingest["Ingestion APIs<br/>Documents, files, structured records"]
+  api --> streamStatus["Streaming Status API"]
   api --> diagnosis["Diagnosis, Chat, And Recommendation APIs"]
   api --> prediction["Prediction API"]
   api --> report["Markdown Report API"]
@@ -17,6 +20,8 @@ flowchart LR
   ingest --> parser["Document Parser<br/>Text files and embedded-text PDFs"]
   parser --> retrieval["Retrieval Service<br/>Chunking, hashed embeddings, lexical scoring"]
   ingest --> repo
+  streamIngest --> repo
+  streamStatus --> streamIngest
 
   diagnosis --> retrieval
   diagnosis --> anomaly["Anomaly Service<br/>Rolling baseline, z-score, thresholds, trend delta"]
@@ -52,6 +57,7 @@ flowchart LR
 
 - React frontend: operator dashboard, left-nav ingestion view, maintenance chat, asset detail, recommendation, report, and detailed feedback views.
 - FastAPI backend: HTTP API layer for dashboard data, ingestion, diagnosis, prediction, chat, reports, and feedback.
+- Async IoT streaming ingestion: planned NATS JetStream durable consumer for plant applications, PLC gateways, and historians that publish alerts, sensor readings, equipment, spares, and maintenance events.
 - Data services: seed SQLite from five sample steel-plant assets and expose repository functions for equipment, alerts, sensor readings, spares, maintenance history, documents, document chunks, and feedback.
 - Document parser: extracts text from uploaded text-like files and embedded-text PDFs before indexing.
 - Retrieval service: local chunk index persisted in SQLite with deterministic hashed embeddings and lexical scoring.
@@ -67,6 +73,7 @@ flowchart LR
   - `POST /api/ingest/documents` stores JSON document records and rebuilds retrieval chunks.
   - `POST /api/ingest/document-file` parses and stores uploaded `.txt`, `.md`, `.markdown`, `.csv`, `.log`, `.json`, and embedded-text `.pdf` files.
   - `POST /api/ingest/records` upserts structured equipment, alert, spare, sensor reading, and maintenance event records.
+  - Planned `GET /api/streaming/status` reports NATS JetStream ingestion state, processed count, failed count, last message timestamp, and last error.
 - Decision support:
   - `GET /api/dashboard/summary` returns plant-level health and all tracked assets sorted by risk priority.
   - `GET /api/equipment/{equipment_id}/health` returns asset risk, anomalies, alerts, spares constraints, and notes.
@@ -82,14 +89,15 @@ flowchart LR
 1. Sample plant records for the hot strip mill drive, blast furnace blower, caster cooling pump, hydraulic system, and overhead crane are loaded from `assets/sample_data/steel_plant_demo.json` and upserted into SQLite on startup.
 2. File and JSON document ingestion endpoints parse manuals, SOPs, logs, CSVs, JSON, Markdown, text files, and embedded-text PDFs into document records and retrieval chunks.
 3. Structured record ingestion upserts equipment, alerts, spares, sensor readings, and maintenance events.
-4. API endpoints read and write typed records through the repository layer.
-5. Dashboard and equipment endpoints expose plant health, the full priority-sorted asset list, asset risk, anomaly findings, alert context, and spares constraints.
-6. Chat or diagnosis requests trigger local retrieval over persisted document chunks plus matching maintenance history.
-7. Anomaly service evaluates sensor readings by signal using rolling baseline, z-score, threshold breach, and trend delta.
-8. Risk and prediction services combine alerts, anomaly findings, asset criticality, spares constraints, maintenance history, and feedback signals to compute health score, risk level, failure probability, and estimated RUL.
-9. Recommendation service requests structured LLM context when configured, validates it, merges safe suggestions with deterministic fallback actions and prior engineer feedback, and returns diagnosis, root causes, actions, spares strategy, learning notes, confidence, and evidence.
-10. Report service converts recommendations into Markdown with diagnosis, risk, RUL, actions, spares strategy, learning notes, evidence, and summary.
-11. Feedback is stored in SQLite and reused in future recommendation prompts, deterministic action/root-cause ranking, learning notes, reports, and prediction drivers.
+4. Planned NATS JetStream ingestion consumes plant IoT messages asynchronously and persists validated payloads through the same repository path.
+5. API endpoints read and write typed records through the repository layer.
+6. Dashboard and equipment endpoints expose plant health, the full priority-sorted asset list, asset risk, anomaly findings, alert context, and spares constraints.
+7. Chat or diagnosis requests trigger local retrieval over persisted document chunks plus matching maintenance history.
+8. Anomaly service evaluates sensor readings by signal using rolling baseline, z-score, threshold breach, and trend delta.
+9. Risk and prediction services combine alerts, anomaly findings, asset criticality, spares constraints, maintenance history, and feedback signals to compute health score, risk level, failure probability, and estimated RUL.
+10. Recommendation service requests structured LLM context when configured, validates it, merges safe suggestions with deterministic fallback actions and prior engineer feedback, and returns diagnosis, root causes, actions, spares strategy, learning notes, confidence, and evidence.
+11. Report service converts recommendations into Markdown with diagnosis, risk, RUL, actions, spares strategy, learning notes, evidence, and summary.
+12. Feedback is stored in SQLite and reused in future recommendation prompts, deterministic action/root-cause ranking, learning notes, reports, and prediction drivers.
 
 ## LLM Boundaries
 
