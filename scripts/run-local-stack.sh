@@ -56,6 +56,14 @@ url_ok() {
   curl -fsS "$1" >/dev/null 2>&1
 }
 
+demo_auth_token() {
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' < <(
+    curl -fsS "http://${BACKEND_HOST}:${BACKEND_PORT}/api/auth/login" \
+      -H "Content-Type: application/json" \
+      -d '{"email":"admin@plant.local","password":"DemoPass123!"}'
+  )
+}
+
 wait_for_url() {
   local url="$1"
   local label="$2"
@@ -216,6 +224,7 @@ stop_started() {
 
 show_status() {
   require_command curl
+  require_command python3
   echo "NATS monitor:"
   curl -fsS "http://${NATS_HOST}:${NATS_MONITOR_PORT}/healthz" || true
   echo
@@ -223,7 +232,13 @@ show_status() {
   curl -fsS "http://${BACKEND_HOST}:${BACKEND_PORT}/api/health" || true
   echo
   echo "Streaming status:"
-  curl -fsS "http://${BACKEND_HOST}:${BACKEND_PORT}/api/streaming/status" || true
+  local token=""
+  if token="$(demo_auth_token 2>/dev/null)"; then
+    curl -fsS "http://${BACKEND_HOST}:${BACKEND_PORT}/api/streaming/status" \
+      -H "Authorization: Bearer ${token}" || true
+  else
+    echo "could not obtain demo admin token"
+  fi
   echo
   echo "Frontend:"
   if url_ok "http://${FRONTEND_HOST}:${FRONTEND_PORT}/"; then
