@@ -1,0 +1,66 @@
+# Repository Guidelines
+
+## Project Structure & Module Organization
+
+This repository is currently empty aside from contributor documentation. As code is added, keep the layout predictable:
+
+- `src/` for application source code and reusable modules.
+- `tests/` for automated tests that mirror `src/` structure.
+- `assets/` for static files such as images, fixtures, prompts, or sample data.
+- `docs/` for design notes, architecture decisions, and user-facing documentation.
+- Root configuration files such as `package.json`, `pyproject.toml`, `.env.example`, or CI workflows.
+
+Prefer small modules named by responsibility, such as `maintenance_wizard.py`, `api_client.ts`, or `work_order_parser.test.ts`.
+
+## Build, Test, and Development Commands
+
+No build system is defined yet. When adding one, document root-level commands here. Examples:
+
+- `npm install` or `pip install -r requirements.txt`: install dependencies.
+- `npm run dev` or `python -m app`: run locally.
+- `npm test` or `pytest`: run tests.
+- `npm run lint`, `ruff check .`, or equivalent: run static checks.
+
+Avoid duplicate command paths. If a Makefile is added, keep targets thin wrappers around underlying tools.
+
+## Coding Style & Naming Conventions
+
+Follow the formatter and linter configured by the stack. Until tooling exists, use these defaults:
+
+- Use 2 spaces for JavaScript/TypeScript, JSON, YAML, and Markdown.
+- Use 4 spaces for Python.
+- Use `snake_case` for Python files and functions.
+- Use `camelCase` for JavaScript/TypeScript variables and functions.
+- Use `PascalCase` for classes, React components, and exported types.
+
+Keep functions focused and avoid broad utility modules.
+
+## Testing Guidelines
+
+Add tests with new behavior. Place tests under `tests/` or beside source files using the chosen convention. Use behavior-focused names, for example `test_rejects_missing_asset_id` or `work-order-parser.test.ts`.
+
+Cover parsing, validation, API boundaries, and error handling first. Add regression tests when practical.
+
+## Commit & Pull Request Guidelines
+
+Git history is not available in this workspace, so no existing convention can be inferred. Use concise, imperative commit messages, for example `Add work order parser` or `Fix retry handling`.
+
+Pull requests should include:
+
+- A short summary of the change.
+- Tests run, with exact commands.
+- Linked issues or task IDs when available.
+- Screenshots or logs for UI or workflow changes.
+- Notes about configuration, migrations, or follow-up work.
+
+## Security & Configuration Tips
+
+Do not commit secrets, local credentials, or generated private data. Provide `.env.example` for required configuration and document each variable. Keep large generated artifacts out of version control unless they are fixtures.
+
+## Progress Tracking
+
+Keep `docs/progress.md` updated at the end of each implementation session. Record completed work, tests or checks run, next steps, blockers, and any new decisions so future sessions can resume without rediscovery.
+
+## Project Rules And Hooks
+
+Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/hooks.md` for branch, pull request, verification, and demo handoff guardrails. In particular, do not commit or push directly to `main`; use a feature branch and raise a pull request targeting `main`.

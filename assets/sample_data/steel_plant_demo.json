@@ -1,0 +1,303 @@
+{
+  "equipment": [
+    {
+      "id": "RM-DRIVE-01",
+      "name": "Hot Strip Mill Main Drive Motor",
+      "area": "Hot Rolling Mill",
+      "process": "Finishing stand drive",
+      "criticality": 5,
+      "status": "degraded"
+    },
+    {
+      "id": "BF-BLOWER-02",
+      "name": "Blast Furnace Combustion Air Blower",
+      "area": "Blast Furnace",
+      "process": "Combustion air supply",
+      "criticality": 5,
+      "status": "watch"
+    },
+    {
+      "id": "CC-PUMP-03",
+      "name": "Continuous Caster Cooling Water Pump",
+      "area": "Continuous Casting",
+      "process": "Secondary cooling",
+      "criticality": 4,
+      "status": "normal"
+    }
+  ],
+  "alerts": [
+    {
+      "id": "ALT-1001",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T08:15:00+05:30",
+      "signal": "drive_end_vibration",
+      "value": 9.8,
+      "unit": "mm/s",
+      "threshold": 7.1,
+      "severity": "critical",
+      "message": "Drive end vibration exceeds trip advisory threshold"
+    },
+    {
+      "id": "ALT-1002",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T08:25:00+05:30",
+      "signal": "bearing_temperature",
+      "value": 91.0,
+      "unit": "C",
+      "threshold": 85.0,
+      "severity": "high",
+      "message": "Bearing temperature rising during finishing stand load"
+    },
+    {
+      "id": "ALT-2001",
+      "equipment_id": "BF-BLOWER-02",
+      "timestamp": "2026-06-06T07:50:00+05:30",
+      "signal": "outlet_pressure_variance",
+      "value": 14.2,
+      "unit": "%",
+      "threshold": 10.0,
+      "severity": "high",
+      "message": "Combustion blower pressure variance above normal range"
+    }
+  ],
+  "sensor_readings": [
+    {
+      "id": "SR-RM-VIB-001",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T07:00:00+05:30",
+      "signal": "drive_end_vibration",
+      "value": 4.6,
+      "unit": "mm/s",
+      "threshold": 7.1
+    },
+    {
+      "id": "SR-RM-VIB-002",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T07:15:00+05:30",
+      "signal": "drive_end_vibration",
+      "value": 4.9,
+      "unit": "mm/s",
+      "threshold": 7.1
+    },
+    {
+      "id": "SR-RM-VIB-003",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T07:30:00+05:30",
+      "signal": "drive_end_vibration",
+      "value": 5.1,
+      "unit": "mm/s",
+      "threshold": 7.1
+    },
+    {
+      "id": "SR-RM-VIB-004",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T07:45:00+05:30",
+      "signal": "drive_end_vibration",
+      "value": 5.4,
+      "unit": "mm/s",
+      "threshold": 7.1
+    },
+    {
+      "id": "SR-RM-VIB-005",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T08:00:00+05:30",
+      "signal": "drive_end_vibration",
+      "value": 6.2,
+      "unit": "mm/s",
+      "threshold": 7.1
+    },
+    {
+      "id": "SR-RM-VIB-006",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T08:15:00+05:30",
+      "signal": "drive_end_vibration",
+      "value": 9.8,
+      "unit": "mm/s",
+      "threshold": 7.1
+    },
+    {
+      "id": "SR-RM-TMP-001",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T07:00:00+05:30",
+      "signal": "bearing_temperature",
+      "value": 72.0,
+      "unit": "C",
+      "threshold": 85.0
+    },
+    {
+      "id": "SR-RM-TMP-002",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T07:20:00+05:30",
+      "signal": "bearing_temperature",
+      "value": 74.0,
+      "unit": "C",
+      "threshold": 85.0
+    },
+    {
+      "id": "SR-RM-TMP-003",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T07:40:00+05:30",
+      "signal": "bearing_temperature",
+      "value": 77.0,
+      "unit": "C",
+      "threshold": 85.0
+    },
+    {
+      "id": "SR-RM-TMP-004",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T08:00:00+05:30",
+      "signal": "bearing_temperature",
+      "value": 82.0,
+      "unit": "C",
+      "threshold": 85.0
+    },
+    {
+      "id": "SR-RM-TMP-005",
+      "equipment_id": "RM-DRIVE-01",
+      "timestamp": "2026-06-06T08:25:00+05:30",
+      "signal": "bearing_temperature",
+      "value": 91.0,
+      "unit": "C",
+      "threshold": 85.0
+    },
+    {
+      "id": "SR-BF-PRS-001",
+      "equipment_id": "BF-BLOWER-02",
+      "timestamp": "2026-06-06T07:00:00+05:30",
+      "signal": "outlet_pressure_variance",
+      "value": 6.8,
+      "unit": "%",
+      "threshold": 10.0
+    },
+    {
+      "id": "SR-BF-PRS-002",
+      "equipment_id": "BF-BLOWER-02",
+      "timestamp": "2026-06-06T07:15:00+05:30",
+      "signal": "outlet_pressure_variance",
+      "value": 7.1,
+      "unit": "%",
+      "threshold": 10.0
+    },
+    {
+      "id": "SR-BF-PRS-003",
+      "equipment_id": "BF-BLOWER-02",
+      "timestamp": "2026-06-06T07:30:00+05:30",
+      "signal": "outlet_pressure_variance",
+      "value": 8.0,
+      "unit": "%",
+      "threshold": 10.0
+    },
+    {
+      "id": "SR-BF-PRS-004",
+      "equipment_id": "BF-BLOWER-02",
+      "timestamp": "2026-06-06T07:50:00+05:30",
+      "signal": "outlet_pressure_variance",
+      "value": 14.2,
+      "unit": "%",
+      "threshold": 10.0
+    },
+    {
+      "id": "SR-CC-FLW-001",
+      "equipment_id": "CC-PUMP-03",
+      "timestamp": "2026-06-06T07:00:00+05:30",
+      "signal": "cooling_water_flow",
+      "value": 1240.0,
+      "unit": "m3/h",
+      "threshold": 1100.0
+    },
+    {
+      "id": "SR-CC-FLW-002",
+      "equipment_id": "CC-PUMP-03",
+      "timestamp": "2026-06-06T07:30:00+05:30",
+      "signal": "cooling_water_flow",
+      "value": 1228.0,
+      "unit": "m3/h",
+      "threshold": 1100.0
+    },
+    {
+      "id": "SR-CC-FLW-003",
+      "equipment_id": "CC-PUMP-03",
+      "timestamp": "2026-06-06T08:00:00+05:30",
+      "signal": "cooling_water_flow",
+      "value": 1215.0,
+      "unit": "m3/h",
+      "threshold": 1100.0
+    }
+  ],
+  "spares": [
+    {
+      "id": "SP-001",
+      "equipment_id": "RM-DRIVE-01",
+      "name": "Drive end spherical roller bearing",
+      "available_qty": 0,
+      "lead_time_days": 21,
+      "criticality": 5
+    },
+    {
+      "id": "SP-002",
+      "equipment_id": "RM-DRIVE-01",
+      "name": "High-temperature coupling grease",
+      "available_qty": 4,
+      "lead_time_days": 3,
+      "criticality": 3
+    },
+    {
+      "id": "SP-003",
+      "equipment_id": "BF-BLOWER-02",
+      "name": "Blower inlet guide vane actuator",
+      "available_qty": 1,
+      "lead_time_days": 12,
+      "criticality": 4
+    }
+  ],
+  "maintenance_events": [
+    {
+      "id": "ME-8801",
+      "equipment_id": "RM-DRIVE-01",
+      "date": "2026-04-18",
+      "issue": "Recurring high vibration on drive end",
+      "root_cause": "Bearing outer race pitting with degraded grease condition",
+      "action": "Bearing replaced, coupling alignment corrected, lubrication interval reduced",
+      "downtime_hours": 8.5
+    },
+    {
+      "id": "ME-8802",
+      "equipment_id": "BF-BLOWER-02",
+      "date": "2026-05-12",
+      "issue": "Outlet pressure oscillation during furnace ramp-up",
+      "root_cause": "Sticky inlet guide vane actuator response",
+      "action": "Actuator linkage cleaned and calibration reset",
+      "downtime_hours": 3.0
+    }
+  ],
+  "documents": [
+    {
+      "id": "DOC-RM-SOP-01",
+      "source_type": "sop",
+      "equipment_id": "RM-DRIVE-01",
+      "title": "Hot Strip Mill Main Drive Vibration SOP",
+      "content": "If drive end vibration exceeds 7.1 mm/s, inspect bearing housing temperature, lubrication condition, coupling alignment, foundation bolts, and load changes. Reduce load if vibration remains above alarm threshold for more than 15 minutes."
+    },
+    {
+      "id": "DOC-RM-MAN-02",
+      "source_type": "manual",
+      "equipment_id": "RM-DRIVE-01",
+      "title": "Main Drive Motor Bearing Maintenance Manual",
+      "content": "Bearing temperature above 85 C combined with rising vibration indicates possible lubrication breakdown, bearing wear, or misalignment. Recommended action is controlled inspection during planned stoppage unless vibration reaches trip criteria."
+    },
+    {
+      "id": "DOC-BF-SOP-01",
+      "source_type": "sop",
+      "equipment_id": "BF-BLOWER-02",
+      "title": "Blast Furnace Blower Pressure Variance SOP",
+      "content": "Pressure variance above 10 percent should trigger inspection of inlet guide vane response, actuator calibration, filter restriction, and surge margin. Notify the furnace supervisor when high variance persists for two samples."
+    },
+    {
+      "id": "DOC-SPARES-01",
+      "source_type": "spares",
+      "equipment_id": null,
+      "title": "Critical Spare Procurement Guidance",
+      "content": "For process-critical equipment, zero stock with lead time greater than 14 days should increase maintenance priority and trigger procurement escalation."
+    }
+  ]
+}

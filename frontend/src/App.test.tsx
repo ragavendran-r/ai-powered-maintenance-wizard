@@ -1,0 +1,138 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { App } from './App'
+
+const dashboard = {
+  equipment_count: 1,
+  active_alert_count: 1,
+  critical_alert_count: 1,
+  average_health_score: 18,
+  highest_risk_equipment: [
+    {
+      equipment: {
+        id: 'RM-DRIVE-01',
+        name: 'Hot Strip Mill Main Drive Motor',
+        area: 'Hot Rolling Mill',
+        process: 'Finishing stand drive',
+        criticality: 5,
+        status: 'degraded',
+      },
+      risk_level: 'critical',
+      health_score: 0,
+      active_alerts: [
+        {
+          id: 'ALT-1001',
+          equipment_id: 'RM-DRIVE-01',
+          timestamp: '2026-06-06T08:15:00+05:30',
+          signal: 'drive_end_vibration',
+          value: 9.8,
+          unit: 'mm/s',
+          threshold: 7.1,
+          severity: 'critical',
+          message: 'Drive end vibration exceeds trip advisory threshold',
+        },
+      ],
+      anomalies: [
+        {
+          equipment_id: 'RM-DRIVE-01',
+          signal: 'drive_end_vibration',
+          timestamp: '2026-06-06T08:15:00+05:30',
+          value: 9.8,
+          unit: 'mm/s',
+          baseline_mean: 5.24,
+          z_score: 8.35,
+          threshold: 7.1,
+          threshold_breached: true,
+          trend_delta: 4.56,
+          risk_level: 'critical',
+          explanation: 'drive_end_vibration is critical risk.',
+        },
+      ],
+      top_spares_constraints: [
+        {
+          id: 'SP-001',
+          equipment_id: 'RM-DRIVE-01',
+          name: 'Drive end spherical roller bearing',
+          available_qty: 0,
+          lead_time_days: 21,
+          criticality: 5,
+        },
+      ],
+      notes: ['2 active alert(s) require maintenance review.'],
+    },
+  ],
+}
+
+const recommendation = {
+  id: 'rec-test',
+  equipment_id: 'RM-DRIVE-01',
+  diagnosis: 'Hot Strip Mill Main Drive Motor shows symptoms consistent with drive end vibration.',
+  probable_root_causes: ['Bearing wear'],
+  risk_level: 'critical',
+  urgency: 'Immediate engineering review required within the current shift.',
+  remaining_useful_life_days: 23,
+  confidence: 0.77,
+  immediate_actions: ['Reduce load or schedule controlled shutdown.'],
+  planned_actions: ['Trend the abnormal signal.'],
+  spares_strategy: ['Review Drive end spherical roller bearing: 0 on hand, 21 day lead time.'],
+  evidence: [
+    {
+      source_type: 'sop',
+      source_id: 'DOC-RM-SOP-01::chunk-000',
+      title: 'Hot Strip Mill Main Drive Vibration SOP',
+      excerpt: 'Inspect bearing housing temperature and coupling alignment.',
+      equipment_id: 'RM-DRIVE-01',
+    },
+  ],
+  report_summary: 'Critical risk with estimated RUL of 23 days.',
+}
+
+beforeEach(() => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: RequestInfo | URL) => {
+      const url = input.toString()
+      if (url.endsWith('/api/dashboard/summary')) {
+        return Promise.resolve(new Response(JSON.stringify(dashboard), { status: 200 }))
+      }
+      if (url.endsWith('/api/diagnose')) {
+        return Promise.resolve(new Response(JSON.stringify(recommendation), { status: 200 }))
+      }
+      if (url.endsWith('/feedback')) {
+        return Promise.resolve(new Response(JSON.stringify({ stored: true }), { status: 200 }))
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    }),
+  )
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('Maintenance Wizard dashboard', () => {
+  it('renders dashboard metrics, anomalies, and selected asset details', async () => {
+    render(<App />)
+
+    expect(await screen.findByText('API connected')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Hot Strip Mill Main Drive Motor' })).toBeInTheDocument()
+    expect(screen.getByText('Sensor Anomalies')).toBeInTheDocument()
+    expect(screen.getByText('drive end vibration')).toBeInTheDocument()
+    expect(screen.getByText('z 8.35 · baseline 5.24 mm/s')).toBeInTheDocument()
+  })
+
+  it('runs diagnosis and exposes report export link', async () => {
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('Diagnose'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Reduce load or schedule controlled shutdown.')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Hot Strip Mill Main Drive Vibration SOP')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /export report/i })).toHaveAttribute(
+      'href',
+      'http://localhost:8000/api/reports/RM-DRIVE-01/markdown',
+    )
+  })
+})
