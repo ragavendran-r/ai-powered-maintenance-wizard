@@ -70,3 +70,4 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Created private GitHub repository `ragavendran-r/ai-powered-maintenance-wizard` and pushed initial commit `1eac0cc` to `main`.
 - GitHub rejected private-repository branch protection and repository rulesets on the current plan, returning an upgrade requirement.
 - Added a versioned local pre-push hook on branch `chore/github-guardrails`; enable it with `git config core.hooksPath .githooks`.
+- Updated `docs/architecture.md` with a Mermaid system architecture diagram.

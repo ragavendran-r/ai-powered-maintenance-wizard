@@ -1,5 +1,47 @@
 # Maintenance Wizard Architecture
 
+## System Diagram
+
+```mermaid
+flowchart LR
+  engineer["Maintenance Engineer"] --> frontend["React Frontend<br/>Dashboard, diagnosis, chat, reports, feedback"]
+  frontend --> api["FastAPI Backend<br/>Typed HTTP API"]
+
+  api --> dashboard["Dashboard And Equipment APIs"]
+  api --> ingest["Document Ingestion APIs"]
+  api --> diagnosis["Diagnosis And Recommendation APIs"]
+  api --> report["Markdown Report API"]
+  api --> feedback["Feedback API"]
+
+  ingest --> parser["Document Parser<br/>Text files and embedded-text PDFs"]
+  parser --> retrieval["Retrieval Service<br/>Chunking, hashed embeddings, lexical scoring"]
+
+  diagnosis --> retrieval
+  diagnosis --> anomaly["Anomaly Service<br/>Rolling baseline, z-score, thresholds, trend delta"]
+  diagnosis --> risk["Risk And Prediction Services<br/>Criticality, alerts, spares, history, RUL"]
+  diagnosis --> llm["LLM Adapter<br/>Mock, OpenAI-compatible, Ollama"]
+  llm --> fallback["Deterministic Fallback<br/>Validated safe recommendations"]
+  diagnosis --> recommendations["Recommendation Service<br/>Root causes, actions, spares, evidence, confidence"]
+
+  recommendations --> report
+  feedback --> learning["Future Learning Loop<br/>Outcome and usefulness signals"]
+
+  dashboard --> repo["Repository Layer"]
+  retrieval --> repo
+  anomaly --> repo
+  risk --> repo
+  report --> repo
+  feedback --> repo
+  repo --> sqlite[("SQLite Prototype Store<br/>Equipment, alerts, sensors, history, documents, chunks, feedback")]
+
+  sample["Sample Steel Plant Fixture<br/>assets/sample_data/steel_plant_demo.json"] --> loader["Startup Seeder"]
+  loader --> sqlite
+
+  recommendations --> frontend
+  report --> frontend
+  sqlite --> dashboard
+```
+
 ## Components
 
 - React frontend: operator dashboard, maintenance chat, asset detail, recommendation, report, and feedback views.
