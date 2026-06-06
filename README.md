@@ -8,8 +8,8 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 
 - FastAPI backend with health, dashboard, equipment health, alert, chat, diagnosis, prediction, report, and feedback endpoints.
 - React + TypeScript + Vite frontend for a maintenance dashboard, left-nav ingestion view, engineer chat, recommendation panel, report export, and detailed feedback controls.
-- Sample steel-plant data for a hot strip mill drive, blast furnace blower, and caster cooling pump.
-- SQLite-backed persistence seeded from sample data for equipment, alerts, sensor readings, spares, maintenance events, documents, document chunks, and feedback.
+- Sample steel-plant data for a hot strip mill drive, blast furnace blower, caster cooling pump, hot rolling hydraulic system, and melt shop overhead crane.
+- SQLite-backed persistence seeded from five sample assets with equipment, alerts, sensor readings, spares, maintenance events, documents, document chunks, and feedback.
 - Local document chunk index with deterministic embeddings for offline retrieval-augmented answers.
 - Time-series sensor readings with rolling-baseline anomaly detection and risk impact.
 - Provider-agnostic LLM adapters for OpenAI and Ollama with structured JSON validation and deterministic fallback reasoning.
@@ -21,7 +21,7 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 
 ## Decision-Support Features
 
-- Reactive troubleshooting through natural-language chat and diagnosis requests.
+- Reactive troubleshooting through natural-language chat and diagnosis requests across the five tracked steel-plant assets.
 - Root-cause suggestions merged from deterministic rules, retrieved evidence, prior feedback, and optional LLM output.
 - Degradation and remaining useful life estimates using explainable heuristic risk drivers.
 - Proactive abnormality detection through rolling baseline, z-score, threshold breach, and trend-delta analysis.

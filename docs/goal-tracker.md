@@ -235,6 +235,34 @@ Delivered in this branch:
 
 Status: `Complete`
 
+### G-011: Add Hydraulic System And Overhead Crane Assets
+
+Requested outcome:
+
+- Add two more equipment assets to tracking and maintenance: one Hydraulic System and one Overhead Crane.
+- Add necessary changes across the application to support these assets.
+
+Delivered in this branch:
+
+- Added `HYD-SYS-04` Hot Rolling Hydraulic System and `OH-CRANE-05` Melt Shop Overhead Crane to the seeded steel plant fixture.
+- Added active alert context, anomaly-driving sensor readings, spare constraints, maintenance history, SOP/manual documents, and retrieval chunks for both assets.
+- Updated the dashboard summary to return all tracked assets sorted by risk priority so the left navigation can expose the full five-asset set.
+- Updated frontend fallback dashboard data so offline/sample mode also lists all five assets.
+- Added backend tests covering seeded counts, dashboard visibility, health, prediction, diagnosis, and retrieval evidence for the new assets.
+- Updated README, architecture, and demo documentation to describe the five-asset demo set.
+
+Verification recorded:
+
+- `PYTHONPYCACHEPREFIX=.pycache .venv/bin/python -m compileall app`
+- `.venv/bin/pytest` passed with 25 tests.
+- `npm run test` passed with 5 tests.
+- `npm run build` passed.
+- `python -m app.manage reset-db` reported 5 equipment records, 5 alerts, 39 sensor readings, 7 spares, 4 maintenance events, and 8 documents/chunks.
+- Live dashboard check returned 5 tracked assets and 5 priority-list entries.
+- Live diagnosis checks for `HYD-SYS-04` and `OH-CRANE-05` returned critical risk with asset-specific SOP/manual/history evidence.
+
+Status: `Complete`
+
 ## Maintenance Rules For This File
 
 - Add a new goal entry whenever the user asks to create or pursue a new multi-step goal.

@@ -24,17 +24,66 @@ def test_health_check():
 def test_database_status_reports_seeded_tables():
     status = database_status()
     assert status["schema_version"] == "2"
-    assert status["counts"]["equipment"] == 3
-    assert status["counts"]["document_chunks"] >= 4
+    assert status["counts"]["equipment"] == 5
+    assert status["counts"]["document_chunks"] >= 8
 
 
 def test_dashboard_summary_contains_sample_equipment():
     response = client.get("/api/dashboard/summary")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["equipment_count"] == 3
-    assert payload["active_alert_count"] == 3
-    assert payload["highest_risk_equipment"]
+    assert payload["equipment_count"] == 5
+    assert payload["active_alert_count"] == 5
+    assert len(payload["highest_risk_equipment"]) == 5
+    equipment_ids = {item["equipment"]["id"] for item in payload["highest_risk_equipment"]}
+    assert {"HYD-SYS-04", "OH-CRANE-05"}.issubset(equipment_ids)
+
+
+@pytest.mark.parametrize(
+    ("equipment_id", "expected_signal", "query", "expected_document"),
+    [
+        (
+            "HYD-SYS-04",
+            "hydraulic_oil_temperature",
+            "hydraulic pressure pulsation servo valve oil temperature",
+            "Hydraulic System Temperature And Pulsation SOP",
+        ),
+        (
+            "OH-CRANE-05",
+            "hoist_motor_current",
+            "overhead crane hoist current brake temperature wire rope",
+            "Overhead Crane Hoist Current And Brake Temperature SOP",
+        ),
+    ],
+)
+def test_added_assets_have_health_prediction_and_retrieval(
+    equipment_id: str,
+    expected_signal: str,
+    query: str,
+    expected_document: str,
+):
+    health_response = client.get(f"/api/equipment/{equipment_id}/health")
+    assert health_response.status_code == 200
+    health = health_response.json()
+    assert health["active_alerts"]
+    assert health["top_spares_constraints"]
+    assert any(item["signal"] == expected_signal for item in health["anomalies"])
+    assert health["risk_level"] in {"high", "critical"}
+
+    prediction_response = client.post("/api/predict", json={"equipment_id": equipment_id})
+    assert prediction_response.status_code == 200
+    prediction = prediction_response.json()
+    assert prediction["failure_probability"] > 0.5
+    assert any("z-score" in driver for driver in prediction["drivers"])
+
+    diagnosis_response = client.post("/api/diagnose", json={"equipment_id": equipment_id})
+    assert diagnosis_response.status_code == 200
+    diagnosis = diagnosis_response.json()
+    assert diagnosis["evidence"]
+    assert any(item["title"] == expected_document for item in diagnosis["evidence"])
+
+    evidence = retrieve_evidence(query, equipment_id)
+    assert any(item.title == expected_document for item in evidence)
 
 
 def test_diagnosis_returns_evidence_and_actions():
