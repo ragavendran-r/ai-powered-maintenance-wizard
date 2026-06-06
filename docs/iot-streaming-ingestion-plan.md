@@ -134,6 +134,61 @@ Confirm the backend has connected to NATS:
 curl http://127.0.0.1:8000/api/streaming/status
 ```
 
+### Post A Sample NATS Alert Message
+
+Use this quick test when the local stack is already running and `/api/streaming/status` shows `"state":"connected"`:
+
+```bash
+cd backend
+
+.venv/bin/python - <<'PY'
+import asyncio
+import json
+from datetime import datetime, timezone
+import nats
+
+async def main():
+    nc = await nats.connect("nats://127.0.0.1:4222")
+    js = nc.jetstream()
+
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    suffix = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+    message = {
+        "message_id": f"iot-demo-alert-{suffix}",
+        "schema_version": "1",
+        "source": "demo-iot-gateway",
+        "type": "alert",
+        "timestamp": now,
+        "payload": {
+            "equipment_id": "CC-PUMP-03",
+            "signal": "motor_current",
+            "value": 121.0,
+            "unit": "A",
+            "threshold": 95.0,
+            "severity": "high",
+            "message": "Demo NATS message: cooling pump motor current above threshold"
+        }
+    }
+
+    await js.publish("steelplant.iot.alerts", json.dumps(message).encode())
+    await nc.drain()
+
+    print("Published:", message["message_id"])
+
+asyncio.run(main())
+PY
+```
+
+Verify the sample message:
+
+```bash
+curl http://127.0.0.1:8000/api/streaming/status
+curl http://127.0.0.1:8000/api/equipment/CC-PUMP-03/health
+```
+
+Expected result: `processed_count` increments and `CC-PUMP-03` health shows `Demo NATS message: cooling pump motor current above threshold`.
+
 Publish a valid sensor reading and alert:
 
 ```bash
