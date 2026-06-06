@@ -63,7 +63,7 @@ Keep `docs/progress.md` updated at the end of each implementation session. Recor
 
 ## Project Rules And Hooks
 
-Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/hooks.md` for branch, pull request, verification, and demo handoff guardrails. In particular, do not commit or push directly to `main`; use a feature branch and raise a pull request targeting `main`.
+Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/hooks.md` for branch, pull request, verification, notification, and demo handoff guardrails. In particular, do not commit or push directly to `main`; use a feature branch and raise a pull request targeting `main`. Send a desktop notification whenever a requested task is complete; if notification delivery fails, mention that in the final response.
 
 ## Latest Session Progress
 
@@ -76,3 +76,4 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Implemented the missing-feature pass on branch `feat/learning-ingestion-ui`: frontend ingestion controls, full recommendation detail visibility, detailed engineer feedback capture, and feedback reuse in future recommendations and prediction drivers. Tests/build passed; browser DOM verification passed; screenshot capture timed out.
 - Added `docs/goal-tracker.md` as the standalone goal ledger after merging PR #4, preserving the branch/PR workflow.
 - Refreshed `README.md` and `docs/architecture.md` after merging PR #5 so user-facing and system architecture docs match the current ingestion, LLM, feedback-learning, and schema behavior.
+- Added a durable completion-notification rule requiring a desktop notification at the end of every completed task.
