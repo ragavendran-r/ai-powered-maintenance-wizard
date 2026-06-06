@@ -18,6 +18,7 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 - Structured JSON record ingestion for equipment, alerts, spares, sensor readings, and maintenance history.
 - Optional async IoT streaming ingestion via NATS JetStream for plant applications and edge gateways.
 - Engineer feedback capture with equipment-linked root cause, action, outcome, and notes reused in later recommendations and prediction drivers.
+- Planned authentication and role-based authorization for steel-plant users is tracked in `docs/auth-authorization-plan.md`.
 - Backend and frontend tests for core prototype behavior.
 
 ## Decision-Support Features
@@ -43,6 +44,7 @@ docs/                 Architecture, planning, goal tracking, and progress docs
 Important docs:
 
 - `docs/architecture.md`: system architecture and data flow.
+- `docs/auth-authorization-plan.md`: planned local login, roles, permissions, and test strategy.
 - `docs/goal-tracker.md`: durable goal ledger from project start.
 - `docs/progress.md`: session-level progress notes and verification history.
 - `docs/demo_script.md`: suggested demo walkthrough.
@@ -156,6 +158,12 @@ NATS JetStream streaming ingestion is disabled by default. Set `STREAMING_ENABLE
 
 The current SQLite schema version is `3`. Lightweight startup migrations add `feedback.equipment_id` and create `streaming_messages` for older local databases. Full migration tooling is still a production hardening item.
 
+## Authentication And Authorization Roadmap
+
+G-013 will add local user login and role-based authorization before the app is exposed to broader plant users. The planned v1 uses SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI role guards, and React role-aware navigation.
+
+Planned roles are `admin`, `maintenance_engineer`, `reliability_engineer`, `planner`, `operator`, and API-only `iot_service`. The implementation will keep `/api/health` and `/api/auth/login` public, then protect maintenance data, ingestion, diagnosis, reports, feedback, streaming status, and user management according to the matrix in `docs/auth-authorization-plan.md`.
+
 ## LLM And Learning Behavior
 
 LLMs are invoked only through recommendation generation, which is used by diagnosis, chat, and report flows. They are not used for raw ingestion, anomaly detection, risk scoring, RUL calculation, or feedback storage.
@@ -200,3 +208,4 @@ Update `docs/progress.md` at the end of each implementation session with complet
 - Hackathon packaging guide: `docs/submission-guide.md`
 - Production hardening notes: `docs/production-hardening.md`
 - IoT streaming ingestion plan: `docs/iot-streaming-ingestion-plan.md`
+- Authentication and authorization plan: `docs/auth-authorization-plan.md`
