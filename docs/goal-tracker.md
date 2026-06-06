@@ -264,6 +264,25 @@ Verification recorded:
 
 Status: `Complete`
 
+### G-012: NATS JetStream IoT Streaming Ingestion
+
+Requested outcome:
+
+- Enable async streaming messages from steel-plant IoT applications as an ingestion source.
+- Use an appropriate production-ready broker; NATS JetStream is selected for the first implementation.
+- First fix visibility of the two newly added assets in the UI.
+
+Planned delivery:
+
+- Document the NATS JetStream ingestion goal and architecture.
+- Make the left-nav priority asset list explicitly show all five tracked assets.
+- Add a backend streaming ingestion worker using a durable NATS JetStream pull consumer.
+- Validate message envelopes, persist supported payloads through existing structured ingestion paths, and route invalid messages to a dead-letter subject.
+- Add streaming status visibility in the API and frontend Ingestion view.
+- Add backend/frontend tests and live verification.
+
+Status: `In Progress`
+
 ## Maintenance Rules For This File
 
 - Add a new goal entry whenever the user asks to create or pursue a new multi-step goal.

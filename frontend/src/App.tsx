@@ -243,24 +243,26 @@ export function App() {
           </nav>
           <div className="sectionHeader compactHeader">
             <Wrench size={18} />
-            <h2>Priority Assets</h2>
+            <h2>Priority Assets ({dashboard.highest_risk_equipment.length})</h2>
           </div>
-          {dashboard.highest_risk_equipment.map((item) => (
-            <button
-              className={`assetRow ${item.equipment.id === selectedEquipment ? 'selected' : ''}`}
-              key={item.equipment.id}
-              onClick={() => {
-                setSelectedEquipment(item.equipment.id)
-                setActiveView('dashboard')
-              }}
-            >
-              <span>
-                <strong>{item.equipment.name}</strong>
-                <small>{item.equipment.area}</small>
-              </span>
-              <span className={`riskBadge ${item.risk_level}`}>{item.risk_level}</span>
-            </button>
-          ))}
+          <div className="assetListScroller" aria-label="Tracked priority assets">
+            {dashboard.highest_risk_equipment.map((item) => (
+              <button
+                className={`assetRow ${item.equipment.id === selectedEquipment ? 'selected' : ''}`}
+                key={item.equipment.id}
+                onClick={() => {
+                  setSelectedEquipment(item.equipment.id)
+                  setActiveView('dashboard')
+                }}
+              >
+                <span>
+                  <strong>{item.equipment.name}</strong>
+                  <small>{item.equipment.area}</small>
+                </span>
+                <span className={`riskBadge ${item.risk_level}`}>{item.risk_level}</span>
+              </button>
+            ))}
+          </div>
         </aside>
 
         {activeView === 'dashboard' ? (
