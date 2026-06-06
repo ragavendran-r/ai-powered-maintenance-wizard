@@ -13,6 +13,8 @@ The current slice includes:
 - Provider-agnostic LLM adapters for OpenAI and Ollama with structured JSON validation and deterministic fallback reasoning.
 - Markdown maintenance report export.
 - File upload ingestion for text/Markdown/CSV/log/JSON and PDF documents.
+- Frontend ingestion panel for document uploads and JSON document/record imports.
+- Engineer feedback capture with equipment-linked root cause, action, outcome, and notes reused in later recommendations and prediction drivers.
 - Backend and frontend tests for core prototype behavior.
 
 ## Project Layout
@@ -114,7 +116,9 @@ npm run build
 3. Open the dashboard and review high-risk assets.
 4. Select the hot strip mill main drive.
 5. Ask why the drive is vibrating or run diagnosis.
-6. Review sensor anomalies, cited evidence, immediate actions, spares strategy, feedback controls, and Markdown report export.
+6. Review sensor anomalies, cited evidence, root causes, immediate and planned actions, spares strategy, feedback controls, and Markdown report export.
+7. Import an SOP/manual/log through the ingestion panel or paste JSON records/documents.
+8. Submit detailed feedback with actual root cause, action taken, and outcome; run diagnosis again to see learning notes included.
 
 ## Progress Tracking
 

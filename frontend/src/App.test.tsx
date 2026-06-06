@@ -75,6 +75,7 @@ const recommendation = {
   immediate_actions: ['Reduce load or schedule controlled shutdown.'],
   planned_actions: ['Trend the abnormal signal.'],
   spares_strategy: ['Review Drive end spherical roller bearing: 0 on hand, 21 day lead time.'],
+  learning_notes: ['corrected recommendation feedback; actual root cause: Loose foundation bolt resonance'],
   evidence: [
     {
       source_type: 'sop',
@@ -97,6 +98,17 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/diagnose')) {
         return Promise.resolve(new Response(JSON.stringify(recommendation), { status: 200 }))
+      }
+      if (url.endsWith('/api/ingest/document-file')) {
+        return Promise.resolve(new Response(JSON.stringify({ status: 'stored', documents: 1 }), { status: 200 }))
+      }
+      if (url.endsWith('/api/ingest/documents')) {
+        return Promise.resolve(new Response(JSON.stringify({ status: 'stored', documents: 1 }), { status: 200 }))
+      }
+      if (url.endsWith('/api/ingest/records')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'stored', counts: { alerts: 1, equipment: 0 } }), { status: 200 }),
+        )
       }
       if (url.endsWith('/feedback')) {
         return Promise.resolve(new Response(JSON.stringify({ stored: true }), { status: 200 }))
@@ -129,10 +141,77 @@ describe('Maintenance Wizard dashboard', () => {
     await waitFor(() => {
       expect(screen.getByText('Reduce load or schedule controlled shutdown.')).toBeInTheDocument()
     })
+    expect(screen.getByText('Bearing wear')).toBeInTheDocument()
+    expect(screen.getByText('Trend the abnormal signal.')).toBeInTheDocument()
+    expect(screen.getByText('Review Drive end spherical roller bearing: 0 on hand, 21 day lead time.')).toBeInTheDocument()
+    expect(screen.getByText('23 days')).toBeInTheDocument()
+    expect(screen.getByText('77%')).toBeInTheDocument()
+    expect(screen.getByText('corrected recommendation feedback; actual root cause: Loose foundation bolt resonance')).toBeInTheDocument()
     expect(screen.getByText('Hot Strip Mill Main Drive Vibration SOP')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /export report/i })).toHaveAttribute(
       'href',
       'http://localhost:8000/api/reports/RM-DRIVE-01/markdown',
+    )
+  })
+
+  it('stores detailed engineer feedback for learning', async () => {
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('Diagnose'))
+    await screen.findByText('Actual Root Cause')
+    fireEvent.change(screen.getByLabelText('Actual Root Cause'), { target: { value: 'Loose foundation bolt resonance' } })
+    fireEvent.change(screen.getByLabelText('Action Taken'), { target: { value: 'Retorqued foundation bolts' } })
+    fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'Vibration normalized' } })
+    fireEvent.click(screen.getByText('Correct'))
+
+    await waitFor(() => {
+      expect(screen.getByText('corrected feedback stored')).toBeInTheDocument()
+    })
+    const feedbackCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => url.toString().endsWith('/feedback'))
+    expect(JSON.parse((feedbackCall?.[1] as RequestInit).body as string)).toMatchObject({
+      equipment_id: 'RM-DRIVE-01',
+      status: 'corrected',
+      actual_root_cause: 'Loose foundation bolt resonance',
+      action_taken: 'Retorqued foundation bolts',
+      outcome: 'Vibration normalized',
+    })
+  })
+
+  it('uploads document files from the ingestion panel', async () => {
+    render(<App />)
+
+    const file = new File(['Inspect bearing housing when vibration increases.'], 'uploaded_sop.txt', { type: 'text/plain' })
+    fireEvent.change(await screen.findByLabelText('Ingestion file'), { target: { files: [file] } })
+    fireEvent.click(screen.getByRole('button', { name: /upload/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Stored 1 document')).toBeInTheDocument()
+    })
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:8000/api/ingest/document-file',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+    )
+  })
+
+  it('imports document JSON from the ingestion panel', async () => {
+    render(<App />)
+
+    fireEvent.change(await screen.findByLabelText('Ingestion JSON'), {
+      target: {
+        value:
+          '{"documents":[{"id":"DOC-UI","source_type":"sop","equipment_id":"RM-DRIVE-01","title":"UI SOP","content":"Check vibration."}]}',
+      },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /import json/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Stored 1 document')).toBeInTheDocument()
+    })
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:8000/api/ingest/documents',
+      expect.objectContaining({ method: 'POST' }),
     )
   })
 })

@@ -100,6 +100,7 @@ SCHEMA_STATEMENTS = [
     CREATE TABLE IF NOT EXISTS feedback (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         recommendation_id TEXT NOT NULL,
+        equipment_id TEXT,
         status TEXT NOT NULL,
         corrected_diagnosis TEXT,
         actual_root_cause TEXT,
@@ -111,7 +112,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 def get_database_path() -> Path:
@@ -135,6 +136,7 @@ def initialize_database(seed: bool = True) -> None:
     with connect() as connection:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
+        _ensure_column(connection, "feedback", "equipment_id", "TEXT")
         connection.execute(
             """
             INSERT INTO schema_metadata (key, value)
@@ -241,3 +243,9 @@ def _db_value(value: Any) -> Any:
     if isinstance(value, (dict, list)):
         return json.dumps(value)
     return value
+
+
+def _ensure_column(connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    existing = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

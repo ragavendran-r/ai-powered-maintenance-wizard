@@ -24,7 +24,8 @@ flowchart LR
   diagnosis --> recommendations["Recommendation Service<br/>Root causes, actions, spares, evidence, confidence"]
 
   recommendations --> report
-  feedback --> learning["Future Learning Loop<br/>Outcome and usefulness signals"]
+  feedback --> learning["Learning Signals<br/>Root cause, action, outcome, usefulness"]
+  learning --> diagnosis
 
   dashboard --> repo["Repository Layer"]
   retrieval --> repo
@@ -51,7 +52,7 @@ flowchart LR
 - Retrieval service: local chunk index persisted in SQLite with deterministic hashed embeddings and lexical scoring.
 - Risk service: deterministic alert severity, asset criticality, spares constraints, and event-history scoring.
 - Anomaly service: rolling-baseline and z-score analysis over persisted sensor readings.
-- Recommendation service: combines retrieved evidence, risk scoring, prediction, and LLM-adapter context.
+- Recommendation service: combines retrieved evidence, risk scoring, prediction, prior engineer feedback, and LLM-adapter context.
 - Report service: formats recommendations as structured Markdown for supervisor handoff or demo export.
 - LLM adapter: common structured interface for mock, OpenAI-compatible chat completions, and Ollama chat providers.
 
@@ -64,9 +65,9 @@ flowchart LR
 5. Chat or diagnosis requests trigger local retrieval over persisted document chunks plus matching maintenance history.
 6. Anomaly service evaluates sensor readings by signal using rolling baseline, z-score, threshold breach, and trend delta.
 7. Risk and prediction services combine alerts, anomaly findings, asset criticality, spares constraints, and history to compute health score, risk level, failure probability, and estimated RUL.
-8. Recommendation service requests structured LLM context when configured, validates it, merges safe suggestions with deterministic fallback actions, and returns diagnosis, root causes, actions, spares strategy, confidence, and evidence.
+8. Recommendation service requests structured LLM context when configured, validates it, merges safe suggestions with deterministic fallback actions and prior engineer feedback, and returns diagnosis, root causes, actions, spares strategy, learning notes, confidence, and evidence.
 9. Report service converts recommendations into Markdown with diagnosis, actions, spares strategy, evidence, and summary.
-10. Feedback is stored in SQLite for future learning-loop integration.
+10. Feedback is stored in SQLite and reused in future recommendation prompts, deterministic action/root-cause ranking, learning notes, and prediction drivers.
 
 ## Current Prototype Limits
 

@@ -192,6 +192,7 @@ def save_feedback(recommendation_id: str, feedback: dict[str, Any]) -> None:
             """
             INSERT INTO feedback (
                 recommendation_id,
+                equipment_id,
                 status,
                 corrected_diagnosis,
                 actual_root_cause,
@@ -199,10 +200,11 @@ def save_feedback(recommendation_id: str, feedback: dict[str, Any]) -> None:
                 outcome,
                 notes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 recommendation_id,
+                feedback.get("equipment_id"),
                 feedback["status"],
                 feedback.get("corrected_diagnosis"),
                 feedback.get("actual_root_cause"),
@@ -213,7 +215,16 @@ def save_feedback(recommendation_id: str, feedback: dict[str, Any]) -> None:
         )
 
 
-def list_feedback() -> list[dict[str, Any]]:
+def list_feedback(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
+    if equipment_id:
+        return _fetch_all(
+            """
+            SELECT * FROM feedback
+            WHERE equipment_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (equipment_id,),
+        )
     return _fetch_all("SELECT * FROM feedback ORDER BY created_at DESC, id DESC")
 
 
