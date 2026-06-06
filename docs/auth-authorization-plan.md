@@ -6,6 +6,8 @@ Implement `G-013: User Login And Role-Based Access Control` so steel-plant users
 
 The first implementation uses local SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI endpoint guards, and React UI role gating. External SSO remains a future production hardening option.
 
+Implementation status: delivered in G-013 with schema version `4`, seeded demo users, protected API endpoints, React login/session handling, role-gated navigation/actions, admin user management, and backend/frontend tests.
+
 ## Role Model
 
 | Role | Intended User | Access |

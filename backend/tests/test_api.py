@@ -17,6 +17,14 @@ from app.services.retrieval import retrieve_evidence
 
 
 client = TestClient(app)
+DEMO_PASSWORD = "DemoPass123!"
+
+
+def auth_headers(email: str = "admin@plant.local", password: str = DEMO_PASSWORD) -> dict[str, str]:
+    response = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert response.status_code == 200, response.text
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
 
 class _FakeNatsMessage:
@@ -54,14 +62,114 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "3"
+    assert status["schema_version"] == "4"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["document_chunks"] >= 8
     assert "streaming_messages" in status["counts"]
+    assert status["counts"]["users"] == 6
+
+
+def test_login_returns_bearer_token_and_current_user():
+    response = client.post(
+        "/api/auth/login",
+        json={"email": "admin@plant.local", "password": DEMO_PASSWORD},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["token_type"] == "bearer"
+    assert payload["access_token"]
+    assert payload["expires_in"] > 0
+    assert payload["user"]["role"] == "admin"
+    user = repository.get_user_by_email("admin@plant.local")
+    assert user
+    assert user["password_hash"] != DEMO_PASSWORD
+
+    me_response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {payload['access_token']}"})
+    assert me_response.status_code == 200
+    assert me_response.json()["email"] == "admin@plant.local"
+
+
+def test_login_rejects_invalid_password():
+    response = client.post(
+        "/api/auth/login",
+        json={"email": "admin@plant.local", "password": "wrong-password"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid email or password"
+
+
+def test_protected_endpoint_requires_token():
+    response = client.get("/api/dashboard/summary")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication required"
+
+
+def test_operator_can_read_but_cannot_diagnose_or_ingest():
+    headers = auth_headers("operator@plant.local")
+
+    dashboard_response = client.get("/api/dashboard/summary", headers=headers)
+    diagnose_response = client.post("/api/diagnose", json={"equipment_id": "RM-DRIVE-01"}, headers=headers)
+    ingest_response = client.post("/api/ingest/records", json={"alerts": []}, headers=headers)
+
+    assert dashboard_response.status_code == 200
+    assert diagnose_response.status_code == 403
+    assert ingest_response.status_code == 403
+
+
+def test_reliability_engineer_can_ingest_and_view_streaming_status():
+    headers = auth_headers("reliability@plant.local")
+
+    ingest_response = client.post("/api/ingest/records", json={"alerts": []}, headers=headers)
+    streaming_response = client.get("/api/streaming/status", headers=headers)
+
+    assert ingest_response.status_code == 200
+    assert streaming_response.status_code == 200
+
+
+def test_admin_manages_users_and_deactivated_user_cannot_login():
+    headers = auth_headers()
+
+    create_response = client.post(
+        "/api/users",
+        json={
+            "email": "contractor@plant.local",
+            "display_name": "Contractor Planner",
+            "role": "planner",
+            "password": "Contractor123!",
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 201
+    user = create_response.json()
+    assert user["role"] == "planner"
+
+    update_response = client.patch(
+        f"/api/users/{user['id']}",
+        json={"is_active": False, "display_name": "Inactive Contractor"},
+        headers=headers,
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["is_active"] is False
+
+    login_response = client.post(
+        "/api/auth/login",
+        json={"email": "contractor@plant.local", "password": "Contractor123!"},
+    )
+    assert login_response.status_code == 401
+
+    reset_response = client.post(
+        f"/api/users/{user['id']}/reset-password",
+        json={"password": "NewContractor123!"},
+        headers=headers,
+    )
+    assert reset_response.status_code == 200
 
 
 def test_dashboard_summary_contains_sample_equipment():
-    response = client.get("/api/dashboard/summary")
+    response = client.get("/api/dashboard/summary", headers=auth_headers())
     assert response.status_code == 200
     payload = response.json()
     assert payload["equipment_count"] == 5
@@ -72,7 +180,7 @@ def test_dashboard_summary_contains_sample_equipment():
 
 
 def test_streaming_status_is_disabled_by_default():
-    response = client.get("/api/streaming/status")
+    response = client.get("/api/streaming/status", headers=auth_headers())
     assert response.status_code == 200
     payload = response.json()
     assert payload["enabled"] is False
@@ -105,7 +213,7 @@ def test_iot_sensor_message_persists_and_is_idempotent():
     readings = repository.list_sensor_readings("CC-PUMP-03", "cooling_water_flow")
     derived = [reading for reading in readings if reading["id"].startswith("SR-IOT-")]
     assert len(derived) == 1
-    anomalies = client.get("/api/equipment/CC-PUMP-03/anomalies").json()
+    anomalies = client.get("/api/equipment/CC-PUMP-03/anomalies", headers=auth_headers()).json()
     assert any(item["signal"] == "cooling_water_flow" for item in anomalies)
 
 
@@ -130,7 +238,7 @@ def test_iot_alert_message_persists_and_affects_health():
     result = process_iot_message(message, "steelplant.iot.alerts")
 
     assert result.status == "processed"
-    health = client.get("/api/equipment/CC-PUMP-03/health").json()
+    health = client.get("/api/equipment/CC-PUMP-03/health", headers=auth_headers()).json()
     assert any(alert["message"] == "Cooling pump motor current above IoT gateway threshold" for alert in health["active_alerts"])
 
 
@@ -236,7 +344,8 @@ def test_added_assets_have_health_prediction_and_retrieval(
     query: str,
     expected_document: str,
 ):
-    health_response = client.get(f"/api/equipment/{equipment_id}/health")
+    headers = auth_headers()
+    health_response = client.get(f"/api/equipment/{equipment_id}/health", headers=headers)
     assert health_response.status_code == 200
     health = health_response.json()
     assert health["active_alerts"]
@@ -244,13 +353,13 @@ def test_added_assets_have_health_prediction_and_retrieval(
     assert any(item["signal"] == expected_signal for item in health["anomalies"])
     assert health["risk_level"] in {"high", "critical"}
 
-    prediction_response = client.post("/api/predict", json={"equipment_id": equipment_id})
+    prediction_response = client.post("/api/predict", json={"equipment_id": equipment_id}, headers=headers)
     assert prediction_response.status_code == 200
     prediction = prediction_response.json()
     assert prediction["failure_probability"] > 0.5
     assert any("z-score" in driver for driver in prediction["drivers"])
 
-    diagnosis_response = client.post("/api/diagnose", json={"equipment_id": equipment_id})
+    diagnosis_response = client.post("/api/diagnose", json={"equipment_id": equipment_id}, headers=headers)
     assert diagnosis_response.status_code == 200
     diagnosis = diagnosis_response.json()
     assert diagnosis["evidence"]
@@ -264,6 +373,7 @@ def test_diagnosis_returns_evidence_and_actions():
     response = client.post(
         "/api/diagnose",
         json={"equipment_id": "RM-DRIVE-01", "alert_id": "ALT-1001"},
+        headers=auth_headers(),
     )
     assert response.status_code == 200
     payload = response.json()
@@ -277,6 +387,7 @@ def test_chat_returns_recommendation():
     response = client.post(
         "/api/chat",
         json={"equipment_id": "RM-DRIVE-01", "message": "Why is the mill drive vibrating?"},
+        headers=auth_headers(),
     )
     assert response.status_code == 200
     payload = response.json()
@@ -295,6 +406,7 @@ def test_feedback_is_accepted():
             "outcome": "Vibration reduced after retightening",
             "notes": "Action matched inspection finding.",
         },
+        headers=auth_headers("maintenance@plant.local"),
     )
     assert response.status_code == 200
     assert response.json()["stored"] is True
@@ -304,6 +416,7 @@ def test_feedback_is_accepted():
 
 
 def test_feedback_is_reused_in_future_recommendations():
+    headers = auth_headers("maintenance@plant.local")
     client.post(
         "/api/recommendations/rec-learning/feedback",
         json={
@@ -313,11 +426,13 @@ def test_feedback_is_reused_in_future_recommendations():
             "action_taken": "Retorque foundation bolts and recheck alignment",
             "outcome": "Vibration normalized after bolt retorque",
         },
+        headers=headers,
     )
 
     response = client.post(
         "/api/diagnose",
         json={"equipment_id": "RM-DRIVE-01", "alert_id": "ALT-1001"},
+        headers=headers,
     )
 
     assert response.status_code == 200
@@ -342,6 +457,7 @@ def test_document_ingestion_persists_to_repository():
                 }
             ]
         },
+        headers=auth_headers("reliability@plant.local"),
     )
     assert response.status_code == 200
     assert response.json()["documents"] == 1
@@ -362,6 +478,7 @@ def test_document_file_upload_persists_and_chunks_text():
                 "text/plain",
             )
         },
+        headers=auth_headers("reliability@plant.local"),
     )
     assert response.status_code == 200
     payload = response.json()
@@ -379,12 +496,14 @@ def test_document_file_upload_rejects_unsupported_type():
         "/api/ingest/document-file",
         data={"source_type": "manual", "equipment_id": "RM-DRIVE-01"},
         files={"file": ("image.bin", b"\x00\x01\x02", "application/octet-stream")},
+        headers=auth_headers("reliability@plant.local"),
     )
     assert response.status_code == 400
     assert "Unsupported document type" in response.json()["detail"]
 
 
 def test_record_ingestion_persists_alert_to_api():
+    headers = auth_headers("reliability@plant.local")
     response = client.post(
         "/api/ingest/records",
         json={
@@ -402,15 +521,16 @@ def test_record_ingestion_persists_alert_to_api():
                 }
             ]
         },
+        headers=headers,
     )
     assert response.status_code == 200
     assert response.json()["counts"]["alerts"] == 1
-    alerts = client.get("/api/alerts").json()
+    alerts = client.get("/api/alerts", headers=headers).json()
     assert any(alert["id"] == "ALT-TEST-3001" for alert in alerts)
 
 
 def test_sensor_readings_are_seeded_and_available():
-    response = client.get("/api/equipment/RM-DRIVE-01/sensor-readings")
+    response = client.get("/api/equipment/RM-DRIVE-01/sensor-readings", headers=auth_headers())
     assert response.status_code == 200
     readings = response.json()
     assert any(reading["signal"] == "drive_end_vibration" for reading in readings)
@@ -418,7 +538,7 @@ def test_sensor_readings_are_seeded_and_available():
 
 
 def test_anomaly_endpoint_detects_vibration_and_temperature():
-    response = client.get("/api/equipment/RM-DRIVE-01/anomalies")
+    response = client.get("/api/equipment/RM-DRIVE-01/anomalies", headers=auth_headers())
     assert response.status_code == 200
     anomalies = response.json()
     signals = {item["signal"] for item in anomalies}
@@ -428,7 +548,7 @@ def test_anomaly_endpoint_detects_vibration_and_temperature():
 
 
 def test_health_summary_includes_anomaly_findings():
-    response = client.get("/api/equipment/RM-DRIVE-01/health")
+    response = client.get("/api/equipment/RM-DRIVE-01/health", headers=auth_headers())
     assert response.status_code == 200
     payload = response.json()
     assert payload["anomalies"]
@@ -436,7 +556,7 @@ def test_health_summary_includes_anomaly_findings():
 
 
 def test_prediction_drivers_include_anomaly_explanations():
-    response = client.post("/api/predict", json={"equipment_id": "RM-DRIVE-01"})
+    response = client.post("/api/predict", json={"equipment_id": "RM-DRIVE-01"}, headers=auth_headers())
     assert response.status_code == 200
     payload = response.json()
     assert payload["failure_probability"] > 0.5
@@ -444,6 +564,7 @@ def test_prediction_drivers_include_anomaly_explanations():
 
 
 def test_prediction_drivers_include_feedback_history():
+    headers = auth_headers("maintenance@plant.local")
     client.post(
         "/api/recommendations/rec-prediction-feedback/feedback",
         json={
@@ -452,9 +573,10 @@ def test_prediction_drivers_include_feedback_history():
             "actual_root_cause": "Bearing cage defect confirmed by inspection",
             "outcome": "Bearing replacement scheduled for next outage",
         },
+        headers=headers,
     )
 
-    response = client.post("/api/predict", json={"equipment_id": "RM-DRIVE-01"})
+    response = client.post("/api/predict", json={"equipment_id": "RM-DRIVE-01"}, headers=headers)
 
     assert response.status_code == 200
     payload = response.json()
@@ -463,7 +585,7 @@ def test_prediction_drivers_include_feedback_history():
 
 
 def test_markdown_report_export_contains_actions_and_evidence():
-    response = client.get("/api/reports/RM-DRIVE-01/markdown")
+    response = client.get("/api/reports/RM-DRIVE-01/markdown", headers=auth_headers("planner@plant.local"))
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
     assert "Maintenance Decision Report: RM-DRIVE-01" in response.text

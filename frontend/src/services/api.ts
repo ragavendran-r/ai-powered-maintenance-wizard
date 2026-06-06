@@ -1,4 +1,34 @@
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
+export type UserRole =
+  | 'admin'
+  | 'maintenance_engineer'
+  | 'reliability_engineer'
+  | 'planner'
+  | 'operator'
+  | 'iot_service'
+
+export interface AuthUser {
+  id: string
+  email: string
+  display_name: string
+  role: UserRole
+  is_active: boolean
+  created_at?: string | null
+  updated_at?: string | null
+  last_login_at?: string | null
+}
+
+export interface AuthSession {
+  accessToken: string
+  user: AuthUser
+}
+
+export interface LoginResponse {
+  access_token: string
+  token_type: 'bearer'
+  expires_in: number
+  user: AuthUser
+}
 
 export interface Equipment {
   id: string
@@ -96,14 +126,59 @@ export interface ChatResponse {
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
+const AUTH_SESSION_KEY = 'maintenance_wizard_auth_session'
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+let authSession: AuthSession | null = loadStoredSession()
+let unauthorizedHandler: (() => void) | null = null
+
+export class ApiError extends Error {
+  status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
+export function loadStoredSession(): AuthSession | null {
+  try {
+    const value = window.sessionStorage.getItem(AUTH_SESSION_KEY)
+    return value ? (JSON.parse(value) as AuthSession) : null
+  } catch {
+    return null
+  }
+}
+
+export function storeSession(session: AuthSession | null) {
+  authSession = session
+  if (!session) {
+    window.sessionStorage.removeItem(AUTH_SESSION_KEY)
+    return
+  }
+  window.sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session))
+}
+
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  unauthorizedHandler = handler
+}
+
+function authHeaders(): Record<string, string> {
+  if (!authSession?.accessToken) return {}
+  return { Authorization: `Bearer ${authSession.accessToken}` }
+}
+
+async function request<T>(path: string, init?: RequestInit, includeAuth = true): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(includeAuth ? authHeaders() : {}),
+      ...(init?.headers ?? {}),
+    },
     ...init,
   })
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`)
+    if (response.status === 401 && includeAuth) unauthorizedHandler?.()
+    throw new ApiError(response.status, `Request failed: ${response.status}`)
   }
   return response.json() as Promise<T>
 }
@@ -111,12 +186,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 async function formRequest<T>(path: string, body: FormData): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
+    headers: authHeaders(),
     body,
   })
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`)
+    if (response.status === 401) unauthorizedHandler?.()
+    throw new ApiError(response.status, `Request failed: ${response.status}`)
   }
   return response.json() as Promise<T>
+}
+
+async function textRequest(path: string): Promise<string> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: authHeaders(),
+  })
+  if (!response.ok) {
+    if (response.status === 401) unauthorizedHandler?.()
+    throw new ApiError(response.status, `Request failed: ${response.status}`)
+  }
+  return response.text()
 }
 
 export interface DocumentIngestResponse {
@@ -149,7 +237,51 @@ export interface StreamingStatus {
   last_error?: string
 }
 
+export interface UserCreateRequest {
+  email: string
+  display_name: string
+  role: UserRole
+  password: string
+  is_active?: boolean
+}
+
+export interface UserUpdateRequest {
+  display_name?: string
+  role?: UserRole
+  is_active?: boolean
+}
+
 export const api = {
+  restoreSession: () => authSession,
+  setSession: storeSession,
+  onUnauthorized: setUnauthorizedHandler,
+  login: (email: string, password: string) =>
+    request<LoginResponse>(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      },
+      false,
+    ),
+  me: () => request<AuthUser>('/api/auth/me'),
+  logout: () => request<{ status: string }>('/api/auth/logout', { method: 'POST' }),
+  users: () => request<AuthUser[]>('/api/users'),
+  createUser: (payload: UserCreateRequest) =>
+    request<AuthUser>('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateUser: (userId: string, payload: UserUpdateRequest) =>
+    request<AuthUser>(`/api/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  resetUserPassword: (userId: string, password: string) =>
+    request<AuthUser>(`/api/users/${userId}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
   equipment: () => request<Equipment[]>('/api/equipment'),
   dashboard: () => request<DashboardSummary>('/api/dashboard/summary'),
   streamingStatus: () => request<StreamingStatus>('/api/streaming/status'),
@@ -200,7 +332,7 @@ export const api = {
         notes: details?.notes,
       }),
     }),
-  reportMarkdownUrl: (equipmentId: string) => `${API_BASE}/api/reports/${equipmentId}/markdown`,
+  reportMarkdown: (equipmentId: string) => textRequest(`/api/reports/${equipmentId}/markdown`),
 }
 
 export const fallbackDashboard: DashboardSummary = {

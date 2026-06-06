@@ -3,6 +3,14 @@ from pydantic import BaseModel, Field
 
 
 RiskLevel = Literal["low", "medium", "high", "critical"]
+UserRole = Literal[
+    "admin",
+    "maintenance_engineer",
+    "reliability_engineer",
+    "planner",
+    "operator",
+    "iot_service",
+]
 
 
 class Evidence(BaseModel):
@@ -189,3 +197,44 @@ class StreamingStatus(BaseModel):
     failed_count: int
     last_message_timestamp: Optional[str] = None
     last_error: Optional[str] = None
+
+
+class UserPublic(BaseModel):
+    id: str
+    email: str
+    display_name: str
+    role: UserRole
+    is_active: bool = True
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    last_login_at: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=1)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserPublic
+
+
+class UserCreateRequest(BaseModel):
+    email: str = Field(min_length=3)
+    display_name: str = Field(min_length=1)
+    role: UserRole
+    password: str = Field(min_length=8)
+    is_active: bool = True
+
+
+class UserUpdateRequest(BaseModel):
+    display_name: Optional[str] = Field(default=None, min_length=1)
+    role: Optional[UserRole] = None
+    is_active: Optional[bool] = None
+
+
+class PasswordResetRequest(BaseModel):
+    password: str = Field(min_length=8)

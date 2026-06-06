@@ -46,7 +46,7 @@ flowchart LR
   risk --> repo
   report --> repo
   feedback --> repo
-  repo --> sqlite[("SQLite Prototype Store<br/>Equipment, alerts, sensors, spares, history, documents, chunks, feedback, planned users")]
+  repo --> sqlite[("SQLite Prototype Store<br/>Equipment, alerts, sensors, spares, history, documents, chunks, feedback, users")]
 
   sample["Sample Steel Plant Fixture<br/>assets/sample_data/steel_plant_demo.json"] --> loader["Startup Seeder"]
   loader --> sqlite
@@ -60,7 +60,7 @@ flowchart LR
 ## Components
 
 - React frontend: operator dashboard, left-nav ingestion view, maintenance chat, asset detail, recommendation, report, and detailed feedback views.
-- Planned auth/RBAC layer: local login, JWT validation, current-user context, role guards, and role-aware navigation for admin, maintenance engineer, reliability engineer, planner, operator, and API-only IoT service users.
+- Auth/RBAC layer: local login, JWT validation, current-user context, role guards, and role-aware navigation for admin, maintenance engineer, reliability engineer, planner, operator, and API-only IoT service users.
 - FastAPI backend: HTTP API layer for dashboard data, ingestion, diagnosis, prediction, chat, reports, and feedback.
 - Async IoT streaming ingestion: optional NATS JetStream durable consumer for plant applications, PLC gateways, and historians that publish alerts, sensor readings, equipment, spares, and maintenance events.
 - Data services: seed SQLite from five sample steel-plant assets and expose repository functions for equipment, alerts, sensor readings, spares, maintenance history, documents, document chunks, and feedback.
@@ -74,7 +74,7 @@ flowchart LR
 
 ## API Surface
 
-- Planned authentication and authorization:
+- Authentication and authorization:
   - `POST /api/auth/login` returns a JWT bearer token for active users.
   - `GET /api/auth/me` returns the current authenticated user and role.
   - `POST /api/auth/logout` lets the frontend clear the current session.
@@ -103,7 +103,7 @@ flowchart LR
 3. Structured record ingestion upserts equipment, alerts, spares, sensor readings, and maintenance events.
 4. Optional NATS JetStream ingestion consumes plant IoT messages asynchronously and persists validated payloads through the same repository path.
 5. API endpoints read and write typed records through the repository layer.
-6. Planned auth/RBAC guards validate JWTs and role permissions before maintenance data or actions are served.
+6. Auth/RBAC guards validate JWTs and role permissions before maintenance data or actions are served.
 7. Dashboard and equipment endpoints expose plant health, the full priority-sorted asset list, asset risk, anomaly findings, alert context, and spares constraints.
 8. Chat or diagnosis requests trigger local retrieval over persisted document chunks plus matching maintenance history.
 9. Anomaly service evaluates sensor readings by signal using rolling baseline, z-score, threshold breach, and trend delta.
@@ -138,7 +138,7 @@ This is a prototype learning loop based on feedback reuse and ranking influence.
 - LLM providers are optional at runtime. Invalid provider responses, missing credentials, or network failures fall back to deterministic reasoning.
 - SQLite persistence is implemented for the prototype data model. A lightweight startup migration exists for `feedback.equipment_id`; full migration tooling is still a production hardening item.
 - NATS JetStream ingestion is implemented as an optional runtime path and requires an external NATS server when `STREAMING_ENABLED=true`.
-- Authentication and role-based authorization are planned in G-013 and documented in `docs/auth-authorization-plan.md`.
+- Authentication and role-based authorization use local SQLite users and JWT bearer tokens. Production SSO remains a hardening item.
 - Live LLM calls are available through provider adapters when configured; deterministic fallback output remains the default local-demo behavior.
 - Anomaly detection and RUL are heuristic and intended for demonstration until richer plant time-series data exists.
 - PDF extraction depends on embedded text; scanned PDFs would need OCR in a production version.

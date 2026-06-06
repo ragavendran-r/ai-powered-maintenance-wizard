@@ -1,7 +1,9 @@
 from typing import Any, Optional
 
 import sqlite3
+import uuid
 
+from app.core.security import hash_password
 from app.data.database import connect, initialize_database
 from app.services.vector_index import build_chunks_for_document
 
@@ -228,6 +230,132 @@ def list_feedback(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
     return _fetch_all("SELECT * FROM feedback ORDER BY created_at DESC, id DESC")
 
 
+def get_user_by_id(user_id: str) -> Optional[dict[str, Any]]:
+    return _normalize_user(_fetch_one("SELECT * FROM users WHERE id = ?", (user_id,)))
+
+
+def get_user_by_email(email: str) -> Optional[dict[str, Any]]:
+    return _normalize_user(_fetch_one("SELECT * FROM users WHERE lower(email) = lower(?)", (email,)))
+
+
+def list_users() -> list[dict[str, Any]]:
+    return [
+        _normalize_user(user) or user
+        for user in _fetch_all("SELECT * FROM users ORDER BY role ASC, display_name ASC")
+    ]
+
+
+def create_user(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    user_id = payload.get("id") or f"USER-{uuid.uuid4().hex[:12].upper()}"
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO users (
+                id,
+                email,
+                display_name,
+                role,
+                password_hash,
+                is_active
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                payload["email"].strip().lower(),
+                payload["display_name"].strip(),
+                payload["role"],
+                hash_password(payload["password"]),
+                1 if payload.get("is_active", True) else 0,
+            ),
+        )
+    user = get_user_by_id(user_id)
+    if not user:
+        raise RuntimeError("User was not persisted")
+    return user
+
+
+def update_user(user_id: str, payload: dict[str, Any]) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    existing = get_user_by_id(user_id)
+    if not existing:
+        return None
+    fields: list[str] = []
+    values: list[Any] = []
+    if payload.get("display_name") is not None:
+        fields.append("display_name = ?")
+        values.append(payload["display_name"].strip())
+    if payload.get("role") is not None:
+        fields.append("role = ?")
+        values.append(payload["role"])
+    if payload.get("is_active") is not None:
+        fields.append("is_active = ?")
+        values.append(1 if payload["is_active"] else 0)
+    if not fields:
+        return existing
+    fields.append("updated_at = CURRENT_TIMESTAMP")
+    values.append(user_id)
+    with connect() as connection:
+        connection.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", values)
+    return get_user_by_id(user_id)
+
+
+def reset_user_password(user_id: str, password: str) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    if not get_user_by_id(user_id):
+        return None
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE users
+            SET password_hash = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (hash_password(password), user_id),
+        )
+    return get_user_by_id(user_id)
+
+
+def record_user_login(user_id: str) -> None:
+    ensure_ready()
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE users
+            SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (user_id,),
+        )
+
+
+def save_auth_audit_event(
+    event_type: str,
+    success: bool,
+    email: Optional[str] = None,
+    user_id: Optional[str] = None,
+    role: Optional[str] = None,
+    detail: Optional[str] = None,
+) -> None:
+    ensure_ready()
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO auth_audit_events (
+                event_type,
+                user_id,
+                email,
+                role,
+                success,
+                detail
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (event_type, user_id, email, role, 1 if success else 0, detail),
+        )
+
+
 def get_streaming_message(message_id: str) -> Optional[dict[str, Any]]:
     return _fetch_one("SELECT * FROM streaming_messages WHERE message_id = ?", (message_id,))
 
@@ -263,6 +391,14 @@ def save_streaming_message(
             """,
             (message_id, source, message_type, subject, status, error),
         )
+
+
+def _normalize_user(user: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    if not user:
+        return None
+    normalized = dict(user)
+    normalized["is_active"] = bool(normalized["is_active"])
+    return normalized
 
 
 def _fetch_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
