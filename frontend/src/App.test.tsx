@@ -131,6 +131,8 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Sensor Anomalies')).toBeInTheDocument()
     expect(screen.getByText('drive end vibration')).toBeInTheDocument()
     expect(screen.getByText('z 8.35 · baseline 5.24 mm/s')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ingestion' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Ingestion file')).not.toBeInTheDocument()
   })
 
   it('runs diagnosis and exposes report export link', async () => {
@@ -182,6 +184,7 @@ describe('Maintenance Wizard dashboard', () => {
   it('uploads document files from the ingestion panel', async () => {
     render(<App />)
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Ingestion' }))
     const file = new File(['Inspect bearing housing when vibration increases.'], 'uploaded_sop.txt', { type: 'text/plain' })
     fireEvent.change(await screen.findByLabelText('Ingestion file'), { target: { files: [file] } })
     fireEvent.click(screen.getByRole('button', { name: /upload/i }))
@@ -198,6 +201,7 @@ describe('Maintenance Wizard dashboard', () => {
   it('imports document JSON from the ingestion panel', async () => {
     render(<App />)
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Ingestion' }))
     fireEvent.change(await screen.findByLabelText('Ingestion JSON'), {
       target: {
         value:

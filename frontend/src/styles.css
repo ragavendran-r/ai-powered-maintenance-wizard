@@ -129,7 +129,7 @@ h3 {
   grid-template-columns: 280px minmax(420px, 1fr) 380px;
 }
 
-.assetList,
+.leftNav,
 .detailPanel,
 .recommendationPanel {
   background: #ffffff;
@@ -138,11 +138,48 @@ h3 {
   padding: 16px;
 }
 
+.workArea.ingestionMode {
+  grid-template-columns: 280px minmax(0, 1fr);
+}
+
+.primaryNav {
+  border-bottom: 1px solid #dfe6ea;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+}
+
+.navButton {
+  align-items: center;
+  background: transparent;
+  border: 1px solid #dfe6ea;
+  border-radius: 6px;
+  color: #25323b;
+  display: flex;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.navButton.selected {
+  background: #edf6f8;
+  border-color: #8fc3cf;
+  color: #174f58;
+  font-weight: 700;
+}
+
 .sectionHeader {
   align-items: center;
   display: flex;
   gap: 8px;
   margin-bottom: 14px;
+}
+
+.compactHeader {
+  margin-bottom: 10px;
 }
 
 .assetRow {
@@ -257,10 +294,28 @@ h3 {
   padding-top: 16px;
 }
 
-.ingestionPanel {
-  border-top: 1px solid #dfe6ea;
-  margin-top: 18px;
-  padding-top: 16px;
+.ingestionView {
+  align-content: start;
+}
+
+.ingestionContext {
+  background: #f4f7f8;
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 12px;
+}
+
+.ingestionContext span,
+.ingestionContext small {
+  color: #60717c;
+  font-size: 12px;
+}
+
+.ingestionContext span {
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .ingestionGrid {

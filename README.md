@@ -7,7 +7,7 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 ## Current Capabilities
 
 - FastAPI backend with health, dashboard, equipment health, alert, chat, diagnosis, prediction, report, and feedback endpoints.
-- React + TypeScript + Vite frontend for a maintenance dashboard, engineer chat, ingestion panel, recommendation panel, report export, and detailed feedback controls.
+- React + TypeScript + Vite frontend for a maintenance dashboard, left-nav ingestion view, engineer chat, recommendation panel, report export, and detailed feedback controls.
 - Sample steel-plant data for a hot strip mill drive, blast furnace blower, and caster cooling pump.
 - SQLite-backed persistence seeded from sample data for equipment, alerts, sensor readings, spares, maintenance events, documents, document chunks, and feedback.
 - Local document chunk index with deterministic embeddings for offline retrieval-augmented answers.
@@ -165,7 +165,7 @@ npm run build
 4. Select the hot strip mill main drive.
 5. Ask why the drive is vibrating or run diagnosis.
 6. Review sensor anomalies, cited evidence, root causes, immediate and planned actions, spares strategy, feedback controls, and Markdown report export.
-7. Import an SOP/manual/log through the ingestion panel or paste JSON records/documents.
+7. Open the Ingestion view from the left navigation and import an SOP/manual/log or paste JSON records/documents.
 8. Submit detailed feedback with actual root cause, action taken, and outcome; run diagnosis again to see learning notes included.
 
 ## Progress Tracking

@@ -18,9 +18,11 @@ import {
 import { api, fallbackDashboard, type DashboardSummary, type Recommendation } from './services/api'
 
 const riskRank = { low: 1, medium: 2, high: 3, critical: 4 }
+type AppView = 'dashboard' | 'ingestion'
 
 export function App() {
   const [dashboard, setDashboard] = useState<DashboardSummary>(fallbackDashboard)
+  const [activeView, setActiveView] = useState<AppView>('dashboard')
   const [selectedEquipment, setSelectedEquipment] = useState('RM-DRIVE-01')
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null)
   const [question, setQuestion] = useState('Why is the hot strip mill main drive vibrating?')
@@ -143,6 +145,70 @@ export function App() {
     }
   }
 
+  const ingestionView = (
+    <section className="detailPanel ingestionView">
+      <div className="sectionHeader">
+        <Upload size={18} />
+        <h2>Ingestion</h2>
+      </div>
+      <div className="ingestionContext">
+        <span>Target asset</span>
+        <strong>{selectedHealth?.equipment.name}</strong>
+        <small>{selectedEquipment}</small>
+      </div>
+      <div className="ingestionGrid">
+        <label className="field">
+          <span>Source</span>
+          <select value={ingestSourceType} onChange={(event) => setIngestSourceType(event.target.value)}>
+            <option value="manual">Manual</option>
+            <option value="sop">SOP</option>
+            <option value="log">Log</option>
+            <option value="alert">Alert</option>
+            <option value="spares">Spares</option>
+            <option value="history">History</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Title</span>
+          <input value={ingestTitle} onChange={(event) => setIngestTitle(event.target.value)} />
+        </label>
+        <label className="field fileField">
+          <span>File</span>
+          <input
+            aria-label="Ingestion file"
+            type="file"
+            accept=".txt,.md,.markdown,.csv,.log,.json,.pdf,text/*,application/pdf"
+            onChange={(event) => setIngestFile(event.target.files?.[0] ?? null)}
+          />
+        </label>
+        <button onClick={ingestSelectedFile} title="Upload maintenance document">
+          <Upload size={16} />
+          Upload
+        </button>
+      </div>
+      <div className="jsonIngest">
+        <label className="field">
+          <span>Payload</span>
+          <select value={jsonMode} onChange={(event) => setJsonMode(event.target.value as 'documents' | 'records')}>
+            <option value="documents">Documents</option>
+            <option value="records">Records</option>
+          </select>
+        </label>
+        <textarea
+          aria-label="Ingestion JSON"
+          value={jsonPayload}
+          onChange={(event) => setJsonPayload(event.target.value)}
+          placeholder={jsonMode === 'documents' ? '{"documents":[...]}' : '{"alerts":[...],"sensor_readings":[...]}'}
+        />
+        <button className="textButton" onClick={ingestJsonPayload}>
+          <FileJson size={16} />
+          Import JSON
+        </button>
+      </div>
+      {ingestionMessage && <p className="inlineStatus">{ingestionMessage}</p>}
+    </section>
+  )
+
   return (
     <main className="appShell">
       <header className="topBar">
@@ -163,9 +229,19 @@ export function App() {
         <Metric icon={<Activity />} label="Assets Tracked" value={dashboard.equipment_count.toString()} />
       </section>
 
-      <section className="workArea">
-        <aside className="assetList" aria-label="Highest risk equipment">
-          <div className="sectionHeader">
+      <section className={`workArea ${activeView === 'ingestion' ? 'ingestionMode' : ''}`}>
+        <aside className="leftNav" aria-label="Maintenance navigation">
+          <nav className="primaryNav" aria-label="Primary navigation">
+            <button className={`navButton ${activeView === 'dashboard' ? 'selected' : ''}`} onClick={() => setActiveView('dashboard')}>
+              <ClipboardList size={17} />
+              Dashboard
+            </button>
+            <button className={`navButton ${activeView === 'ingestion' ? 'selected' : ''}`} onClick={() => setActiveView('ingestion')}>
+              <Upload size={17} />
+              Ingestion
+            </button>
+          </nav>
+          <div className="sectionHeader compactHeader">
             <Wrench size={18} />
             <h2>Priority Assets</h2>
           </div>
@@ -173,7 +249,10 @@ export function App() {
             <button
               className={`assetRow ${item.equipment.id === selectedEquipment ? 'selected' : ''}`}
               key={item.equipment.id}
-              onClick={() => setSelectedEquipment(item.equipment.id)}
+              onClick={() => {
+                setSelectedEquipment(item.equipment.id)
+                setActiveView('dashboard')
+              }}
             >
               <span>
                 <strong>{item.equipment.name}</strong>
@@ -184,231 +263,180 @@ export function App() {
           ))}
         </aside>
 
-        <section className="detailPanel">
-          <div className="sectionHeader">
-            <ClipboardList size={18} />
-            <h2>{selectedHealth?.equipment.name}</h2>
-          </div>
-          <div className="assetFacts">
-            <span>Process: {selectedHealth?.equipment.process}</span>
-            <span>Health: {selectedHealth?.health_score}%</span>
-            <span>Criticality: {selectedHealth?.equipment.criticality}/5</span>
-          </div>
-
-          <div className="split">
-            <div>
-              <h3>Active Alerts</h3>
-              {selectedHealth?.active_alerts.map((alert) => (
-                <div className="alertLine" key={alert.id}>
-                  <span className={`riskDot ${alert.severity}`} />
-                  <span>{alert.message}</span>
-                  <strong>
-                    {alert.value} {alert.unit}
-                  </strong>
-                </div>
-              ))}
-            </div>
-            <div>
-              <h3>Sensor Anomalies</h3>
-              {selectedHealth?.anomalies.map((anomaly) => (
-                <div className="anomalyLine" key={`${anomaly.signal}-${anomaly.timestamp}`}>
-                  <span className={`riskDot ${anomaly.risk_level}`} />
-                  <span>
-                    <strong>{anomaly.signal.replace(/_/g, ' ')}</strong>
-                    <small>
-                      z {anomaly.z_score} · baseline {anomaly.baseline_mean} {anomaly.unit}
-                    </small>
-                  </span>
-                  <strong>
-                    {anomaly.value} {anomaly.unit}
-                  </strong>
-                </div>
-              ))}
-            </div>
-            <div>
-              <h3>Spares Constraints</h3>
-              {selectedHealth?.top_spares_constraints.map((spare) => (
-                <div className="spareLine" key={spare.id}>
-                  <span>{spare.name}</span>
-                  <strong>{spare.available_qty} stock</strong>
-                  <small>{spare.lead_time_days}d lead</small>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="ingestionPanel">
-            <div className="sectionHeader">
-              <Upload size={18} />
-              <h2>Ingestion</h2>
-            </div>
-            <div className="ingestionGrid">
-              <label className="field">
-                <span>Source</span>
-                <select value={ingestSourceType} onChange={(event) => setIngestSourceType(event.target.value)}>
-                  <option value="manual">Manual</option>
-                  <option value="sop">SOP</option>
-                  <option value="log">Log</option>
-                  <option value="alert">Alert</option>
-                  <option value="spares">Spares</option>
-                  <option value="history">History</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>Title</span>
-                <input value={ingestTitle} onChange={(event) => setIngestTitle(event.target.value)} />
-              </label>
-              <label className="field fileField">
-                <span>File</span>
-                <input
-                  aria-label="Ingestion file"
-                  type="file"
-                  accept=".txt,.md,.markdown,.csv,.log,.json,.pdf,text/*,application/pdf"
-                  onChange={(event) => setIngestFile(event.target.files?.[0] ?? null)}
-                />
-              </label>
-              <button onClick={ingestSelectedFile} title="Upload maintenance document">
-                <Upload size={16} />
-                Upload
-              </button>
-            </div>
-            <div className="jsonIngest">
-              <label className="field">
-                <span>Payload</span>
-                <select value={jsonMode} onChange={(event) => setJsonMode(event.target.value as 'documents' | 'records')}>
-                  <option value="documents">Documents</option>
-                  <option value="records">Records</option>
-                </select>
-              </label>
-              <textarea
-                aria-label="Ingestion JSON"
-                value={jsonPayload}
-                onChange={(event) => setJsonPayload(event.target.value)}
-                placeholder={jsonMode === 'documents' ? '{"documents":[...]}' : '{"alerts":[...],"sensor_readings":[...]}'}
-              />
-              <button className="textButton" onClick={ingestJsonPayload}>
-                <FileJson size={16} />
-                Import JSON
-              </button>
-            </div>
-            {ingestionMessage && <p className="inlineStatus">{ingestionMessage}</p>}
-          </div>
-
-          <div className="chatPanel">
-            <div className="sectionHeader">
-              <MessageSquare size={18} />
-              <h2>Engineer Query</h2>
-            </div>
-            <div className="queryRow">
-              <input value={question} onChange={(event) => setQuestion(event.target.value)} />
-              <button onClick={sendQuestion} title="Ask maintenance wizard">
-                <Send size={18} />
-              </button>
-              <button className="textButton" onClick={runDiagnosis}>
-                Diagnose
-              </button>
-            </div>
-            {answer && <p className="answer">{answer}</p>}
-          </div>
-        </section>
-
-        <aside className="recommendationPanel">
-          <div className="sectionHeader">
-            <CheckCircle2 size={18} />
-            <h2>Recommendation</h2>
-          </div>
-          {recommendation ? (
-            <>
-              <p className="diagnosis">{recommendation.diagnosis}</p>
-              <span className={`riskBadge ${recommendation.risk_level}`}>{recommendation.risk_level}</span>
-              <div className="recommendationFacts">
-                <span>
-                  <small>Urgency</small>
-                  <strong>{recommendation.urgency}</strong>
-                </span>
-                <span>
-                  <small>RUL</small>
-                  <strong>{recommendation.remaining_useful_life_days ?? 'n/a'} days</strong>
-                </span>
-                <span>
-                  <small>Confidence</small>
-                  <strong>{Math.round(recommendation.confidence * 100)}%</strong>
-                </span>
+        {activeView === 'dashboard' ? (
+          <>
+            <section className="detailPanel">
+              <div className="sectionHeader">
+                <ClipboardList size={18} />
+                <h2>{selectedHealth?.equipment.name}</h2>
               </div>
-              <h3>Probable Root Causes</h3>
-              <ul>
-                {recommendation.probable_root_causes.map((cause) => (
-                  <li key={cause}>{cause}</li>
-                ))}
-              </ul>
-              <h3>Immediate Actions</h3>
-              <ul>
-                {recommendation.immediate_actions.map((action) => (
-                  <li key={action}>{action}</li>
-                ))}
-              </ul>
-              <h3>Planned Actions</h3>
-              <ul>
-                {recommendation.planned_actions.map((action) => (
-                  <li key={action}>{action}</li>
-                ))}
-              </ul>
-              <h3>Spares Strategy</h3>
-              <ul>
-                {recommendation.spares_strategy.map((action) => (
-                  <li key={action}>{action}</li>
-                ))}
-              </ul>
-              {(recommendation.learning_notes ?? []).length > 0 && (
+              <div className="assetFacts">
+                <span>Process: {selectedHealth?.equipment.process}</span>
+                <span>Health: {selectedHealth?.health_score}%</span>
+                <span>Criticality: {selectedHealth?.equipment.criticality}/5</span>
+              </div>
+
+              <div className="split">
+                <div>
+                  <h3>Active Alerts</h3>
+                  {selectedHealth?.active_alerts.map((alert) => (
+                    <div className="alertLine" key={alert.id}>
+                      <span className={`riskDot ${alert.severity}`} />
+                      <span>{alert.message}</span>
+                      <strong>
+                        {alert.value} {alert.unit}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <h3>Sensor Anomalies</h3>
+                  {selectedHealth?.anomalies.map((anomaly) => (
+                    <div className="anomalyLine" key={`${anomaly.signal}-${anomaly.timestamp}`}>
+                      <span className={`riskDot ${anomaly.risk_level}`} />
+                      <span>
+                        <strong>{anomaly.signal.replace(/_/g, ' ')}</strong>
+                        <small>
+                          z {anomaly.z_score} · baseline {anomaly.baseline_mean} {anomaly.unit}
+                        </small>
+                      </span>
+                      <strong>
+                        {anomaly.value} {anomaly.unit}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <h3>Spares Constraints</h3>
+                  {selectedHealth?.top_spares_constraints.map((spare) => (
+                    <div className="spareLine" key={spare.id}>
+                      <span>{spare.name}</span>
+                      <strong>{spare.available_qty} stock</strong>
+                      <small>{spare.lead_time_days}d lead</small>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="chatPanel">
+                <div className="sectionHeader">
+                  <MessageSquare size={18} />
+                  <h2>Engineer Query</h2>
+                </div>
+                <div className="queryRow">
+                  <input value={question} onChange={(event) => setQuestion(event.target.value)} />
+                  <button onClick={sendQuestion} title="Ask maintenance wizard">
+                    <Send size={18} />
+                  </button>
+                  <button className="textButton" onClick={runDiagnosis}>
+                    Diagnose
+                  </button>
+                </div>
+                {answer && <p className="answer">{answer}</p>}
+              </div>
+            </section>
+
+            <aside className="recommendationPanel">
+              <div className="sectionHeader">
+                <CheckCircle2 size={18} />
+                <h2>Recommendation</h2>
+              </div>
+              {recommendation ? (
                 <>
-                  <h3>Learning Notes</h3>
-                  {recommendation.learning_notes.map((note) => (
-                    <p className="learningNote" key={note}>
-                      {note}
+                  <p className="diagnosis">{recommendation.diagnosis}</p>
+                  <span className={`riskBadge ${recommendation.risk_level}`}>{recommendation.risk_level}</span>
+                  <div className="recommendationFacts">
+                    <span>
+                      <small>Urgency</small>
+                      <strong>{recommendation.urgency}</strong>
+                    </span>
+                    <span>
+                      <small>RUL</small>
+                      <strong>{recommendation.remaining_useful_life_days ?? 'n/a'} days</strong>
+                    </span>
+                    <span>
+                      <small>Confidence</small>
+                      <strong>{Math.round(recommendation.confidence * 100)}%</strong>
+                    </span>
+                  </div>
+                  <h3>Probable Root Causes</h3>
+                  <ul>
+                    {recommendation.probable_root_causes.map((cause) => (
+                      <li key={cause}>{cause}</li>
+                    ))}
+                  </ul>
+                  <h3>Immediate Actions</h3>
+                  <ul>
+                    {recommendation.immediate_actions.map((action) => (
+                      <li key={action}>{action}</li>
+                    ))}
+                  </ul>
+                  <h3>Planned Actions</h3>
+                  <ul>
+                    {recommendation.planned_actions.map((action) => (
+                      <li key={action}>{action}</li>
+                    ))}
+                  </ul>
+                  <h3>Spares Strategy</h3>
+                  <ul>
+                    {recommendation.spares_strategy.map((action) => (
+                      <li key={action}>{action}</li>
+                    ))}
+                  </ul>
+                  {(recommendation.learning_notes ?? []).length > 0 && (
+                    <>
+                      <h3>Learning Notes</h3>
+                      {recommendation.learning_notes.map((note) => (
+                        <p className="learningNote" key={note}>
+                          {note}
+                        </p>
+                      ))}
+                    </>
+                  )}
+                  <h3>Evidence</h3>
+                  {recommendation.evidence.slice(0, 3).map((evidence) => (
+                    <p className="evidence" key={evidence.source_id}>
+                      <strong>{evidence.title}</strong>
+                      {evidence.excerpt}
                     </p>
                   ))}
+                  <div className="feedbackDetails">
+                    <label className="field">
+                      <span>Actual Root Cause</span>
+                      <input value={feedbackRootCause} onChange={(event) => setFeedbackRootCause(event.target.value)} />
+                    </label>
+                    <label className="field">
+                      <span>Action Taken</span>
+                      <input value={feedbackActionTaken} onChange={(event) => setFeedbackActionTaken(event.target.value)} />
+                    </label>
+                    <label className="field">
+                      <span>Outcome</span>
+                      <input value={feedbackOutcome} onChange={(event) => setFeedbackOutcome(event.target.value)} />
+                    </label>
+                    <label className="field">
+                      <span>Notes</span>
+                      <input value={feedbackNotes} onChange={(event) => setFeedbackNotes(event.target.value)} />
+                    </label>
+                  </div>
+                  <div className="feedbackRow">
+                    <button onClick={() => sendFeedback('accepted')}>Accept</button>
+                    <button onClick={() => sendFeedback('corrected')}>Correct</button>
+                    <button onClick={() => sendFeedback('rejected')}>Reject</button>
+                  </div>
+                  {feedbackMessage && <p className="inlineStatus">{feedbackMessage}</p>}
+                  <a className="downloadReport" href={api.reportMarkdownUrl(recommendation.equipment_id)} download>
+                    <Download size={16} />
+                    Export Report
+                  </a>
                 </>
+              ) : (
+                <p className="emptyState">Run diagnosis or ask a question to generate cited maintenance actions.</p>
               )}
-              <h3>Evidence</h3>
-              {recommendation.evidence.slice(0, 3).map((evidence) => (
-                <p className="evidence" key={evidence.source_id}>
-                  <strong>{evidence.title}</strong>
-                  {evidence.excerpt}
-                </p>
-              ))}
-              <div className="feedbackDetails">
-                <label className="field">
-                  <span>Actual Root Cause</span>
-                  <input value={feedbackRootCause} onChange={(event) => setFeedbackRootCause(event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>Action Taken</span>
-                  <input value={feedbackActionTaken} onChange={(event) => setFeedbackActionTaken(event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>Outcome</span>
-                  <input value={feedbackOutcome} onChange={(event) => setFeedbackOutcome(event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>Notes</span>
-                  <input value={feedbackNotes} onChange={(event) => setFeedbackNotes(event.target.value)} />
-                </label>
-              </div>
-              <div className="feedbackRow">
-                <button onClick={() => sendFeedback('accepted')}>Accept</button>
-                <button onClick={() => sendFeedback('corrected')}>Correct</button>
-                <button onClick={() => sendFeedback('rejected')}>Reject</button>
-              </div>
-              {feedbackMessage && <p className="inlineStatus">{feedbackMessage}</p>}
-              <a className="downloadReport" href={api.reportMarkdownUrl(recommendation.equipment_id)} download>
-                <Download size={16} />
-                Export Report
-              </a>
-            </>
-          ) : (
-            <p className="emptyState">Run diagnosis or ask a question to generate cited maintenance actions.</p>
-          )}
-        </aside>
+            </aside>
+          </>
+        ) : (
+          ingestionView
+        )}
       </section>
     </main>
   )

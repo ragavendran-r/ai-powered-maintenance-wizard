@@ -50,7 +50,7 @@ flowchart LR
 
 ## Components
 
-- React frontend: operator dashboard, ingestion panel, maintenance chat, asset detail, recommendation, report, and detailed feedback views.
+- React frontend: operator dashboard, left-nav ingestion view, maintenance chat, asset detail, recommendation, report, and detailed feedback views.
 - FastAPI backend: HTTP API layer for dashboard data, ingestion, diagnosis, prediction, chat, reports, and feedback.
 - Data services: seed SQLite from sample steel-plant fixtures and expose repository functions for equipment, alerts, sensor readings, spares, maintenance history, documents, document chunks, and feedback.
 - Document parser: extracts text from uploaded text-like files and embedded-text PDFs before indexing.
