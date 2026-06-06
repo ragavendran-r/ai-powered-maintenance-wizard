@@ -181,3 +181,6 @@ The active goal is complete for a working hackathon prototype. Remaining items a
 - Implemented final database tooling, production hardening docs, submission guide, and completion audit.
 - Verified backend compile, backend tests, frontend tests, frontend build, database status, live API, and browser workflow.
 - Added durable rules and hooks documentation, including no direct commits/pushes to `main`.
+- Created private GitHub repository `ragavendran-r/ai-powered-maintenance-wizard` and pushed initial commit `1eac0cc`.
+- GitHub-side main branch protection could not be enabled because GitHub rejected branch protection and repository rulesets for this private repo on the current plan.
+- Added a versioned local pre-push hook on branch `chore/github-guardrails` to block direct pushes to `main` or `master`.
