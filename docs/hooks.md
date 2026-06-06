@@ -2,6 +2,13 @@
 
 These hooks are repository guardrails to follow manually or automate in Git/CI once the folder is initialized as a Git repository.
 
+Enable versioned local Git hooks after cloning:
+
+```bash
+git config core.hooksPath .githooks
+chmod +x .githooks/pre-push
+```
+
 ## Branch And PR Guard
 
 Purpose: prevent direct work on `main` and require changes to reach `main` through a pull request.
@@ -27,7 +34,9 @@ if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
 fi
 ```
 
-Suggested pre-push hook:
+Implemented pre-push hook: `.githooks/pre-push`
+
+Reference behavior:
 
 ```bash
 #!/usr/bin/env bash
