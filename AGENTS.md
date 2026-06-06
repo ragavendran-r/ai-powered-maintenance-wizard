@@ -78,4 +78,4 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Refreshed `README.md` and `docs/architecture.md` after merging PR #5 so user-facing and system architecture docs match the current ingestion, LLM, feedback-learning, and schema behavior.
 - Added a durable completion-notification rule requiring a desktop notification at the end of every completed task.
 - Moved the complete ingestion section into a dedicated left-nav Ingestion view after merging PR #7, verified the frontend build/tests and browser DOM behavior, and opened PR #8 from `feat/ingestion-view` to `main`.
-- Added two tracked sample assets, `HYD-SYS-04` Hot Rolling Hydraulic System and `OH-CRANE-05` Melt Shop Overhead Crane, with alerts, sensor readings, spares, maintenance history, SOP/manual evidence, dashboard visibility, tests, and docs.
+- Added two tracked sample assets, `HYD-SYS-04` Hot Rolling Hydraulic System and `OH-CRANE-05` Melt Shop Overhead Crane, with alerts, sensor readings, spares, maintenance history, SOP/manual evidence, dashboard visibility, tests, docs, and PR #9.

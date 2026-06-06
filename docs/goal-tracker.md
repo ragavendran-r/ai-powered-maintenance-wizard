@@ -250,6 +250,7 @@ Delivered in this branch:
 - Updated frontend fallback dashboard data so offline/sample mode also lists all five assets.
 - Added backend tests covering seeded counts, dashboard visibility, health, prediction, diagnosis, and retrieval evidence for the new assets.
 - Updated README, architecture, and demo documentation to describe the five-asset demo set.
+- Opened PR #9 from `feat/add-equipment-assets` to `main`: `https://github.com/ragavendran-r/ai-powered-maintenance-wizard/pull/9`.
 
 Verification recorded:
 
