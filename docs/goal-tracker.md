@@ -280,6 +280,7 @@ Delivered:
 - Added deterministic message envelope validation, derived IDs for sensor/alert messages, existing-equipment checks, SQLite persistence through structured ingestion paths, idempotency audit records, retry/nak behavior, and dead-letter publishing for invalid messages.
 - Added `GET /api/streaming/status` and a read-only IoT Stream status panel in the frontend Ingestion view.
 - Added backend/frontend tests and live verification.
+- Opened PR #11 from `feat/nats-iot-streaming-ingestion` to `main`: `https://github.com/ragavendran-r/ai-powered-maintenance-wizard/pull/11`.
 
 Verification recorded:
 
