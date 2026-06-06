@@ -151,7 +151,7 @@ def report_markdown(equipment_id: str):
 @app.get("/api/dashboard/summary", response_model=DashboardSummary)
 def dashboard_summary():
     summaries = [health_summary(equipment.id) for equipment in equipment_records()]
-    highest = sorted(summaries, key=lambda item: item.health_score)[:3]
+    highest = sorted(summaries, key=lambda item: item.health_score)
     alerts = active_alerts()
     critical_count = len([alert for alert in alerts if alert.severity == "critical"])
     average_health = int(sum(item.health_score for item in summaries) / max(1, len(summaries)))
