@@ -2,7 +2,7 @@ import asyncio
 import json
 import ssl
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from hashlib import sha1
 from typing import Any, Optional, Union
 
@@ -156,7 +156,7 @@ class StreamingIngestionService:
     async def _run(self) -> None:
         try:
             import nats
-            from nats.js.api import AckPolicy, ConsumerConfig
+            from nats.js.api import AckPolicy, ConsumerConfig, StreamConfig
         except ImportError as exc:
             self._state = "error"
             self._last_error = f"nats-py is not installed: {exc}"
@@ -177,7 +177,7 @@ class StreamingIngestionService:
 
             self._nc = await nats.connect(**connect_kwargs)
             self._js = self._nc.jetstream()
-            await self._ensure_stream_and_consumer(ConsumerConfig, AckPolicy)
+            await self._ensure_stream_and_consumer(StreamConfig, ConsumerConfig, AckPolicy)
             subscription = await self._js.pull_subscribe(
                 f"{self.settings.nats_subject_prefix}.*",
                 durable=self.settings.nats_consumer,
@@ -199,23 +199,26 @@ class StreamingIngestionService:
             self._state = "error"
             self._last_error = str(exc)
 
-    async def _ensure_stream_and_consumer(self, consumer_config, ack_policy) -> None:
+    async def _ensure_stream_and_consumer(self, stream_config, consumer_config, ack_policy) -> None:
         subjects = streaming_subjects(self.settings.nats_subject_prefix)
         stream_subjects = [*subjects, self.settings.nats_dlq_subject]
+        config = stream_config(name=self.settings.nats_stream, subjects=stream_subjects)
         try:
-            await self._js.add_stream(name=self.settings.nats_stream, subjects=stream_subjects)
+            await self._js.add_stream(config=config)
         except Exception as exc:
-            if "already" not in str(exc).lower():
+            if "already" in str(exc).lower():
+                await self._js.update_stream(config=config)
+            else:
                 raise
-        config = consumer_config(
+        consumer = consumer_config(
             durable_name=self.settings.nats_consumer,
             ack_policy=ack_policy.EXPLICIT,
             filter_subject=f"{self.settings.nats_subject_prefix}.*",
-            ack_wait=timedelta(seconds=self.settings.nats_ack_wait_seconds),
+            ack_wait=float(self.settings.nats_ack_wait_seconds),
             max_deliver=self.settings.nats_max_deliver,
         )
         try:
-            await self._js.add_consumer(self.settings.nats_stream, config=config)
+            await self._js.add_consumer(self.settings.nats_stream, config=consumer)
         except Exception as exc:
             if "already" not in str(exc).lower():
                 raise
