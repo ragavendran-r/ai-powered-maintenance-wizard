@@ -32,7 +32,7 @@ Usage: scripts/run-local-stack.sh [start|status|stop]
 Commands:
   start   Start/reuse NATS JetStream, FastAPI backend, and Vite frontend.
   status  Show health for NATS, backend, streaming ingestion, and frontend.
-  stop    Stop backend/frontend processes started by this script and stop NATS if this script started it.
+  stop    Stop backend/frontend listeners on configured ports and stop the named NATS container.
 
 Environment overrides:
   NATS_CONTAINER, NATS_IMAGE, NATS_HOST, NATS_PORT, NATS_MONITOR_PORT
@@ -85,6 +85,23 @@ pid_running() {
   local pid
   pid="$(cat "$pid_file")"
   [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1
+}
+
+stop_process_tree() {
+  local pid="$1"
+  local label="$2"
+  [[ -n "$pid" ]] || return 0
+  kill -0 "$pid" >/dev/null 2>&1 || return 0
+
+  local child
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    stop_process_tree "$child" "$label"
+  done
+
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    echo "Stopping ${label} process ${pid}"
+    kill "$pid" >/dev/null 2>&1 || true
+  fi
 }
 
 docker_container_exists() {
@@ -206,16 +223,38 @@ stop_pid_file() {
   if pid_running "$pid_file"; then
     local pid
     pid="$(cat "$pid_file")"
-    echo "Stopping ${label} process ${pid}"
-    kill "$pid" >/dev/null 2>&1 || true
+    stop_process_tree "$pid" "$label"
   fi
   rm -f "$pid_file"
+}
+
+stop_port_listeners() {
+  local port="$1"
+  local label="$2"
+
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "Cannot inspect ${label} port ${port}; lsof is not installed" >&2
+    return 0
+  fi
+
+  local pids
+  pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+
+  local pid
+  for pid in $pids; do
+    stop_process_tree "$pid" "$label"
+  done
 }
 
 stop_started() {
   stop_pid_file "$BACKEND_PID_FILE" "backend"
   stop_pid_file "$FRONTEND_PID_FILE" "frontend"
-  if [[ -f "$NATS_STARTED_FILE" ]] && command -v docker >/dev/null 2>&1 && docker_container_running; then
+  stop_port_listeners "$BACKEND_PORT" "backend"
+  stop_port_listeners "$FRONTEND_PORT" "frontend"
+  if command -v docker >/dev/null 2>&1 && docker_container_running; then
     echo "Stopping NATS container ${NATS_CONTAINER}"
     docker stop "$NATS_CONTAINER" >/dev/null 2>&1 || true
   fi

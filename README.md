@@ -147,6 +147,8 @@ The script requires Docker for the temporary `nats:2` container, an installed ba
 
 `scripts/run-local-stack.sh status` uses the seeded demo admin login to check protected streaming status when local auth is enabled.
 
+`scripts/run-local-stack.sh stop` stops backend/frontend listeners on the configured ports and stops the named local-stack NATS container, even if `.local-stack` PID marker files are missing.
+
 ## Local Kubernetes Stack
 
 To create a disposable local Kubernetes cluster and deploy NATS JetStream, the FastAPI backend, and the production-built frontend:
