@@ -697,129 +697,131 @@ export function App() {
               </div>
 
               {canDecision && (
-                <div className="chatPanel">
-                  <div className="sectionHeader">
-                    <MessageSquare size={18} />
-                    <h2>Engineer Query</h2>
-                  </div>
-                  <div className="queryRow">
-                    <input value={question} onChange={(event) => setQuestion(event.target.value)} />
-                    <button onClick={sendQuestion} title="Ask maintenance wizard">
-                      <Send size={18} />
-                    </button>
+                <>
+                  <div className="diagnoseActionRow">
                     <button className="textButton" onClick={runDiagnosis}>
+                      <CheckCircle2 size={16} />
                       Diagnose
                     </button>
                   </div>
-                  {answer && <p className="answer">{answer}</p>}
-                </div>
+                  <div className="chatPanel">
+                    <div className="sectionHeader">
+                      <MessageSquare size={18} />
+                      <h2>Engineer Query</h2>
+                    </div>
+                    <div className="queryRow">
+                      <input value={question} onChange={(event) => setQuestion(event.target.value)} />
+                      <button onClick={sendQuestion} title="Ask maintenance wizard">
+                        <Send size={18} />
+                      </button>
+                    </div>
+                    {answer && <p className="answer">{answer}</p>}
+                  </div>
+                  <div className="recommendationSection">
+                    <div className="sectionHeader">
+                      <CheckCircle2 size={18} />
+                      <h2>Recommendation</h2>
+                    </div>
+                    {recommendation ? (
+                      <>
+                        <p className="diagnosis">{recommendation.diagnosis}</p>
+                        <span className={`riskBadge ${recommendation.risk_level}`}>{recommendation.risk_level}</span>
+                        <div className="recommendationFacts">
+                          <span>
+                            <small>Urgency</small>
+                            <strong>{recommendation.urgency}</strong>
+                          </span>
+                          <span>
+                            <small>RUL</small>
+                            <strong>{recommendation.remaining_useful_life_days ?? 'n/a'} days</strong>
+                          </span>
+                          <span>
+                            <small>Confidence</small>
+                            <strong>{Math.round(recommendation.confidence * 100)}%</strong>
+                          </span>
+                        </div>
+                        <h3>Probable Root Causes</h3>
+                        <ul>
+                          {recommendation.probable_root_causes.map((cause) => (
+                            <li key={cause}>{cause}</li>
+                          ))}
+                        </ul>
+                        <h3>Immediate Actions</h3>
+                        <ul>
+                          {recommendation.immediate_actions.map((action) => (
+                            <li key={action}>{action}</li>
+                          ))}
+                        </ul>
+                        <h3>Planned Actions</h3>
+                        <ul>
+                          {recommendation.planned_actions.map((action) => (
+                            <li key={action}>{action}</li>
+                          ))}
+                        </ul>
+                        <h3>Spares Strategy</h3>
+                        <ul>
+                          {recommendation.spares_strategy.map((action) => (
+                            <li key={action}>{action}</li>
+                          ))}
+                        </ul>
+                        {(recommendation.learning_notes ?? []).length > 0 && (
+                          <>
+                            <h3>Learning Notes</h3>
+                            {recommendation.learning_notes.map((note) => (
+                              <p className="learningNote" key={note}>
+                                {note}
+                              </p>
+                            ))}
+                          </>
+                        )}
+                        <h3>Evidence</h3>
+                        {recommendation.evidence.slice(0, 3).map((evidence) => (
+                          <p className="evidence" key={evidence.source_id}>
+                            <strong>{evidence.title}</strong>
+                            {evidence.excerpt}
+                          </p>
+                        ))}
+                        {canFeedback && (
+                          <>
+                            <div className="feedbackDetails">
+                              <label className="field">
+                                <span>Actual Root Cause</span>
+                                <input value={feedbackRootCause} onChange={(event) => setFeedbackRootCause(event.target.value)} />
+                              </label>
+                              <label className="field">
+                                <span>Action Taken</span>
+                                <input value={feedbackActionTaken} onChange={(event) => setFeedbackActionTaken(event.target.value)} />
+                              </label>
+                              <label className="field">
+                                <span>Outcome</span>
+                                <input value={feedbackOutcome} onChange={(event) => setFeedbackOutcome(event.target.value)} />
+                              </label>
+                              <label className="field">
+                                <span>Notes</span>
+                                <input value={feedbackNotes} onChange={(event) => setFeedbackNotes(event.target.value)} />
+                              </label>
+                            </div>
+                            <div className="feedbackRow">
+                              <button onClick={() => sendFeedback('accepted')}>Accept</button>
+                              <button onClick={() => sendFeedback('corrected')}>Correct</button>
+                              <button onClick={() => sendFeedback('rejected')}>Reject</button>
+                            </div>
+                            {feedbackMessage && <p className="inlineStatus">{feedbackMessage}</p>}
+                          </>
+                        )}
+                        <button className="downloadReport" onClick={downloadReport}>
+                          <Download size={16} />
+                          Export Report
+                        </button>
+                        {reportMessage && <p className="inlineStatus">{reportMessage}</p>}
+                      </>
+                    ) : (
+                      <p className="emptyState">Run diagnosis or ask a question to generate cited maintenance actions.</p>
+                    )}
+                  </div>
+                </>
               )}
             </section>
-
-            {canDecision && (
-              <aside className="recommendationPanel">
-              <div className="sectionHeader">
-                <CheckCircle2 size={18} />
-                <h2>Recommendation</h2>
-              </div>
-              {recommendation ? (
-                <>
-                  <p className="diagnosis">{recommendation.diagnosis}</p>
-                  <span className={`riskBadge ${recommendation.risk_level}`}>{recommendation.risk_level}</span>
-                  <div className="recommendationFacts">
-                    <span>
-                      <small>Urgency</small>
-                      <strong>{recommendation.urgency}</strong>
-                    </span>
-                    <span>
-                      <small>RUL</small>
-                      <strong>{recommendation.remaining_useful_life_days ?? 'n/a'} days</strong>
-                    </span>
-                    <span>
-                      <small>Confidence</small>
-                      <strong>{Math.round(recommendation.confidence * 100)}%</strong>
-                    </span>
-                  </div>
-                  <h3>Probable Root Causes</h3>
-                  <ul>
-                    {recommendation.probable_root_causes.map((cause) => (
-                      <li key={cause}>{cause}</li>
-                    ))}
-                  </ul>
-                  <h3>Immediate Actions</h3>
-                  <ul>
-                    {recommendation.immediate_actions.map((action) => (
-                      <li key={action}>{action}</li>
-                    ))}
-                  </ul>
-                  <h3>Planned Actions</h3>
-                  <ul>
-                    {recommendation.planned_actions.map((action) => (
-                      <li key={action}>{action}</li>
-                    ))}
-                  </ul>
-                  <h3>Spares Strategy</h3>
-                  <ul>
-                    {recommendation.spares_strategy.map((action) => (
-                      <li key={action}>{action}</li>
-                    ))}
-                  </ul>
-                  {(recommendation.learning_notes ?? []).length > 0 && (
-                    <>
-                      <h3>Learning Notes</h3>
-                      {recommendation.learning_notes.map((note) => (
-                        <p className="learningNote" key={note}>
-                          {note}
-                        </p>
-                      ))}
-                    </>
-                  )}
-                  <h3>Evidence</h3>
-                  {recommendation.evidence.slice(0, 3).map((evidence) => (
-                    <p className="evidence" key={evidence.source_id}>
-                      <strong>{evidence.title}</strong>
-                      {evidence.excerpt}
-                    </p>
-                  ))}
-                  {canFeedback && (
-                    <>
-                      <div className="feedbackDetails">
-                        <label className="field">
-                          <span>Actual Root Cause</span>
-                          <input value={feedbackRootCause} onChange={(event) => setFeedbackRootCause(event.target.value)} />
-                        </label>
-                        <label className="field">
-                          <span>Action Taken</span>
-                          <input value={feedbackActionTaken} onChange={(event) => setFeedbackActionTaken(event.target.value)} />
-                        </label>
-                        <label className="field">
-                          <span>Outcome</span>
-                          <input value={feedbackOutcome} onChange={(event) => setFeedbackOutcome(event.target.value)} />
-                        </label>
-                        <label className="field">
-                          <span>Notes</span>
-                          <input value={feedbackNotes} onChange={(event) => setFeedbackNotes(event.target.value)} />
-                        </label>
-                      </div>
-                      <div className="feedbackRow">
-                        <button onClick={() => sendFeedback('accepted')}>Accept</button>
-                        <button onClick={() => sendFeedback('corrected')}>Correct</button>
-                        <button onClick={() => sendFeedback('rejected')}>Reject</button>
-                      </div>
-                      {feedbackMessage && <p className="inlineStatus">{feedbackMessage}</p>}
-                    </>
-                  )}
-                  <button className="downloadReport" onClick={downloadReport}>
-                    <Download size={16} />
-                    Export Report
-                  </button>
-                  {reportMessage && <p className="inlineStatus">{reportMessage}</p>}
-                </>
-              ) : (
-                <p className="emptyState">Run diagnosis or ask a question to generate cited maintenance actions.</p>
-              )}
-              </aside>
-            )}
           </>
         ) : activeView === 'ingestion' ? (
           ingestionView
