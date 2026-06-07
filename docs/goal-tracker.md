@@ -14,7 +14,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 ## Current Goal State
 
 - Active implementation goal: none.
-- Latest completed tracked goal: G-013 user login and role-based access control.
+- Latest completed tracked goal: G-014 local Kubernetes deployment script.
 - Branch workflow rule: work intended for `main` must happen on a feature branch and merge through a PR.
 
 ## Goal Index
@@ -34,6 +34,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 | G-011 | Add Hydraulic System and Overhead Crane assets. | Complete | Added two tracked steel-plant assets with alerts, sensor readings, spares, history, SOP/manual evidence, dashboard visibility, tests, and docs. | PR #9; `assets/sample_data/steel_plant_demo.json`; `frontend/src/App.test.tsx` |
 | G-012 | Enable NATS JetStream IoT streaming ingestion. | Complete | Added optional durable NATS JetStream ingestion, validation, DLQ handling, `/api/streaming/status`, frontend status, tests, docs, and local stack runner. | PR #11; PR #12; PR #13; `docs/iot-streaming-ingestion-plan.md`; `scripts/run-local-stack.sh` |
 | G-013 | Implement user login and role-based access control. | Complete | Added local SQLite users, bcrypt password hashes, JWT login, endpoint role guards, React login/session handling, role-gated navigation/actions, admin user management, tests, and docs. | `backend/app/core/auth.py`; `frontend/src/App.tsx`; `docs/auth-authorization-plan.md` |
+| G-014 | Create a local Kubernetes deployment script. | Complete With Caveat | Added a Kind-based script that creates a local cluster, deploys NATS, backend, and frontend, reports status, and deletes the cluster/runtime files. Full live cluster verification is pending because `kind` is not installed in this local environment. | `scripts/run-local-k8s.sh`; `README.md` |
 
 ## Detailed Goal Notes
 
@@ -56,6 +57,32 @@ Delivered:
 - `AGENTS.md` progress-tracking guidance
 
 Status: `Complete`
+
+### G-014: Local Kubernetes Deployment Script
+
+Requested outcome:
+
+- Create a new goal for local Kubernetes deployment.
+- Add a local deployment script that creates and cleans up a local Kubernetes cluster.
+- Deploy all project components from that script.
+
+Delivered:
+
+- Kind-based local Kubernetes cluster lifecycle.
+- Local Docker image build/load for backend and frontend.
+- NATS JetStream, FastAPI backend, and frontend Kubernetes deployments and services.
+- Local host port access for frontend, backend, NATS, and NATS monitor.
+- Status command with authenticated streaming-status check.
+- Stop command that deletes the Kind cluster and generated runtime files.
+
+Verification recorded:
+
+- `bash -n scripts/run-local-k8s.sh`
+- `scripts/run-local-k8s.sh --help`
+- `scripts/run-local-k8s.sh status` correctly reported missing local `kind` dependency.
+- `git diff --check`
+
+Status: `Complete With Caveat`
 
 ### G-002: Initial Working Prototype
 
