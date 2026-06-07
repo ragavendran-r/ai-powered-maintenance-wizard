@@ -213,9 +213,29 @@ build_images() {
 
 load_images() {
   echo "Loading images into Kind cluster"
-  kind load docker-image "$NATS_IMAGE" --name "$CLUSTER_NAME"
-  kind load docker-image "$BACKEND_IMAGE" --name "$CLUSTER_NAME"
-  kind load docker-image "$FRONTEND_IMAGE" --name "$CLUSTER_NAME"
+  load_image "$NATS_IMAGE"
+  load_image "$BACKEND_IMAGE"
+  load_image "$FRONTEND_IMAGE"
+}
+
+load_image() {
+  local image="$1"
+  if kind load docker-image "$image" --name "$CLUSTER_NAME"; then
+    return 0
+  fi
+
+  echo "Kind image load failed for ${image}; retrying with direct containerd import."
+  local node_container="${CLUSTER_NAME}-control-plane"
+  local image_file=""
+  image_file="$(printf '%s' "$image" | tr -c 'A-Za-z0-9_.-' '_')"
+  local host_tar="${RUNTIME_DIR}/${image_file}.tar"
+  local node_tar="/${image_file}.tar"
+
+  docker save -o "$host_tar" "$image"
+  docker cp "$host_tar" "${node_container}:${node_tar}"
+  docker exec "$node_container" ctr --namespace=k8s.io images import --digests --snapshotter=overlayfs "$node_tar"
+  docker exec "$node_container" rm -f "$node_tar"
+  rm -f "$host_tar"
 }
 
 apply_manifests() {
@@ -306,6 +326,8 @@ spec:
               value: "true"
             - name: AUTH_SEED_DEMO_USERS
               value: "true"
+            - name: CORS_ALLOW_ORIGINS
+              value: "http://localhost:${FRONTEND_HOST_PORT},http://127.0.0.1:${FRONTEND_HOST_PORT},http://localhost:5173,http://127.0.0.1:5173"
             - name: JWT_SECRET_KEY
               value: "maintenance-wizard-local-k8s-secret-change-me"
             - name: DATABASE_PATH
@@ -387,6 +409,7 @@ spec:
       targetPort: 80
       nodePort: ${FRONTEND_NODE_PORT}
 EOF
+  kubectl_cmd -n "$NAMESPACE" rollout restart deployment/backend deployment/frontend
 }
 
 wait_for_rollouts() {

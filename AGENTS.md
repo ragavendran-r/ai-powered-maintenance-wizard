@@ -89,3 +89,6 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Created G-014 and added a Kind-based local Kubernetes deployment script for disposable cluster creation, all-component deployment, status checks, and cleanup.
 - Completed G-014 with a verification caveat: script syntax/help and diff checks passed, but full live Kind cluster deployment is pending until `kind` is installed locally.
 - Updated the local Kubernetes runner so it can install Kind automatically when missing, with `KIND_AUTO_INSTALL=false` available for fail-fast environments.
+- Added a direct Kind node containerd image-import fallback in `scripts/run-local-k8s.sh` after `kind load docker-image nats:2` failed during local Kubernetes deployment.
+- Added configurable backend `CORS_ALLOW_ORIGINS` and configured the local Kubernetes deployment to allow its frontend NodePort origin.
+- Updated the local Kubernetes runner to restart backend/frontend deployments after applying manifests so stable local image tags are refreshed on reruns.
