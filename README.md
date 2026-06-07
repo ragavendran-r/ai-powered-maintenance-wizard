@@ -162,7 +162,7 @@ scripts/run-local-k8s.sh status
 scripts/run-local-k8s.sh stop
 ```
 
-The script requires Docker, `kind`, `kubectl`, `curl`, and `python3`. On macOS, install Kind with `brew install kind` if it is not already available. It creates a Kind cluster named `maintenance-wizard-local`, builds local backend/frontend images, loads those images plus `nats:2` into the cluster, applies Kubernetes deployments/services, and exposes:
+The script requires Docker, `kubectl`, `curl`, and `python3`. If `kind` is missing, the script installs it automatically with Homebrew when available, then falls back to `go install sigs.k8s.io/kind@latest` when Go is available. Set `KIND_AUTO_INSTALL=false` to fail fast instead. It creates a Kind cluster named `maintenance-wizard-local`, builds local backend/frontend images, loads those images plus `nats:2` into the cluster, applies Kubernetes deployments/services, and exposes:
 
 - Frontend: `http://127.0.0.1:18081`
 - Backend: `http://127.0.0.1:18080`
