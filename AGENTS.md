@@ -92,3 +92,4 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Added a direct Kind node containerd image-import fallback in `scripts/run-local-k8s.sh` after `kind load docker-image nats:2` failed during local Kubernetes deployment.
 - Added configurable backend `CORS_ALLOW_ORIGINS` and configured the local Kubernetes deployment to allow its frontend NodePort origin.
 - Updated the local Kubernetes runner to restart backend/frontend deployments after applying manifests so stable local image tags are refreshed on reruns.
+- Updated the diagnosis/query layout so the `Diagnose` button and Engineer Query send button share the detail-pane centerline, with a three-row query textarea.
