@@ -427,4 +427,20 @@ describe('Maintenance Wizard dashboard', () => {
       expect(screen.getByText('User created')).toBeInTheDocument()
     })
   })
+
+  it('opens password reset in a dialog instead of inline user rows', async () => {
+    render(<App />)
+    await signIn()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Users' }))
+    expect(await screen.findByText('Shift Operator')).toBeInTheDocument()
+
+    expect(screen.queryByLabelText('New Password')).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Reset' })[0])
+
+    expect(await screen.findByRole('dialog', { name: 'Reset Password' })).toBeInTheDocument()
+    expect(screen.getByLabelText('New Password')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog', { name: 'Reset Password' })).not.toBeInTheDocument()
+  })
 })

@@ -546,7 +546,7 @@ h3 {
 .queryRow .textButton,
 .diagnoseActionRow .textButton,
 .jsonIngest .textButton,
-.subtleButton {
+.modalActions .iconTextButton {
   background: #26343d;
   gap: 8px;
 }
@@ -686,7 +686,7 @@ h3 {
   border-radius: 8px;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(180px, 1fr) 160px 90px 110px minmax(150px, 210px) 100px;
+  grid-template-columns: minmax(220px, 1fr) 170px 100px 120px 110px;
   padding: 10px;
 }
 
@@ -721,6 +721,73 @@ h3 {
 
 .compactField {
   gap: 3px;
+}
+
+.subtleButton {
+  background: #edf6f8;
+  border: 1px solid #b9d7de;
+  color: #174f58;
+  font-weight: 700;
+  gap: 8px;
+}
+
+.subtleButton:hover {
+  background: #dceff3;
+}
+
+.modalOverlay {
+  align-items: center;
+  background: rgb(24 32 41 / 46%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 20;
+}
+
+.modalPanel {
+  background: #ffffff;
+  border: 1px solid #d4e0e5;
+  border-radius: 8px;
+  box-shadow: 0 22px 55px rgb(24 32 41 / 24%);
+  display: grid;
+  gap: 14px;
+  max-width: 420px;
+  padding: 20px;
+  width: min(100%, 420px);
+}
+
+.modalContext {
+  background: #f5f8f9;
+  border-radius: 6px;
+  color: #1f2a31;
+  font-weight: 700;
+  margin: 0;
+  padding: 10px;
+}
+
+.modalContext small {
+  color: #60717c;
+  display: block;
+  font-weight: 600;
+  margin-top: 3px;
+}
+
+.modalActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.outlineButton {
+  background: #ffffff;
+  border: 1px solid #b9cbd3;
+  border-radius: 6px;
+  color: #26343d;
+  font-weight: 700;
+  min-height: 42px;
+  padding: 0 12px;
 }
 
 .apiOnlyPanel {

@@ -93,7 +93,8 @@ export function App() {
   const [newUserName, setNewUserName] = useState('')
   const [newUserRole, setNewUserRole] = useState<UserRole>('operator')
   const [newUserPassword, setNewUserPassword] = useState('')
-  const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({})
+  const [resetUser, setResetUser] = useState<AuthUser | null>(null)
+  const [resetPasswordValue, setResetPasswordValue] = useState('')
 
   const currentUser = session?.user
   const canDecision = hasRole(currentUser, decisionRoles)
@@ -331,16 +332,28 @@ export function App() {
     }
   }
 
-  async function resetPassword(user: AuthUser) {
-    const password = resetPasswords[user.id]
+  function openResetPassword(user: AuthUser) {
+    setResetUser(user)
+    setResetPasswordValue('')
+    setUserMessage('')
+  }
+
+  function closeResetPassword() {
+    setResetUser(null)
+    setResetPasswordValue('')
+  }
+
+  async function resetPassword() {
+    if (!resetUser) return
+    const password = resetPasswordValue
     if (!password) {
       setUserMessage('Enter a new password first')
       return
     }
     try {
-      const updated = await api.resetUserPassword(user.id, password)
+      const updated = await api.resetUserPassword(resetUser.id, password)
       setUsers((items) => items.map((item) => (item.id === updated.id ? updated : item)))
-      setResetPasswords((values) => ({ ...values, [user.id]: '' }))
+      closeResetPassword()
       setUserMessage(`Password reset for ${updated.display_name}`)
     } catch {
       setUserMessage('Password could not be reset')
@@ -482,15 +495,7 @@ export function App() {
             <button className="textButton subtleButton" onClick={() => toggleUserActive(user)}>
               {user.is_active ? 'Deactivate' : 'Activate'}
             </button>
-            <label className="field compactField">
-              <span>New Password</span>
-              <input
-                type="password"
-                value={resetPasswords[user.id] ?? ''}
-                onChange={(event) => setResetPasswords((values) => ({ ...values, [user.id]: event.target.value }))}
-              />
-            </label>
-            <button className="iconTextButton" onClick={() => resetPassword(user)} title="Reset password">
+            <button className="iconTextButton" onClick={() => openResetPassword(user)} title="Reset password">
               <KeyRound size={16} />
               Reset
             </button>
@@ -498,6 +503,38 @@ export function App() {
         ))}
       </div>
       {userMessage && <p className="inlineStatus">{userMessage}</p>}
+      {resetUser && (
+        <div className="modalOverlay" role="presentation">
+          <section className="modalPanel" role="dialog" aria-modal="true" aria-labelledby="reset-password-title">
+            <div className="sectionHeader compactHeader">
+              <KeyRound size={18} />
+              <h2 id="reset-password-title">Reset Password</h2>
+            </div>
+            <p className="modalContext">
+              {resetUser.display_name}
+              <small>{resetUser.email}</small>
+            </p>
+            <label className="field">
+              <span>New Password</span>
+              <input
+                autoFocus
+                type="password"
+                value={resetPasswordValue}
+                onChange={(event) => setResetPasswordValue(event.target.value)}
+              />
+            </label>
+            <div className="modalActions">
+              <button className="outlineButton" onClick={closeResetPassword}>
+                Cancel
+              </button>
+              <button className="iconTextButton" onClick={resetPassword}>
+                <KeyRound size={16} />
+                Reset
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   )
 
