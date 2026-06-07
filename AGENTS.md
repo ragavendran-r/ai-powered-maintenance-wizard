@@ -86,3 +86,5 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Implemented G-013 user login and role-based access control on `feat/auth-rbac`: local SQLite users, bcrypt hashes, JWT auth, endpoint role guards, React login/session handling, role-gated UI, admin user management, authenticated report downloads, schema version 4 docs, passing backend/frontend verification, and an auth-aware local stack status check.
 - Added a steel-plant favicon SVG linked from the frontend HTML entrypoint so the browser tab shows a plant-themed icon.
 - Repositioned dashboard controls so `Diagnose` appears above `Engineer Query` and recommendation details render at the bottom of the middle asset detail pane, with frontend regression coverage.
+- Created G-014 and added a Kind-based local Kubernetes deployment script for disposable cluster creation, all-component deployment, status checks, and cleanup.
+- Completed G-014 with a verification caveat: script syntax/help and diff checks passed, but full live Kind cluster deployment is pending until `kind` is installed locally.

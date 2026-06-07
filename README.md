@@ -147,6 +147,30 @@ The script requires Docker for the temporary `nats:2` container, an installed ba
 
 `scripts/run-local-stack.sh status` uses the seeded demo admin login to check protected streaming status when local auth is enabled.
 
+## Local Kubernetes Stack
+
+To create a disposable local Kubernetes cluster and deploy NATS JetStream, the FastAPI backend, and the production-built frontend:
+
+```bash
+scripts/run-local-k8s.sh start
+```
+
+Useful Kubernetes stack commands:
+
+```bash
+scripts/run-local-k8s.sh status
+scripts/run-local-k8s.sh stop
+```
+
+The script requires Docker, `kind`, `kubectl`, `curl`, and `python3`. On macOS, install Kind with `brew install kind` if it is not already available. It creates a Kind cluster named `maintenance-wizard-local`, builds local backend/frontend images, loads those images plus `nats:2` into the cluster, applies Kubernetes deployments/services, and exposes:
+
+- Frontend: `http://127.0.0.1:18081`
+- Backend: `http://127.0.0.1:18080`
+- NATS: `nats://127.0.0.1:14222`
+- NATS monitor: `http://127.0.0.1:18222`
+
+`scripts/run-local-k8s.sh stop` deletes the Kind cluster and generated `.local-k8s/` runtime files.
+
 ## Configuration
 
 Copy `.env.example` to `.env` when configuring real providers.
