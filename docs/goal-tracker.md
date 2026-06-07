@@ -34,7 +34,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 | G-011 | Add Hydraulic System and Overhead Crane assets. | Complete | Added two tracked steel-plant assets with alerts, sensor readings, spares, history, SOP/manual evidence, dashboard visibility, tests, and docs. | PR #9; `assets/sample_data/steel_plant_demo.json`; `frontend/src/App.test.tsx` |
 | G-012 | Enable NATS JetStream IoT streaming ingestion. | Complete | Added optional durable NATS JetStream ingestion, validation, DLQ handling, `/api/streaming/status`, frontend status, tests, docs, and local stack runner. | PR #11; PR #12; PR #13; `docs/iot-streaming-ingestion-plan.md`; `scripts/run-local-stack.sh` |
 | G-013 | Implement user login and role-based access control. | Complete | Added local SQLite users, bcrypt password hashes, JWT login, endpoint role guards, React login/session handling, role-gated navigation/actions, admin user management, tests, and docs. | `backend/app/core/auth.py`; `frontend/src/App.tsx`; `docs/auth-authorization-plan.md` |
-| G-014 | Create a local Kubernetes deployment script. | Complete With Caveat | Added a Kind-based script that creates a local cluster, installs Kind when missing, deploys NATS, backend, and frontend, reports status, and deletes the cluster/runtime files. Full live cluster verification is pending because the auto-install/start path was not executed in this local environment. | `scripts/run-local-k8s.sh`; `README.md` |
+| G-014 | Create a local Kubernetes deployment script. | Complete | Added and live-verified a Kind-based script that installs Kind when missing, creates a local cluster, deploys NATS, backend, and frontend, reports status, and deletes the cluster/runtime files. | `scripts/run-local-k8s.sh`; `README.md`; live Kind deployment |
 
 ## Detailed Goal Notes
 
@@ -70,10 +70,12 @@ Delivered:
 
 - Kind-based local Kubernetes cluster lifecycle.
 - Automatic Kind installation when missing, using Homebrew first and Go as a fallback.
-- Local Docker image build/load for backend and frontend.
+- Local Docker image build/load for backend and frontend, with a direct Kind node containerd import fallback when `kind load docker-image` fails on third-party image metadata.
 - NATS JetStream, FastAPI backend, and frontend Kubernetes deployments and services.
 - Local host port access for frontend, backend, NATS, and NATS monitor.
 - Status command with authenticated streaming-status check.
+- Configurable backend CORS origins so the Kubernetes frontend NodePort can call the backend NodePort.
+- Backend/frontend rollout restart after manifest apply so reruns pick up rebuilt stable `:local-k8s` image tags.
 - Stop command that deletes the Kind cluster and generated runtime files.
 
 Verification recorded:
@@ -81,9 +83,12 @@ Verification recorded:
 - `bash -n scripts/run-local-k8s.sh`
 - `scripts/run-local-k8s.sh --help`
 - `KIND_AUTO_INSTALL=false scripts/run-local-k8s.sh status` correctly reported missing local `kind` dependency without trying to install it.
+- `scripts/run-local-k8s.sh start` installed Kind through Homebrew, created the local Kind cluster, built/loaded images, applied manifests, and rolled out NATS, backend, and frontend.
+- `scripts/run-local-k8s.sh status` showed backend/frontend/NATS pods running, backend health OK, streaming status connected, frontend OK, and NATS monitor OK.
+- Browser verification loaded `http://127.0.0.1:18081/` and signed in as the seeded demo admin.
 - `git diff --check`
 
-Status: `Complete With Caveat`
+Status: `Complete`
 
 ### G-002: Initial Working Prototype
 

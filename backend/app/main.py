@@ -15,6 +15,7 @@ from app.core.auth import (
     get_current_user,
     require_roles,
 )
+from app.core.config import get_settings
 from app.core.security import create_access_token, verify_password
 from app.data import repository
 from app.data.database import initialize_database
@@ -58,10 +59,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Maintenance Wizard API", version="0.1.0", lifespan=lifespan)
+settings = get_settings()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

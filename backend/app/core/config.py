@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(default=480, ge=1, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
     auth_seed_demo_users: bool = Field(default=True, alias="AUTH_SEED_DEMO_USERS")
+    cors_allow_origins: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173",
+        alias="CORS_ALLOW_ORIGINS",
+    )
     streaming_enabled: bool = Field(default=False, alias="STREAMING_ENABLED")
     nats_url: str = Field(default="nats://localhost:4222", alias="NATS_URL")
     nats_stream: str = Field(default="MW_IOT", alias="NATS_STREAM")
@@ -46,6 +50,10 @@ class Settings(BaseSettings):
     )
 
     model_config = {"env_file": ".env", "extra": "ignore"}
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allow_origins.split(",") if origin.strip()]
 
 
 @lru_cache
