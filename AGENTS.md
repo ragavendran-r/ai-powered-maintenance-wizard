@@ -93,3 +93,4 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Added configurable backend `CORS_ALLOW_ORIGINS` and configured the local Kubernetes deployment to allow its frontend NodePort origin.
 - Updated the local Kubernetes runner to restart backend/frontend deployments after applying manifests so stable local image tags are refreshed on reruns.
 - Updated the diagnosis/query layout so the `Diagnose` button and Engineer Query send button share the detail-pane centerline, with a three-row query textarea.
+- Fixed the Users administration view so status-action buttons are no longer black and password reset happens in a dedicated overlay dialog opened from Reset.
