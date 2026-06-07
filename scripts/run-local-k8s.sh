@@ -10,6 +10,7 @@ NAMESPACE="${K8S_NAMESPACE:-maintenance-wizard}"
 BACKEND_IMAGE="${BACKEND_IMAGE:-maintenance-wizard-backend:local-k8s}"
 FRONTEND_IMAGE="${FRONTEND_IMAGE:-maintenance-wizard-frontend:local-k8s}"
 NATS_IMAGE="${NATS_IMAGE:-nats:2}"
+KIND_AUTO_INSTALL="${KIND_AUTO_INSTALL:-true}"
 
 BACKEND_HOST_PORT="${BACKEND_HOST_PORT:-18080}"
 FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-18081}"
@@ -40,6 +41,7 @@ Environment overrides:
   BACKEND_HOST_PORT, FRONTEND_HOST_PORT, NATS_HOST_PORT, NATS_MONITOR_HOST_PORT
   BACKEND_NODE_PORT, FRONTEND_NODE_PORT, NATS_NODE_PORT, NATS_MONITOR_NODE_PORT
   BACKEND_IMAGE, FRONTEND_IMAGE, NATS_IMAGE
+  KIND_AUTO_INSTALL=false to fail instead of installing Kind when missing
 
 URLs after start:
   Frontend: ${FRONTEND_URL}
@@ -56,9 +58,54 @@ require_command() {
   fi
 }
 
+ensure_kind() {
+  if command -v kind >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "$KIND_AUTO_INSTALL" != "true" ]]; then
+    echo "Missing required command: kind" >&2
+    echo "Install Kind manually or rerun with KIND_AUTO_INSTALL=true." >&2
+    exit 1
+  fi
+
+  echo "Kind is not installed. Attempting to install Kind for the local Kubernetes stack."
+
+  if command -v brew >/dev/null 2>&1; then
+    echo "Installing Kind with Homebrew."
+    if brew install kind; then
+      if command -v kind >/dev/null 2>&1; then
+        return 0
+      fi
+    else
+      echo "Homebrew Kind installation failed; trying Go fallback if available."
+    fi
+  fi
+
+  if command -v go >/dev/null 2>&1; then
+    echo "Installing Kind with Go."
+    if go install sigs.k8s.io/kind@latest; then
+      local go_path=""
+      go_path="$(go env GOPATH 2>/dev/null || true)"
+      if [[ -n "$go_path" ]]; then
+        export PATH="${go_path}/bin:${PATH}"
+      fi
+    else
+      echo "Go Kind installation failed."
+    fi
+    if command -v kind >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  echo "Could not install Kind automatically." >&2
+  echo "Install Homebrew or Go, or install Kind manually and rerun this script." >&2
+  exit 1
+}
+
 require_runtime() {
   require_command docker
-  require_command kind
+  ensure_kind
   require_command kubectl
   require_command curl
   require_command python3
@@ -410,7 +457,7 @@ status_stack() {
 }
 
 stop_stack() {
-  require_command kind
+  ensure_kind
   if cluster_exists; then
     echo "Deleting Kind cluster: ${CLUSTER_NAME}"
     kind delete cluster --name "$CLUSTER_NAME"

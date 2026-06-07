@@ -88,3 +88,4 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Repositioned dashboard controls so `Diagnose` appears above `Engineer Query` and recommendation details render at the bottom of the middle asset detail pane, with frontend regression coverage.
 - Created G-014 and added a Kind-based local Kubernetes deployment script for disposable cluster creation, all-component deployment, status checks, and cleanup.
 - Completed G-014 with a verification caveat: script syntax/help and diff checks passed, but full live Kind cluster deployment is pending until `kind` is installed locally.
+- Updated the local Kubernetes runner so it can install Kind automatically when missing, with `KIND_AUTO_INSTALL=false` available for fail-fast environments.

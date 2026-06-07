@@ -34,7 +34,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 | G-011 | Add Hydraulic System and Overhead Crane assets. | Complete | Added two tracked steel-plant assets with alerts, sensor readings, spares, history, SOP/manual evidence, dashboard visibility, tests, and docs. | PR #9; `assets/sample_data/steel_plant_demo.json`; `frontend/src/App.test.tsx` |
 | G-012 | Enable NATS JetStream IoT streaming ingestion. | Complete | Added optional durable NATS JetStream ingestion, validation, DLQ handling, `/api/streaming/status`, frontend status, tests, docs, and local stack runner. | PR #11; PR #12; PR #13; `docs/iot-streaming-ingestion-plan.md`; `scripts/run-local-stack.sh` |
 | G-013 | Implement user login and role-based access control. | Complete | Added local SQLite users, bcrypt password hashes, JWT login, endpoint role guards, React login/session handling, role-gated navigation/actions, admin user management, tests, and docs. | `backend/app/core/auth.py`; `frontend/src/App.tsx`; `docs/auth-authorization-plan.md` |
-| G-014 | Create a local Kubernetes deployment script. | Complete With Caveat | Added a Kind-based script that creates a local cluster, deploys NATS, backend, and frontend, reports status, and deletes the cluster/runtime files. Full live cluster verification is pending because `kind` is not installed in this local environment. | `scripts/run-local-k8s.sh`; `README.md` |
+| G-014 | Create a local Kubernetes deployment script. | Complete With Caveat | Added a Kind-based script that creates a local cluster, installs Kind when missing, deploys NATS, backend, and frontend, reports status, and deletes the cluster/runtime files. Full live cluster verification is pending because the auto-install/start path was not executed in this local environment. | `scripts/run-local-k8s.sh`; `README.md` |
 
 ## Detailed Goal Notes
 
@@ -69,6 +69,7 @@ Requested outcome:
 Delivered:
 
 - Kind-based local Kubernetes cluster lifecycle.
+- Automatic Kind installation when missing, using Homebrew first and Go as a fallback.
 - Local Docker image build/load for backend and frontend.
 - NATS JetStream, FastAPI backend, and frontend Kubernetes deployments and services.
 - Local host port access for frontend, backend, NATS, and NATS monitor.
@@ -79,7 +80,7 @@ Verification recorded:
 
 - `bash -n scripts/run-local-k8s.sh`
 - `scripts/run-local-k8s.sh --help`
-- `scripts/run-local-k8s.sh status` correctly reported missing local `kind` dependency.
+- `KIND_AUTO_INSTALL=false scripts/run-local-k8s.sh status` correctly reported missing local `kind` dependency without trying to install it.
 - `git diff --check`
 
 Status: `Complete With Caveat`
