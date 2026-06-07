@@ -84,3 +84,4 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Added `scripts/run-local-stack.sh` as the common local runner for Docker NATS JetStream, streaming-enabled FastAPI, and Vite, plus README/progress documentation and PR #12.
 - Added quick sample NATS alert publish steps to `docs/iot-streaming-ingestion-plan.md` for testing the running IoT ingestion flow.
 - Implemented G-013 user login and role-based access control on `feat/auth-rbac`: local SQLite users, bcrypt hashes, JWT auth, endpoint role guards, React login/session handling, role-gated UI, admin user management, authenticated report downloads, schema version 4 docs, passing backend/frontend verification, and an auth-aware local stack status check.
+- Added a steel-plant favicon SVG linked from the frontend HTML entrypoint so the browser tab shows a plant-themed icon.
