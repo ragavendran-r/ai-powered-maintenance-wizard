@@ -710,7 +710,12 @@ export function App() {
                       <h2>Engineer Query</h2>
                     </div>
                     <div className="queryRow">
-                      <input value={question} onChange={(event) => setQuestion(event.target.value)} />
+                      <textarea
+                        aria-label="Engineer question"
+                        rows={3}
+                        value={question}
+                        onChange={(event) => setQuestion(event.target.value)}
+                      />
                       <button onClick={sendQuestion} title="Ask maintenance wizard">
                         <Send size={18} />
                       </button>
