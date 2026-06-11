@@ -1,7 +1,59 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { api, type UserRole } from './services/api'
+
+const sampleFiles = [
+  {
+    sourceType: 'sop',
+    equipmentId: 'RM-DRIVE-01',
+    assetName: 'Hot Strip Mill Main Drive Motor',
+    path: '../assets/ingestion_samples/RM-DRIVE-01_SOP_main_drive_bearing_vibration.md',
+    fileName: 'RM-DRIVE-01_SOP_main_drive_bearing_vibration.md',
+    mimeType: 'text/markdown',
+  },
+  {
+    sourceType: 'manual',
+    equipmentId: 'BF-BLOWER-02',
+    assetName: 'Blast Furnace Combustion Air Blower',
+    path: '../assets/ingestion_samples/BF-BLOWER-02_MANUAL_inlet_guide_vane_actuator.txt',
+    fileName: 'BF-BLOWER-02_MANUAL_inlet_guide_vane_actuator.txt',
+    mimeType: 'text/plain',
+  },
+  {
+    sourceType: 'log',
+    equipmentId: 'HYD-SYS-04',
+    assetName: 'Hot Rolling Hydraulic System',
+    path: '../assets/ingestion_samples/HYD-SYS-04_LOG_hydraulic_temperature_pulsation.log',
+    fileName: 'HYD-SYS-04_LOG_hydraulic_temperature_pulsation.log',
+    mimeType: 'text/plain',
+  },
+  {
+    sourceType: 'alert',
+    equipmentId: 'OH-CRANE-05',
+    assetName: 'Melt Shop Overhead Crane',
+    path: '../assets/ingestion_samples/OH-CRANE-05_ALERT_hoist_current_brake_temperature.json',
+    fileName: 'OH-CRANE-05_ALERT_hoist_current_brake_temperature.json',
+    mimeType: 'application/json',
+  },
+  {
+    sourceType: 'spares',
+    equipmentId: 'CC-PUMP-03',
+    assetName: 'Continuous Caster Cooling Water Pump',
+    path: '../assets/ingestion_samples/CC-PUMP-03_SPARES_cooling_pump_inventory.csv',
+    fileName: 'CC-PUMP-03_SPARES_cooling_pump_inventory.csv',
+    mimeType: 'text/csv',
+  },
+  {
+    sourceType: 'history',
+    equipmentId: 'RM-DRIVE-01',
+    assetName: 'Hot Strip Mill Main Drive Motor',
+    path: '../assets/ingestion_samples/RM-DRIVE-01_HISTORY_drive_bearing_maintenance.json',
+    fileName: 'RM-DRIVE-01_HISTORY_drive_bearing_maintenance.json',
+    mimeType: 'application/json',
+  },
+]
 
 const dashboard = {
   equipment_count: 5,
@@ -377,6 +429,40 @@ describe('Maintenance Wizard dashboard', () => {
       'http://localhost:8000/api/ingest/document-file',
       expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
     )
+  })
+
+  it('uploads every bundled ingestion sample file with the intended source type and asset', async () => {
+    render(<App />)
+    await signIn()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Ingestion' }))
+    expect(await screen.findByText('IoT Stream')).toBeInTheDocument()
+
+    for (const sample of sampleFiles) {
+      const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText(sample.assetName).closest('button')
+      if (!assetButton) {
+        throw new Error(`Missing asset button for ${sample.assetName}`)
+      }
+      fireEvent.click(assetButton)
+      fireEvent.click(screen.getByRole('button', { name: 'Ingestion' }))
+      fireEvent.change(screen.getByLabelText('Source'), { target: { value: sample.sourceType } })
+      const content = readFileSync(sample.path, 'utf8')
+      const file = new File([content], sample.fileName, { type: sample.mimeType })
+      fireEvent.change(screen.getByLabelText('Ingestion file'), { target: { files: [file] } })
+      fireEvent.click(screen.getByRole('button', { name: /upload/i }))
+
+      await waitFor(() => {
+        expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()
+      })
+
+      const uploadCall = [...vi.mocked(fetch).mock.calls]
+        .reverse()
+        .find(([url]) => url.toString().endsWith('/api/ingest/document-file'))
+      const body = uploadCall?.[1]?.body as FormData
+      expect(body.get('source_type')).toBe(sample.sourceType)
+      expect(body.get('equipment_id')).toBe(sample.equipmentId)
+      expect((body.get('file') as File).name).toBe(sample.fileName)
+    }
   })
 
   it('imports document JSON from the ingestion panel', async () => {
