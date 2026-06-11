@@ -2,6 +2,7 @@ from typing import Any, Optional
 
 import json
 import sqlite3
+from threading import Lock
 import uuid
 
 from app.core.security import hash_password
@@ -9,8 +10,18 @@ from app.data.database import connect, initialize_database
 from app.services.vector_index import build_chunks_for_document
 
 
+_READY = False
+_READY_LOCK = Lock()
+
+
 def ensure_ready() -> None:
-    initialize_database(seed=True)
+    global _READY
+    if _READY:
+        return
+    with _READY_LOCK:
+        if not _READY:
+            initialize_database(seed=True)
+            _READY = True
 
 
 def list_equipment() -> list[dict[str, Any]]:

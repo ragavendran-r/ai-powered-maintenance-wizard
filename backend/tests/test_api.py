@@ -1,5 +1,6 @@
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -71,6 +72,22 @@ def test_database_status_reports_seeded_tables():
     assert "maintenance_labels" in status["counts"]
     assert "streaming_messages" in status["counts"]
     assert status["counts"]["users"] == 6
+
+
+def test_repository_initializes_once_under_concurrent_access(monkeypatch):
+    calls = 0
+
+    def fake_initialize_database(seed: bool = True):
+        nonlocal calls
+        calls += 1
+
+    monkeypatch.setattr(repository, "_READY", False)
+    monkeypatch.setattr(repository, "initialize_database", fake_initialize_database)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(lambda _: repository.ensure_ready(), range(16)))
+
+    assert calls == 1
 
 
 def test_login_returns_bearer_token_and_current_user():
