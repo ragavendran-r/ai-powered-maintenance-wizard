@@ -19,16 +19,21 @@ Use this file for durable product and engineering rules. Use `docs/hooks.md` for
   - `cd frontend && npm run build`
 - Documentation-only changes require a link/path sanity check for touched docs.
 - Update `docs/progress.md` at the end of each implementation session with completed work, checks run, next steps, blockers, and decisions.
-- Send a desktop notification when a requested task is complete.
+- Send desktop and mobile notifications when a requested task is complete.
 
 ## Completion Notifications
 
-- At the end of every completed task, send a local desktop notification before the final response when the host environment supports it.
-- On macOS, use:
+- At the end of every completed task, send local desktop and mobile notifications before the final response when the host environment supports them.
+- Prefer the repository helper:
+  ```bash
+  scripts/notify-complete.sh "Maintenance Wizard" "Task complete."
+  ```
+- For mobile notification delivery, set `MOBILE_NTFY_TOPIC` to an ntfy topic subscribed from the user's phone. Optionally set `MOBILE_NTFY_URL` for a self-hosted ntfy server.
+- On macOS, desktop-only fallback is:
   ```bash
   osascript -e 'display notification "Task complete." with title "Maintenance Wizard"'
   ```
-- If desktop notification fails or is unavailable, mention that in the final response.
+- If desktop or mobile notification fails or is unavailable, mention that in the final response.
 
 ## Product Behavior
 

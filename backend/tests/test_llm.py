@@ -1,5 +1,6 @@
 import httpx
 
+from app.models.schemas import DocumentIntelligence
 from app.services.llm import MockLLMClient, OpenAIClient, OllamaClient
 
 
@@ -40,6 +41,46 @@ def test_openai_client_parses_structured_response(monkeypatch):
     assert context.probable_root_causes == ["Bearing wear"]
     assert context.immediate_actions == ["Reduce load"]
     assert context.confidence_adjustment == 0.1
+
+
+def test_openai_client_parses_generic_structured_response(monkeypatch):
+    def fake_post(*args, **kwargs):
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://example.test/v1/chat/completions"),
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"document_id":"DOC-1",'
+                                '"summary":"Bearing inspection SOP.",'
+                                '"asset_ids":["RM-DRIVE-01"],'
+                                '"components":["bearing"],'
+                                '"failure_modes":["wear"],'
+                                '"symptoms":["vibration"],'
+                                '"safety_constraints":["lockout"],'
+                                '"spares":["bearing"],'
+                                '"thresholds":["above 7 mm/s"]}'
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    context = OpenAIClient("test-key", "test-model", "https://example.test/v1", 2.0).complete_model(
+        "prompt",
+        DocumentIntelligence,
+        "Return document intelligence.",
+        lambda provider, reason: DocumentIntelligence(document_id="fallback", summary=reason),
+    )
+
+    assert context.used_live_provider is True
+    assert context.provider == "openai"
+    assert context.document_id == "DOC-1"
+    assert context.components == ["bearing"]
 
 
 def test_openai_client_falls_back_on_invalid_json(monkeypatch):

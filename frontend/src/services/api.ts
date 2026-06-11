@@ -58,6 +58,7 @@ export interface Evidence {
   excerpt: string
   equipment_id?: string
   timestamp?: string
+  relevance_reason?: string | null
 }
 
 export interface SparePart {
@@ -82,6 +83,19 @@ export interface AnomalyFinding {
   trend_delta: number
   risk_level: RiskLevel
   explanation: string
+  context_class?: string | null
+  context_rationale?: string | null
+  recommended_inspection_steps?: string[]
+}
+
+export interface ReasoningExplanation {
+  subject_type: 'prediction' | 'anomaly' | 'recommendation' | 'retrieval'
+  summary: string
+  driver_explanations: string[]
+  cautions: string[]
+  recommended_next_steps: string[]
+  used_live_provider: boolean
+  provider: string
 }
 
 export interface HealthSummary {
@@ -116,6 +130,7 @@ export interface Recommendation {
   spares_strategy: string[]
   evidence: Evidence[]
   learning_notes: string[]
+  reasoning_explanation?: ReasoningExplanation | null
   report_summary: string
 }
 
@@ -217,6 +232,7 @@ export interface DocumentIngestResponse {
     title: string
     content: string
   }
+  intelligence?: DocumentIntelligence[]
 }
 
 export interface RecordIngestResponse {
@@ -235,6 +251,40 @@ export interface StreamingStatus {
   failed_count: number
   last_message_timestamp?: string
   last_error?: string
+}
+
+export interface DocumentIntelligence {
+  document_id: string
+  summary: string
+  asset_ids: string[]
+  components: string[]
+  failure_modes: string[]
+  symptoms: string[]
+  safety_constraints: string[]
+  spares: string[]
+  thresholds: string[]
+  used_live_provider: boolean
+  provider: string
+}
+
+export interface MaintenanceLabel {
+  source_type: 'maintenance_event' | 'feedback'
+  source_id: string
+  equipment_id?: string | null
+  failure_mode: string
+  component: string
+  root_cause: string
+  action_class: string
+  outcome_status: string
+  signal_hints: string[]
+  usable_for_training: boolean
+  used_live_provider: boolean
+  provider: string
+}
+
+export interface MaintenanceLabelsResponse {
+  equipment_id?: string | null
+  labels: MaintenanceLabel[]
 }
 
 export interface UserCreateRequest {
@@ -314,6 +364,14 @@ export const api = {
     request<RecordIngestResponse>('/api/ingest/records', {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+  documentIntelligence: (equipmentId: string) =>
+    request<DocumentIntelligence[]>(`/api/equipment/${equipmentId}/document-intelligence`),
+  maintenanceLabels: (equipmentId: string) =>
+    request<MaintenanceLabelsResponse>(`/api/equipment/${equipmentId}/maintenance-labels`),
+  generateMaintenanceLabels: (equipmentId: string) =>
+    request<MaintenanceLabelsResponse>(`/api/equipment/${equipmentId}/maintenance-labels`, {
+      method: 'POST',
     }),
   feedback: (
     recommendationId: string,

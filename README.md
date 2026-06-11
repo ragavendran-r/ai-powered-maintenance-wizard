@@ -9,15 +9,15 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 - FastAPI backend with health, dashboard, equipment health, alert, chat, diagnosis, prediction, report, and feedback endpoints.
 - React + TypeScript + Vite frontend for a maintenance dashboard, left-nav ingestion view, engineer chat, recommendation panel, report export, and detailed feedback controls.
 - Sample steel-plant data for a hot strip mill drive, blast furnace blower, caster cooling pump, hot rolling hydraulic system, and melt shop overhead crane.
-- SQLite-backed persistence seeded from five sample assets with equipment, alerts, sensor readings, spares, maintenance events, documents, document chunks, and feedback.
-- Local document chunk index with deterministic embeddings for offline retrieval-augmented answers.
-- Time-series sensor readings with rolling-baseline anomaly detection and risk impact.
-- Provider-agnostic LLM adapters for OpenAI and Ollama with structured JSON validation and deterministic fallback reasoning.
+- SQLite-backed persistence seeded from five sample assets with equipment, alerts, sensor readings, spares, maintenance events, documents, document chunks, document intelligence, maintenance labels, and feedback.
+- Local document chunk index with deterministic embeddings, hybrid retrieval scoring, optional LLM/SLM reranking, and relevance reasons for offline retrieval-augmented answers.
+- Time-series sensor readings with rolling-baseline anomaly detection, risk impact, and optional LLM/SLM context classification with inspection steps.
+- Provider-agnostic LLM/SLM adapters for OpenAI and Ollama with structured JSON validation and deterministic fallback reasoning.
 - Markdown maintenance report export.
 - API and frontend ingestion for text/Markdown/CSV/log/JSON and embedded-text PDF documents.
 - Structured JSON record ingestion for equipment, alerts, spares, sensor readings, and maintenance history.
 - Optional async IoT streaming ingestion via NATS JetStream for plant applications and edge gateways.
-- Engineer feedback capture with equipment-linked root cause, action, outcome, and notes reused in later recommendations and prediction drivers.
+- Engineer feedback capture with equipment-linked root cause, action, outcome, and notes normalized into reusable maintenance labels for later recommendations and prediction drivers.
 - Local login and role-based authorization for steel-plant users with admin, engineer, planner, operator, and API-only service roles.
 - Backend and frontend tests for core prototype behavior.
 
@@ -25,11 +25,11 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 
 - Reactive troubleshooting through natural-language chat and diagnosis requests across the five tracked steel-plant assets.
 - Root-cause suggestions merged from deterministic rules, retrieved evidence, prior feedback, and optional LLM output.
-- Degradation and remaining useful life estimates using explainable heuristic risk drivers.
-- Proactive abnormality detection through rolling baseline, z-score, threshold breach, and trend-delta analysis.
+- Degradation and remaining useful life estimates using explainable heuristic risk drivers, normalized maintenance labels, and grounded reasoning explanations.
+- Proactive abnormality detection through rolling baseline, z-score, threshold breach, trend-delta analysis, and context classification.
 - Prioritized maintenance actions based on risk level, active alerts, equipment criticality, spares availability, lead time, maintenance history, and feedback signals.
 - Structured Markdown report export with diagnosis, risk, RUL, root causes, immediate actions, planned actions, spares strategy, learning notes, evidence, and summary.
-- Continuous-improvement loop through equipment-linked engineer feedback reused in future recommendation ranking, LLM prompt context, reports, and prediction drivers.
+- Continuous-improvement loop through equipment-linked engineer feedback reused in future recommendation ranking, LLM prompt context, normalized training labels, reports, and prediction drivers.
 
 ## Project Layout
 
@@ -96,6 +96,10 @@ curl -X POST http://localhost:8000/api/predict \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"equipment_id":"RM-DRIVE-01"}'
+curl -X POST http://localhost:8000/api/equipment/RM-DRIVE-01/maintenance-labels \
+  -H "Authorization: Bearer $TOKEN"
+curl http://localhost:8000/api/equipment/RM-DRIVE-01/document-intelligence \
+  -H "Authorization: Bearer $TOKEN"
 curl -X POST http://localhost:8000/api/ingest/document-file \
   -H "Authorization: Bearer $TOKEN" \
   -F source_type=sop \
@@ -187,17 +191,17 @@ Supported LLM provider values:
 - `openai`: OpenAI-compatible chat completions adapter using `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL`.
 - `ollama`: Ollama chat adapter using `OLLAMA_BASE_URL` and `OLLAMA_MODEL`.
 
-Provider responses must return structured JSON with `summary`, `probable_root_causes`, `immediate_actions`, `planned_actions`, and `confidence_adjustment`. Missing keys, malformed JSON, timeout, or network failure automatically fall back to deterministic local reasoning so the prototype remains runnable without secrets.
+Provider responses must return the structured JSON contract requested by each feature. Recommendation generation expects `summary`, `probable_root_causes`, `immediate_actions`, `planned_actions`, and `confidence_adjustment`; document intelligence, maintenance labels, anomaly context, retrieval reranking, and reasoning explanations each use their own Pydantic-validated JSON schemas. Missing keys, malformed JSON, timeout, or network failure automatically fall back to deterministic local reasoning so the prototype remains runnable without secrets.
 
 The backend creates and seeds `backend/data/maintenance_wizard.db` automatically on startup unless `DATABASE_PATH` is set to another SQLite file path. Documents are chunked into `document_chunks` with deterministic local embeddings for retrieval.
 
-Document upload supports `.txt`, `.md`, `.markdown`, `.csv`, `.log`, `.json`, and `.pdf`. Parsed text is stored in SQLite and indexed into retrieval chunks.
+Document upload supports `.txt`, `.md`, `.markdown`, `.csv`, `.log`, `.json`, and `.pdf`. Parsed text is stored in SQLite, indexed into retrieval chunks, and processed into document intelligence with summary, assets, components, failure modes, symptoms, safety constraints, spares, and thresholds.
 
-Structured record ingestion supports `equipment`, `alerts`, `spares`, `sensor_readings`, and `maintenance_events`. Engineer feedback is stored with `equipment_id`, `status`, `corrected_diagnosis`, `actual_root_cause`, `action_taken`, `outcome`, and `notes`.
+Structured record ingestion supports `equipment`, `alerts`, `spares`, `sensor_readings`, and `maintenance_events`. Maintenance events and engineer feedback are normalized into maintenance labels with failure mode, component, root cause, action class, outcome status, signal hints, and training usability. Engineer feedback is stored with `equipment_id`, `status`, `corrected_diagnosis`, `actual_root_cause`, `action_taken`, `outcome`, and `notes`.
 
 NATS JetStream streaming ingestion is disabled by default. Set `STREAMING_ENABLED=true` and configure `NATS_URL` to consume IoT envelopes from `steelplant.iot.*` subjects into the same structured record tables used by JSON ingestion. The backend uses the `MW_IOT` stream, `maintenance-wizard-ingestor` durable consumer, explicit acknowledgments after persistence, and `steelplant.iot.dlq` for invalid messages.
 
-The current SQLite schema version is `4`. Lightweight startup migrations add `feedback.equipment_id`, create `streaming_messages`, and create local auth tables for older local databases. Full migration tooling is still a production hardening item.
+The current SQLite schema version is `5`. Lightweight startup migrations add `feedback.equipment_id`, create `document_intelligence`, `maintenance_labels`, `streaming_messages`, and local auth tables for older local databases. Full migration tooling is still a production hardening item.
 
 ## Authentication And Authorization
 
@@ -218,13 +222,13 @@ Set `JWT_SECRET_KEY` to a strong secret outside local demos. External OIDC/SAML 
 
 ## LLM And Learning Behavior
 
-LLMs are invoked only through recommendation generation, which is used by diagnosis, chat, and report flows. They are not used for raw ingestion, anomaly detection, risk scoring, RUL calculation, or feedback storage.
+LLMs/SLMs are invoked only after deterministic ingestion and validation. They can enrich document ingestion with structured intelligence, normalize maintenance events and feedback into labels, rerank retrieved evidence, classify anomaly context, and explain predictions/recommendations. They are not the source of truth for raw IoT ingestion, anomaly scores, risk scoring, or RUL calculation.
 
 LLMs are not involved in NATS IoT streaming ingestion. Streaming payloads are validated deterministically and persisted before later diagnosis, chat, report, and recommendation flows use the updated data.
 
-When configured, the LLM prompt includes equipment context, selected alert, symptoms/query, computed risk, failure probability, RUL, retrieved evidence, and recent engineer feedback notes. The backend validates structured JSON before merging LLM suggestions into deterministic recommendations.
+When configured, recommendation prompts include equipment context, selected alert, symptoms/query, computed risk, failure probability, RUL, retrieved evidence, normalized maintenance labels, and recent engineer feedback notes. The backend validates structured JSON before merging LLM suggestions into deterministic recommendations.
 
-Engineer feedback improves future behavior without retraining. Accepted or corrected feedback can promote known root causes and confirmed actions, appear as learning notes in reports, and add prediction drivers for the relevant equipment.
+Engineer feedback improves future behavior without retraining. Accepted or corrected feedback can promote known root causes and confirmed actions, appear as learning notes in reports, produce normalized labels, and add prediction drivers for the relevant equipment.
 
 ## Tests
 

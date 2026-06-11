@@ -1,0 +1,5 @@
+2026-06-06T07:40:00+05:30 asset=HYD-SYS-04 source_type=log signal=hydraulic_oil_temperature value=58.4 unit=C note="Temperature tracking above normal warmup band."
+2026-06-06T07:45:00+05:30 asset=HYD-SYS-04 source_type=log signal=hydraulic_pressure_pulsation value=13.8 unit=bar note="Pulsation increased during hot rolling mill stand adjustment."
+2026-06-06T07:50:00+05:30 asset=HYD-SYS-04 source_type=log signal=hydraulic_oil_temperature value=63.1 unit=C threshold=60 note="Temperature exceeded advisory threshold."
+2026-06-06T07:55:00+05:30 asset=HYD-SYS-04 source_type=log signal=hydraulic_pressure_pulsation value=18.5 unit=bar threshold=15 note="Pressure pulsation exceeded servo valve inspection threshold."
+2026-06-06T08:00:00+05:30 asset=HYD-SYS-04 source_type=log action="Reduce stand adjustment rate and inspect servo valve filter element, cooling water flow, and oil contamination indicators."

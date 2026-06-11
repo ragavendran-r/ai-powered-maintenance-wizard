@@ -63,7 +63,7 @@ Keep `docs/progress.md` updated at the end of each implementation session. Recor
 
 ## Project Rules And Hooks
 
-Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/hooks.md` for branch, pull request, verification, notification, and demo handoff guardrails. In particular, do not commit or push directly to `main`; use a feature branch and raise a pull request targeting `main`. Send a desktop notification whenever a requested task is complete; if notification delivery fails, mention that in the final response.
+Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/hooks.md` for branch, pull request, verification, notification, and demo handoff guardrails. In particular, do not commit or push directly to `main`; use a feature branch and raise a pull request targeting `main`. Send desktop and mobile notifications whenever a requested task is complete; if either notification channel is unavailable, not configured, or fails, mention that in the final response.
 
 ## Latest Session Progress
 
@@ -76,7 +76,7 @@ Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/h
 - Implemented the missing-feature pass on branch `feat/learning-ingestion-ui`: frontend ingestion controls, full recommendation detail visibility, detailed engineer feedback capture, and feedback reuse in future recommendations and prediction drivers. Tests/build passed; browser DOM verification passed; screenshot capture timed out.
 - Added `docs/goal-tracker.md` as the standalone goal ledger after merging PR #4, preserving the branch/PR workflow.
 - Refreshed `README.md` and `docs/architecture.md` after merging PR #5 so user-facing and system architecture docs match the current ingestion, LLM, feedback-learning, and schema behavior.
-- Added a durable completion-notification rule requiring a desktop notification at the end of every completed task.
+- Added a durable completion-notification rule requiring desktop and mobile notifications at the end of every completed task.
 - Moved the complete ingestion section into a dedicated left-nav Ingestion view after merging PR #7, verified the frontend build/tests and browser DOM behavior, and opened PR #8 from `feat/ingestion-view` to `main`.
 - Added two tracked sample assets, `HYD-SYS-04` Hot Rolling Hydraulic System and `OH-CRANE-05` Melt Shop Overhead Crane, with alerts, sensor readings, spares, maintenance history, SOP/manual evidence, dashboard visibility, tests, docs, and PR #9.
 - Merged PR #10 for streaming-goal docs and asset visibility, then implemented optional NATS JetStream IoT streaming ingestion with `/api/streaming/status`, frontend IoT Stream status, schema version 3 audit records, tests, docs, and PR #11.

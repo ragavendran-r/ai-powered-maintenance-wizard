@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
 import json
-from typing import Any, Optional
+from typing import Callable, Optional, TypeVar
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
+
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class LLMContext(BaseModel):
@@ -21,8 +24,22 @@ class LLMProviderError(RuntimeError):
 
 
 class LLMClient(ABC):
-    @abstractmethod
     def complete_json(self, prompt: str) -> LLMContext:
+        return self.complete_model(
+            prompt,
+            LLMContext,
+            _system_prompt(),
+            lambda provider, reason: _fallback_context(provider, reason),
+        )
+
+    @abstractmethod
+    def complete_model(
+        self,
+        prompt: str,
+        response_model: type[T],
+        system_prompt: str,
+        fallback_factory: Callable[[str, str], T],
+    ) -> T:
         raise NotImplementedError
 
 
@@ -31,13 +48,14 @@ class MockLLMClient(LLMClient):
         self.provider = provider
         self.reason = reason
 
-    def complete_json(self, prompt: str) -> LLMContext:
-        return LLMContext(
-            summary=f"Deterministic maintenance reasoning was used because {self.reason}.",
-            confidence_adjustment=0.0,
-            used_live_provider=False,
-            provider=self.provider,
-        )
+    def complete_model(
+        self,
+        prompt: str,
+        response_model: type[T],
+        system_prompt: str,
+        fallback_factory: Callable[[str, str], T],
+    ) -> T:
+        return fallback_factory(self.provider, self.reason)
 
 
 class OpenAIClient(LLMClient):
@@ -47,9 +65,15 @@ class OpenAIClient(LLMClient):
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
 
-    def complete_json(self, prompt: str) -> LLMContext:
+    def complete_model(
+        self,
+        prompt: str,
+        response_model: type[T],
+        system_prompt: str,
+        fallback_factory: Callable[[str, str], T],
+    ) -> T:
         if not self.api_key:
-            return MockLLMClient("openai", "OPENAI_API_KEY is not set").complete_json(prompt)
+            return fallback_factory("openai", "OPENAI_API_KEY is not set")
         try:
             response = httpx.post(
                 f"{self.base_url}/chat/completions",
@@ -57,7 +81,7 @@ class OpenAIClient(LLMClient):
                 json={
                     "model": self.model,
                     "messages": [
-                        {"role": "system", "content": _system_prompt()},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.1,
@@ -67,9 +91,9 @@ class OpenAIClient(LLMClient):
             )
             response.raise_for_status()
             content = response.json()["choices"][0]["message"]["content"]
-            return _parse_context(content, provider="openai")
+            return _parse_model(content, response_model, provider="openai")
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, ValidationError) as exc:
-            return MockLLMClient("openai", f"OpenAI call failed or returned invalid JSON: {exc}").complete_json(prompt)
+            return fallback_factory("openai", f"OpenAI call failed or returned invalid JSON: {exc}")
 
 
 class OllamaClient(LLMClient):
@@ -78,14 +102,20 @@ class OllamaClient(LLMClient):
         self.model = model
         self.timeout_seconds = timeout_seconds
 
-    def complete_json(self, prompt: str) -> LLMContext:
+    def complete_model(
+        self,
+        prompt: str,
+        response_model: type[T],
+        system_prompt: str,
+        fallback_factory: Callable[[str, str], T],
+    ) -> T:
         try:
             response = httpx.post(
                 f"{self.base_url.rstrip('/')}/api/chat",
                 json={
                     "model": self.model,
                     "messages": [
-                        {"role": "system", "content": _system_prompt()},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt},
                     ],
                     "stream": False,
@@ -95,9 +125,9 @@ class OllamaClient(LLMClient):
             )
             response.raise_for_status()
             content = response.json()["message"]["content"]
-            return _parse_context(content, provider="ollama")
+            return _parse_model(content, response_model, provider="ollama")
         except (httpx.HTTPError, KeyError, TypeError, ValueError, ValidationError) as exc:
-            return MockLLMClient("ollama", f"Ollama call failed or returned invalid JSON: {exc}").complete_json(prompt)
+            return fallback_factory("ollama", f"Ollama call failed or returned invalid JSON: {exc}")
 
 
 def build_llm_client(
@@ -125,7 +155,21 @@ def _system_prompt() -> str:
     )
 
 
-def _parse_context(content: str, provider: str) -> LLMContext:
+def _fallback_context(provider: str, reason: str) -> LLMContext:
+    return LLMContext(
+        summary=f"Deterministic maintenance reasoning was used because {reason}.",
+        confidence_adjustment=0.0,
+        used_live_provider=False,
+        provider=provider,
+    )
+
+
+def _parse_model(content: str, response_model: type[T], provider: str) -> T:
     payload = json.loads(content)
-    context = LLMContext.model_validate(payload)
-    return context.model_copy(update={"used_live_provider": True, "provider": provider})
+    context = response_model.model_validate(payload)
+    update_payload = {}
+    if "used_live_provider" in response_model.model_fields:
+        update_payload["used_live_provider"] = True
+    if "provider" in response_model.model_fields:
+        update_payload["provider"] = provider
+    return context.model_copy(update=update_payload)

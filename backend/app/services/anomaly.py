@@ -10,7 +10,11 @@ def sensor_readings(equipment_id: Optional[str] = None) -> list[SensorReading]:
     return [SensorReading(**record) for record in repository.list_sensor_readings(equipment_id)]
 
 
-def analyze_anomalies(equipment_id: Optional[str] = None, window: int = 5) -> list[AnomalyFinding]:
+def analyze_anomalies(
+    equipment_id: Optional[str] = None,
+    window: int = 5,
+    include_context: bool = True,
+) -> list[AnomalyFinding]:
     grouped: dict[tuple[str, str], list[SensorReading]] = defaultdict(list)
     for reading in sensor_readings(equipment_id):
         grouped[(reading.equipment_id, reading.signal)].append(reading)
@@ -47,7 +51,12 @@ def analyze_anomalies(equipment_id: Optional[str] = None, window: int = 5) -> li
                 )
             )
 
-    return sorted(findings, key=lambda item: (_risk_rank(item.risk_level), item.timestamp), reverse=True)
+    sorted_findings = sorted(findings, key=lambda item: (_risk_rank(item.risk_level), item.timestamp), reverse=True)
+    if not include_context:
+        return sorted_findings
+    from app.services.anomaly_context import enrich_anomaly_findings
+
+    return enrich_anomaly_findings(sorted_findings)
 
 
 def _risk_level(z_score: float, threshold_breached: bool, trend_delta: float) -> RiskLevel:

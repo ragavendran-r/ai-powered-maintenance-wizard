@@ -153,6 +153,42 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS document_intelligence (
+        document_id TEXT PRIMARY KEY,
+        summary TEXT NOT NULL,
+        asset_ids TEXT NOT NULL,
+        components TEXT NOT NULL,
+        failure_modes TEXT NOT NULL,
+        symptoms TEXT NOT NULL,
+        safety_constraints TEXT NOT NULL,
+        spares TEXT NOT NULL,
+        thresholds TEXT NOT NULL,
+        used_live_provider INTEGER NOT NULL DEFAULT 0,
+        provider TEXT NOT NULL DEFAULT 'mock',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (document_id) REFERENCES documents(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS maintenance_labels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_type TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        equipment_id TEXT,
+        failure_mode TEXT NOT NULL,
+        component TEXT NOT NULL,
+        root_cause TEXT NOT NULL,
+        action_class TEXT NOT NULL,
+        outcome_status TEXT NOT NULL,
+        signal_hints TEXT NOT NULL,
+        usable_for_training INTEGER NOT NULL DEFAULT 1,
+        used_live_provider INTEGER NOT NULL DEFAULT 0,
+        provider TEXT NOT NULL DEFAULT 'mock',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(source_type, source_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS streaming_messages (
         message_id TEXT PRIMARY KEY,
         source TEXT NOT NULL,
@@ -191,7 +227,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 
 def get_database_path() -> Path:
@@ -318,7 +354,9 @@ def database_status() -> dict[str, Any]:
         "maintenance_events",
         "documents",
         "document_chunks",
+        "document_intelligence",
         "feedback",
+        "maintenance_labels",
         "streaming_messages",
         "users",
         "auth_audit_events",

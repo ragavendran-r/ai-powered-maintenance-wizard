@@ -274,7 +274,10 @@ export function App() {
         equipmentId: selectedEquipment,
         title: ingestTitle.trim() || undefined,
       })
-      setIngestionMessage(`Stored ${result.documents} document${result.documents === 1 ? '' : 's'}`)
+      const intelligenceCount = result.intelligence?.length ?? 0
+      setIngestionMessage(
+        `Stored ${result.documents} document${result.documents === 1 ? '' : 's'} and extracted ${intelligenceCount} intelligence profile${intelligenceCount === 1 ? '' : 's'}`,
+      )
       setIngestTitle('')
       setIngestFile(null)
       await loadDashboard()
@@ -290,7 +293,10 @@ export function App() {
         const documents = Array.isArray(parsed) ? parsed : parsed.documents
         if (!Array.isArray(documents)) throw new Error('documents payload must be an array')
         const result = await api.ingestDocuments(documents)
-        setIngestionMessage(`Stored ${result.documents} document${result.documents === 1 ? '' : 's'}`)
+        const intelligenceCount = result.intelligence?.length ?? 0
+        setIngestionMessage(
+          `Stored ${result.documents} document${result.documents === 1 ? '' : 's'} and extracted ${intelligenceCount} intelligence profile${intelligenceCount === 1 ? '' : 's'}`,
+        )
       } else {
         const result = await api.ingestRecords(parsed)
         const total = Object.values(result.counts).reduce((sum, count) => sum + count, 0)
@@ -714,6 +720,7 @@ export function App() {
                         <small>
                           z {anomaly.z_score} · baseline {anomaly.baseline_mean} {anomaly.unit}
                         </small>
+                        {anomaly.context_class && <small>{anomaly.context_class.replace(/_/g, ' ')}</small>}
                       </span>
                       <strong>
                         {anomaly.value} {anomaly.unit}
@@ -816,11 +823,23 @@ export function App() {
                             ))}
                           </>
                         )}
+                        {recommendation.reasoning_explanation && (
+                          <>
+                            <h3>Reasoning Explanation</h3>
+                            <p className="learningNote">{recommendation.reasoning_explanation.summary}</p>
+                            <ul>
+                              {recommendation.reasoning_explanation.driver_explanations.slice(0, 3).map((driver) => (
+                                <li key={driver}>{driver}</li>
+                              ))}
+                            </ul>
+                          </>
+                        )}
                         <h3>Evidence</h3>
                         {recommendation.evidence.slice(0, 3).map((evidence) => (
                           <p className="evidence" key={evidence.source_id}>
                             <strong>{evidence.title}</strong>
                             {evidence.excerpt}
+                            {evidence.relevance_reason && <small>{evidence.relevance_reason}</small>}
                           </p>
                         ))}
                         {canFeedback && (

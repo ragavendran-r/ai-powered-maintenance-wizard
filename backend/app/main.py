@@ -24,9 +24,11 @@ from app.models.schemas import (
     ChatResponse,
     DashboardSummary,
     DiagnosisRequest,
+    DocumentIngestResponse,
     FeedbackRequest,
     FeedbackResponse,
     HealthSummary,
+    MaintenanceLabelsResponse,
     LoginRequest,
     PasswordResetRequest,
     PredictionRequest,
@@ -37,7 +39,9 @@ from app.models.schemas import (
     UserPublic,
     UserUpdateRequest,
 )
+from app.services.document_intelligence import analyze_documents, document_intelligence
 from app.services.iot_streaming import StreamingIngestionService
+from app.services.maintenance_labeling import label_feedback, label_maintenance_event, label_maintenance_history, stored_labels
 from app.services.recommendations import generate_recommendation
 from app.services.document_parser import parse_upload_to_document
 from app.services.reports import recommendation_to_markdown
@@ -157,14 +161,23 @@ def reset_password(user_id: str, request: PasswordResetRequest):
     return UserPublic(**user)
 
 
-@app.post("/api/ingest/documents", dependencies=[Depends(require_roles(*INGESTION_ROLES))])
-def ingest_documents(payload: Optional[dict[str, list[dict[str, Any]]]] = None) -> dict[str, Any]:
+@app.post(
+    "/api/ingest/documents",
+    response_model=DocumentIngestResponse,
+    dependencies=[Depends(require_roles(*INGESTION_ROLES))],
+)
+def ingest_documents(payload: Optional[dict[str, list[dict[str, Any]]]] = None):
     documents = payload.get("documents", []) if payload else []
     count = repository.add_documents(documents)
-    return {"status": "stored", "documents": count}
+    intelligence = analyze_documents(documents)
+    return {"status": "stored", "documents": count, "intelligence": intelligence}
 
 
-@app.post("/api/ingest/document-file", dependencies=[Depends(require_roles(*INGESTION_ROLES))])
+@app.post(
+    "/api/ingest/document-file",
+    response_model=DocumentIngestResponse,
+    dependencies=[Depends(require_roles(*INGESTION_ROLES))],
+)
 async def ingest_document_file(
     file: UploadFile = File(...),
     source_type: str = Form(default="manual"),
@@ -173,12 +186,16 @@ async def ingest_document_file(
 ) -> dict[str, Any]:
     document = await parse_upload_to_document(file, source_type, equipment_id, title)
     count = repository.add_documents([document])
-    return {"status": "stored", "documents": count, "document": document}
+    intelligence = analyze_documents([document])
+    return {"status": "stored", "documents": count, "document": document, "intelligence": intelligence}
 
 
 @app.post("/api/ingest/records", dependencies=[Depends(require_roles(*INGESTION_ROLES))])
 def ingest_records(payload: Optional[dict[str, list[dict[str, Any]]]] = None) -> dict[str, Any]:
-    counts = repository.add_records(payload or {})
+    records = payload or {}
+    counts = repository.add_records(records)
+    for event in records.get("maintenance_events", []):
+        label_maintenance_event(event)
     return {"status": "stored", "counts": counts}
 
 
@@ -226,6 +243,33 @@ def get_anomalies(equipment_id: str):
     return analyze_anomalies(equipment_id)
 
 
+@app.get(
+    "/api/equipment/{equipment_id}/document-intelligence",
+    dependencies=[Depends(require_roles(*READ_ROLES))],
+)
+def get_document_intelligence(equipment_id: str):
+    return document_intelligence(equipment_id)
+
+
+@app.post(
+    "/api/equipment/{equipment_id}/maintenance-labels",
+    response_model=MaintenanceLabelsResponse,
+    dependencies=[Depends(require_roles(*DECISION_ROLES))],
+)
+def generate_maintenance_labels(equipment_id: str):
+    labels = label_maintenance_history(equipment_id)
+    return MaintenanceLabelsResponse(equipment_id=equipment_id, labels=labels)
+
+
+@app.get(
+    "/api/equipment/{equipment_id}/maintenance-labels",
+    response_model=MaintenanceLabelsResponse,
+    dependencies=[Depends(require_roles(*READ_ROLES))],
+)
+def get_maintenance_labels(equipment_id: str):
+    return MaintenanceLabelsResponse(equipment_id=equipment_id, labels=stored_labels(equipment_id))
+
+
 @app.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(require_roles(*DECISION_ROLES))])
 def chat(request: ChatRequest):
     equipment_id = request.equipment_id or "RM-DRIVE-01"
@@ -255,6 +299,8 @@ def predict(request: PredictionRequest):
 )
 def store_feedback(recommendation_id: str, feedback: FeedbackRequest):
     repository.save_feedback(recommendation_id, feedback.model_dump())
+    saved_feedback = repository.list_feedback(feedback.equipment_id)[0] if feedback.equipment_id else repository.list_feedback()[0]
+    label_feedback(saved_feedback)
     return FeedbackResponse(
         recommendation_id=recommendation_id,
         stored=True,

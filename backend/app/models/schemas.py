@@ -3,6 +3,13 @@ from pydantic import BaseModel, Field
 
 
 RiskLevel = Literal["low", "medium", "high", "critical"]
+AnomalyContextClass = Literal[
+    "requires_investigation",
+    "startup_transient",
+    "known_process_condition",
+    "maintenance_induced",
+    "normal_variation",
+]
 UserRole = Literal[
     "admin",
     "maintenance_engineer",
@@ -20,6 +27,7 @@ class Evidence(BaseModel):
     excerpt: str
     equipment_id: Optional[str] = None
     timestamp: Optional[str] = None
+    relevance_reason: Optional[str] = None
 
 
 class Equipment(BaseModel):
@@ -85,6 +93,9 @@ class AnomalyFinding(BaseModel):
     trend_delta: float
     risk_level: RiskLevel
     explanation: str
+    context_class: Optional[AnomalyContextClass] = None
+    context_rationale: Optional[str] = None
+    recommended_inspection_steps: list[str] = []
 
 
 class HealthSummary(BaseModel):
@@ -132,6 +143,7 @@ class Recommendation(BaseModel):
     spares_strategy: list[str]
     evidence: list[Evidence]
     learning_notes: list[str] = []
+    reasoning_explanation: Optional["ReasoningExplanation"] = None
     report_summary: str
 
 
@@ -147,6 +159,69 @@ class PredictionResponse(BaseModel):
     failure_probability: float = Field(ge=0, le=1)
     remaining_useful_life_days: int
     drivers: list[str]
+    reasoning_explanation: Optional["ReasoningExplanation"] = None
+
+
+class DocumentIntelligence(BaseModel):
+    document_id: str
+    summary: str
+    asset_ids: list[str] = []
+    components: list[str] = []
+    failure_modes: list[str] = []
+    symptoms: list[str] = []
+    safety_constraints: list[str] = []
+    spares: list[str] = []
+    thresholds: list[str] = []
+    used_live_provider: bool = False
+    provider: str = "mock"
+
+
+class MaintenanceLabel(BaseModel):
+    source_type: Literal["maintenance_event", "feedback"]
+    source_id: str
+    equipment_id: Optional[str] = None
+    failure_mode: str
+    component: str
+    root_cause: str
+    action_class: str
+    outcome_status: str
+    signal_hints: list[str] = []
+    usable_for_training: bool = True
+    used_live_provider: bool = False
+    provider: str = "mock"
+
+
+class AnomalyContext(BaseModel):
+    equipment_id: str
+    signal: str
+    timestamp: str
+    context_class: AnomalyContextClass
+    rationale: str
+    recommended_inspection_steps: list[str] = []
+    used_live_provider: bool = False
+    provider: str = "mock"
+
+
+class ReasoningExplanation(BaseModel):
+    subject_type: Literal["prediction", "anomaly", "recommendation", "retrieval"]
+    summary: str
+    driver_explanations: list[str] = []
+    cautions: list[str] = []
+    recommended_next_steps: list[str] = []
+    used_live_provider: bool = False
+    provider: str = "mock"
+
+
+class DocumentIngestResponse(BaseModel):
+    status: str
+    documents: int
+    document: Optional[dict[str, Any]] = None
+    intelligence: list[DocumentIntelligence] = []
+
+
+class MaintenanceLabelsResponse(BaseModel):
+    equipment_id: Optional[str] = None
+    labels: list[MaintenanceLabel]
 
 
 class FeedbackRequest(BaseModel):
@@ -238,3 +313,7 @@ class UserUpdateRequest(BaseModel):
 
 class PasswordResetRequest(BaseModel):
     password: str = Field(min_length=8)
+
+
+Recommendation.model_rebuild()
+PredictionResponse.model_rebuild()

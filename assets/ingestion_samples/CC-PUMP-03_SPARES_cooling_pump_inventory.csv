@@ -1,0 +1,5 @@
+source_type,equipment_id,equipment_name,spare_name,available_qty,lead_time_days,criticality,usage_note
+spares,CC-PUMP-03,Continuous Caster Cooling Water Pump,Mechanical seal cartridge,1,12,5,Required when seal leakage accompanies rising motor current
+spares,CC-PUMP-03,Continuous Caster Cooling Water Pump,Pump bearing kit,0,18,4,Escalate procurement if vibration or current remains above baseline
+spares,CC-PUMP-03,Continuous Caster Cooling Water Pump,Cooling water flow transmitter,2,7,3,Use for validating abnormal flow readings
+spares,CC-PUMP-03,Continuous Caster Cooling Water Pump,Motor coupling insert,1,10,3,Inspect when current spikes occur during pump startup

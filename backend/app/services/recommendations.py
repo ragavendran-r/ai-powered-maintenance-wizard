@@ -1,11 +1,12 @@
 from uuid import uuid4
 
-from app.core.config import get_settings
 from fastapi import HTTPException
 
 from app.data import repository
 from app.models.schemas import DiagnosisRequest, Recommendation
-from app.services.llm import build_llm_client
+from app.services.ai_client import configured_llm_client
+from app.services.maintenance_labeling import training_signal_summary
+from app.services.reasoning_explainer import explain_reasoning
 from app.services.retrieval import retrieve_evidence
 from app.services.risk import health_summary, predict_failure
 
@@ -30,17 +31,11 @@ def generate_recommendation(request: DiagnosisRequest) -> Recommendation:
     summary = health_summary(request.equipment_id)
     prediction = predict_failure(request.equipment_id)
     feedback_records = repository.list_feedback(request.equipment_id)
+    training_signals = training_signal_summary(request.equipment_id)
     learning_notes = _feedback_notes(feedback_records)
-    settings = get_settings()
-    llm = build_llm_client(
-        settings.llm_provider,
-        settings.openai_api_key,
-        settings.ollama_base_url,
-        settings.ollama_model,
-        settings.openai_model,
-        settings.openai_base_url,
-        settings.llm_timeout_seconds,
-    )
+    if training_signals:
+        learning_notes = _merge_ranked(training_signals, learning_notes, limit=8)
+    llm = configured_llm_client()
     llm_context = llm.complete_json(
         _build_llm_prompt(equipment, selected_alert, summary, prediction, evidence, request.symptoms, learning_notes)
     )
@@ -79,10 +74,25 @@ def generate_recommendation(request: DiagnosisRequest) -> Recommendation:
     if not spares_strategy:
         spares_strategy.append("No spare constraint found in sample data.")
 
+    diagnosis = f"{equipment['name']} shows symptoms consistent with {selected_alert['message'] if selected_alert else 'degraded equipment condition'}."
+    drivers = [
+        diagnosis,
+        f"Risk level is {summary.risk_level} with health score {summary.health_score}.",
+        f"Estimated RUL is {prediction.remaining_useful_life_days} days.",
+        *summary.notes,
+        *learning_notes[:3],
+    ]
+    reasoning_explanation = explain_reasoning(
+        "recommendation",
+        "Recommendation merges deterministic maintenance rules, retrieval evidence, prediction drivers, and validated LLM/SLM context.",
+        drivers,
+        evidence,
+    )
+
     return Recommendation(
         id=f"rec-{uuid4().hex[:8]}",
         equipment_id=request.equipment_id,
-        diagnosis=f"{equipment['name']} shows symptoms consistent with {selected_alert['message'] if selected_alert else 'degraded equipment condition'}.",
+        diagnosis=diagnosis,
         probable_root_causes=likely_root_causes,
         risk_level=summary.risk_level,
         urgency="Immediate engineering review required within the current shift." if summary.risk_level in {"high", "critical"} else "Plan intervention in the next maintenance window.",
@@ -101,6 +111,7 @@ def generate_recommendation(request: DiagnosisRequest) -> Recommendation:
         spares_strategy=spares_strategy,
         evidence=evidence,
         learning_notes=learning_notes,
+        reasoning_explanation=reasoning_explanation,
         report_summary=_report_summary(
             equipment["name"],
             summary.risk_level,

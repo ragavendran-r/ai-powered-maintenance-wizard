@@ -371,7 +371,7 @@ describe('Maintenance Wizard dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: /upload/i }))
 
     await waitFor(() => {
-      expect(screen.getByText('Stored 1 document')).toBeInTheDocument()
+      expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()
     })
     expect(fetch).toHaveBeenCalledWith(
       'http://localhost:8000/api/ingest/document-file',
@@ -393,7 +393,7 @@ describe('Maintenance Wizard dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: /import json/i }))
 
     await waitFor(() => {
-      expect(screen.getByText('Stored 1 document')).toBeInTheDocument()
+      expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()
     })
     expect(fetch).toHaveBeenCalledWith(
       'http://localhost:8000/api/ingest/documents',
