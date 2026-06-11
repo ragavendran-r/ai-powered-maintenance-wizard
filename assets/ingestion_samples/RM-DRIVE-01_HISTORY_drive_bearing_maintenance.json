@@ -1,0 +1,27 @@
+{
+  "source_type": "history",
+  "equipment_id": "RM-DRIVE-01",
+  "equipment_name": "Hot Strip Mill Main Drive Motor",
+  "maintenance_events": [
+    {
+      "date": "2026-05-18",
+      "issue": "Drive end vibration increased during finishing stand load changes.",
+      "root_cause": "Loose foundation bolt resonance amplified bearing housing vibration.",
+      "action": "Retorqued foundation bolts, checked coupling alignment, and trended vibration after load ramp.",
+      "outcome": "Vibration reduced from 8.4 mm/s to 5.9 mm/s after retorque.",
+      "downtime_hours": 2.5
+    },
+    {
+      "date": "2026-04-27",
+      "issue": "Bearing temperature and vibration rose together after lubricant filter differential pressure alarm.",
+      "root_cause": "Lubricant filter restriction reduced bearing oil flow.",
+      "action": "Replaced lubricant filter and inspected drive end spherical roller bearing.",
+      "outcome": "Bearing temperature returned below 72 C and vibration stabilized below advisory threshold.",
+      "downtime_hours": 3.0
+    }
+  ],
+  "learning_notes": [
+    "For RM-DRIVE-01, vibration with rising bearing temperature should prioritize lubrication and bearing inspection.",
+    "Foundation bolt looseness has previously produced vibration symptoms similar to bearing degradation."
+  ]
+}

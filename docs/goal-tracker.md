@@ -358,6 +358,34 @@ Verification recorded:
 
 Status: `Complete`
 
+### G-015: LLM/SLM Leverage For Analytics And Retrieval
+
+Requested outcome:
+
+- Implement LLM/SLM leverage across predictive analytics, anomaly detection, knowledge retrieval, feedback learning, and explanations.
+- Keep deterministic scoring and fallback behavior intact.
+
+Delivered:
+
+- Generic structured LLM/SLM adapter support for Pydantic-validated response contracts.
+- Document intelligence extraction for ingested documents, persisted in schema version 5.
+- Normalized maintenance labels from maintenance history and engineer feedback.
+- LLM/SLM retrieval reranking with evidence relevance reasons.
+- Anomaly context classification and recommended inspection steps.
+- Prediction and recommendation reasoning explanations.
+- Prediction drivers that include normalized labels with bounded risk influence.
+- Frontend display of ingestion intelligence counts, anomaly context, reasoning explanations, and relevance reasons.
+- README, architecture, progress, backend tests, and frontend tests updated.
+
+Verification recorded:
+
+- `PYTHONPYCACHEPREFIX=.pycache python3 -m compileall backend/app`
+- `cd backend && .venv/bin/pytest` passed with 40 tests.
+- `cd frontend && npm run test` passed with 8 tests.
+- `cd frontend && npm run build` passed.
+
+Status: `Complete`
+
 ## Maintenance Rules For This File
 
 - Add a new goal entry whenever the user asks to create or pursue a new multi-step goal.

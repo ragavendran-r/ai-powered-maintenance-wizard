@@ -1,0 +1,24 @@
+Inlet Guide Vane Actuator Maintenance Manual
+
+Asset: BF-BLOWER-02
+Equipment: Blast Furnace Combustion Air Blower
+Area: Blast Furnace
+Source type: manual
+
+The inlet guide vane actuator controls blower outlet pressure during furnace ramp-up and steady combustion air operation. Pressure variance above 10 percent may indicate sticky actuator linkage, calibration drift, filter restriction, or unstable surge margin.
+
+Maintenance checks:
+
+- Verify actuator stroke feedback from 0 percent to 100 percent command.
+- Inspect linkage pins, bushings, and clevis fasteners for wear or binding.
+- Clean actuator linkage and apply approved high-temperature lubricant.
+- Validate pressure transmitter calibration before replacing actuator hardware.
+- Confirm furnace supervisor notification when high pressure variance persists for two samples.
+
+Safety:
+
+Use the blower isolation permit before hands-on actuator inspection. Keep personnel clear of linkage motion while testing actuator response.
+
+Recommended spares:
+
+Actuator linkage kit, position feedback sensor, inlet filter element, pressure transmitter calibration kit.

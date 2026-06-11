@@ -83,10 +83,10 @@ After docs or progress changes:
 After completing any requested task:
 
 ```bash
-osascript -e 'display notification "Task complete." with title "Maintenance Wizard"'
+scripts/notify-complete.sh "Maintenance Wizard" "Task complete."
 ```
 
-If the host does not support desktop notifications or the command fails, note the failure in the final response.
+For mobile delivery, set `MOBILE_NTFY_TOPIC` to an ntfy topic subscribed from the user's phone. If desktop or mobile notification delivery is unavailable, not configured, or fails, note that in the final response.
 
 Before demo or handoff:
 

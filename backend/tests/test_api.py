@@ -14,6 +14,8 @@ from app.services.iot_streaming import (
     process_iot_message,
 )
 from app.services.retrieval import retrieve_evidence
+from app.services.document_intelligence import document_intelligence
+from app.services.maintenance_labeling import stored_labels
 
 
 client = TestClient(app)
@@ -62,9 +64,11 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "4"
+    assert status["schema_version"] == "5"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["document_chunks"] >= 8
+    assert "document_intelligence" in status["counts"]
+    assert "maintenance_labels" in status["counts"]
     assert "streaming_messages" in status["counts"]
     assert status["counts"]["users"] == 6
 
@@ -351,6 +355,7 @@ def test_added_assets_have_health_prediction_and_retrieval(
     assert health["active_alerts"]
     assert health["top_spares_constraints"]
     assert any(item["signal"] == expected_signal for item in health["anomalies"])
+    assert any(item["context_class"] for item in health["anomalies"])
     assert health["risk_level"] in {"high", "critical"}
 
     prediction_response = client.post("/api/predict", json={"equipment_id": equipment_id}, headers=headers)
@@ -358,6 +363,7 @@ def test_added_assets_have_health_prediction_and_retrieval(
     prediction = prediction_response.json()
     assert prediction["failure_probability"] > 0.5
     assert any("z-score" in driver for driver in prediction["drivers"])
+    assert prediction["reasoning_explanation"]["subject_type"] == "prediction"
 
     diagnosis_response = client.post("/api/diagnose", json={"equipment_id": equipment_id}, headers=headers)
     assert diagnosis_response.status_code == 200
@@ -440,6 +446,7 @@ def test_feedback_is_reused_in_future_recommendations():
     assert "Loose foundation bolt resonance" in payload["probable_root_causes"]
     assert any("Retorque foundation bolts" in action for action in payload["immediate_actions"])
     assert payload["learning_notes"]
+    assert payload["reasoning_explanation"]["subject_type"] == "recommendation"
     assert "engineer feedback record" in payload["report_summary"]
 
 
@@ -461,10 +468,13 @@ def test_document_ingestion_persists_to_repository():
     )
     assert response.status_code == 200
     assert response.json()["documents"] == 1
+    assert response.json()["intelligence"]
     documents = repository.list_documents("CC-PUMP-03")
     assert any(document["id"] == "DOC-TEST-INGEST" for document in documents)
     chunks = repository.list_document_chunks("CC-PUMP-03")
     assert any(chunk["document_id"] == "DOC-TEST-INGEST" for chunk in chunks)
+    intelligence = document_intelligence("CC-PUMP-03")
+    assert any(item.document_id == "DOC-TEST-INGEST" for item in intelligence)
 
 
 def test_document_file_upload_persists_and_chunks_text():
@@ -485,6 +495,7 @@ def test_document_file_upload_persists_and_chunks_text():
     document_id = payload["document"]["id"]
     assert payload["documents"] == 1
     assert payload["document"]["title"] == "Uploaded Coupling SOP"
+    assert payload["intelligence"][0]["document_id"] == document_id
     chunks = repository.list_document_chunks("RM-DRIVE-01")
     assert any(chunk["document_id"] == document_id for chunk in chunks)
     evidence = retrieve_evidence("coupling alignment baseline", "RM-DRIVE-01")
@@ -545,6 +556,8 @@ def test_anomaly_endpoint_detects_vibration_and_temperature():
     assert "drive_end_vibration" in signals
     assert "bearing_temperature" in signals
     assert any(item["risk_level"] in {"high", "critical"} for item in anomalies)
+    assert any(item["context_class"] == "requires_investigation" for item in anomalies)
+    assert all(item["recommended_inspection_steps"] for item in anomalies)
 
 
 def test_health_summary_includes_anomaly_findings():
@@ -561,6 +574,7 @@ def test_prediction_drivers_include_anomaly_explanations():
     payload = response.json()
     assert payload["failure_probability"] > 0.5
     assert any("z-score" in driver for driver in payload["drivers"])
+    assert payload["reasoning_explanation"]["driver_explanations"]
 
 
 def test_prediction_drivers_include_feedback_history():
@@ -582,6 +596,8 @@ def test_prediction_drivers_include_feedback_history():
     payload = response.json()
     assert any("engineer feedback" in driver for driver in payload["drivers"])
     assert any("Bearing cage defect" in driver for driver in payload["drivers"])
+    labels = stored_labels("RM-DRIVE-01")
+    assert any(label.source_type == "feedback" for label in labels)
 
 
 def test_markdown_report_export_contains_actions_and_evidence():
@@ -590,6 +606,7 @@ def test_markdown_report_export_contains_actions_and_evidence():
     assert response.headers["content-type"].startswith("text/markdown")
     assert "Maintenance Decision Report: RM-DRIVE-01" in response.text
     assert "## Immediate Actions" in response.text
+    assert "## Reasoning Explanation" in response.text
     assert "Hot Strip Mill Main Drive Vibration SOP" in response.text
 
 
@@ -608,3 +625,42 @@ def test_retrieval_returns_chunk_evidence_for_vibration_query():
         for item in evidence
     )
     assert any("vibration" in item.excerpt.lower() or "bearing" in item.excerpt.lower() for item in evidence)
+    assert any(item.relevance_reason for item in evidence)
+
+
+def test_maintenance_label_endpoint_generates_training_labels():
+    headers = auth_headers("reliability@plant.local")
+
+    response = client.post("/api/equipment/RM-DRIVE-01/maintenance-labels", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["equipment_id"] == "RM-DRIVE-01"
+    assert payload["labels"]
+    assert any(label["usable_for_training"] for label in payload["labels"])
+
+
+def test_document_intelligence_endpoint_returns_extracted_profiles():
+    headers = auth_headers("reliability@plant.local")
+    client.post(
+        "/api/ingest/documents",
+        json={
+            "documents": [
+                {
+                    "id": "DOC-INTEL-TEST",
+                    "source_type": "manual",
+                    "equipment_id": "RM-DRIVE-01",
+                    "title": "Drive Bearing Manual",
+                    "content": "Bearing vibration above 7 mm/s requires lockout and inspection of coupling spares.",
+                }
+            ]
+        },
+        headers=headers,
+    )
+
+    response = client.get("/api/equipment/RM-DRIVE-01/document-intelligence", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert any(item["document_id"] == "DOC-INTEL-TEST" for item in payload)
+    assert any("bearing" in item["components"] for item in payload)

@@ -1,8 +1,16 @@
 from typing import Optional
 
+from pydantic import BaseModel, Field
+
 from app.data import repository
 from app.models.schemas import Evidence
+from app.services.ai_client import configured_llm_client
 from app.services.vector_index import cosine_similarity, decode_embedding, embed_text, tokenize
+
+
+class RetrievalRerankResult(BaseModel):
+    ordered_source_ids: list[str] = Field(default_factory=list)
+    relevance_reasons: dict[str, str] = Field(default_factory=dict)
 
 
 def _score(text: str, terms: set[str]) -> int:
@@ -10,7 +18,12 @@ def _score(text: str, terms: set[str]) -> int:
     return sum(1 for term in terms if term and term in lowered)
 
 
-def retrieve_evidence(query: str, equipment_id: Optional[str] = None, limit: int = 4) -> list[Evidence]:
+def retrieve_evidence(
+    query: str,
+    equipment_id: Optional[str] = None,
+    limit: int = 4,
+    use_reranker: bool = True,
+) -> list[Evidence]:
     terms = set(tokenize(query))
     query_embedding = embed_text(query)
     scored: list[tuple[float, Evidence]] = []
@@ -57,4 +70,58 @@ def retrieve_evidence(query: str, equipment_id: Optional[str] = None, limit: int
             )
 
     scored.sort(key=lambda item: item[0], reverse=True)
-    return [evidence for _, evidence in scored[:limit]]
+    evidence = [evidence for _, evidence in scored[: max(limit * 2, limit)]]
+    if use_reranker:
+        evidence = _rerank_evidence(query, evidence)
+    return evidence[:limit]
+
+
+def _rerank_evidence(query: str, evidence: list[Evidence]) -> list[Evidence]:
+    if len(evidence) < 2:
+        return evidence
+    fallback = RetrievalRerankResult(
+        ordered_source_ids=[item.source_id for item in evidence],
+        relevance_reasons={
+            item.source_id: "Ranked by deterministic hybrid lexical and local-vector score."
+            for item in evidence
+        },
+    )
+    prompt = "\n".join(
+        [
+            f"Query: {query}",
+            "Candidates:",
+            *[
+                f"- source_id={item.source_id}; source_type={item.source_type}; title={item.title}; excerpt={item.excerpt}"
+                for item in evidence
+            ],
+        ]
+    )
+    result = configured_llm_client().complete_model(
+        prompt,
+        RetrievalRerankResult,
+        _rerank_system_prompt(),
+        lambda provider, reason: fallback,
+    )
+    by_id = {item.source_id: item for item in evidence}
+    reranked = []
+    for source_id in result.ordered_source_ids:
+        item = by_id.pop(source_id, None)
+        if item:
+            reranked.append(
+                item.model_copy(
+                    update={"relevance_reason": result.relevance_reasons.get(source_id)}
+                )
+            )
+    reranked.extend(
+        item.model_copy(update={"relevance_reason": fallback.relevance_reasons.get(item.source_id)})
+        for item in by_id.values()
+    )
+    return reranked
+
+
+def _rerank_system_prompt() -> str:
+    return (
+        "Rerank maintenance evidence candidates for the query. Return JSON with "
+        "ordered_source_ids as source IDs in best-first order and relevance_reasons as "
+        "a map from source ID to one concise reason. Use only supplied candidates."
+    )

@@ -28,6 +28,10 @@ def recommendation_to_markdown(recommendation: Recommendation) -> str:
         "## Learning Notes",
         *_bullets(recommendation.learning_notes),
         "",
+        "## Reasoning Explanation",
+        recommendation.reasoning_explanation.summary if recommendation.reasoning_explanation else "No reasoning explanation recorded.",
+        *_bullets(recommendation.reasoning_explanation.driver_explanations if recommendation.reasoning_explanation else []),
+        "",
         "## Evidence",
         *[
             f"- **{item.title}** (`{item.source_type}:{item.source_id}`): {item.excerpt}"

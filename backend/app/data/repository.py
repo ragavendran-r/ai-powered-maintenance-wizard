@@ -1,5 +1,6 @@
 from typing import Any, Optional
 
+import json
 import sqlite3
 import uuid
 
@@ -63,6 +64,10 @@ def list_documents(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
     return _fetch_all("SELECT * FROM documents ORDER BY source_type, title")
 
 
+def get_document(document_id: str) -> Optional[dict[str, Any]]:
+    return _fetch_one("SELECT * FROM documents WHERE id = ?", (document_id,))
+
+
 def list_document_chunks(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
     if equipment_id:
         return _fetch_all(
@@ -104,6 +109,70 @@ def add_documents(documents: list[dict[str, Any]]) -> int:
         )
         upsert_document_chunks(connection, documents)
     return len(documents)
+
+
+def save_document_intelligence(payload: dict[str, Any]) -> None:
+    ensure_ready()
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO document_intelligence (
+                document_id,
+                summary,
+                asset_ids,
+                components,
+                failure_modes,
+                symptoms,
+                safety_constraints,
+                spares,
+                thresholds,
+                used_live_provider,
+                provider
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(document_id) DO UPDATE SET
+                summary=excluded.summary,
+                asset_ids=excluded.asset_ids,
+                components=excluded.components,
+                failure_modes=excluded.failure_modes,
+                symptoms=excluded.symptoms,
+                safety_constraints=excluded.safety_constraints,
+                spares=excluded.spares,
+                thresholds=excluded.thresholds,
+                used_live_provider=excluded.used_live_provider,
+                provider=excluded.provider,
+                created_at=CURRENT_TIMESTAMP
+            """,
+            (
+                payload["document_id"],
+                payload["summary"],
+                _json_dump(payload.get("asset_ids", [])),
+                _json_dump(payload.get("components", [])),
+                _json_dump(payload.get("failure_modes", [])),
+                _json_dump(payload.get("symptoms", [])),
+                _json_dump(payload.get("safety_constraints", [])),
+                _json_dump(payload.get("spares", [])),
+                _json_dump(payload.get("thresholds", [])),
+                1 if payload.get("used_live_provider") else 0,
+                payload.get("provider") or "mock",
+            ),
+        )
+
+
+def list_document_intelligence(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
+    if equipment_id:
+        rows = _fetch_all(
+            """
+            SELECT di.* FROM document_intelligence di
+            JOIN documents d ON d.id = di.document_id
+            WHERE d.equipment_id = ? OR d.equipment_id IS NULL
+            ORDER BY di.created_at DESC
+            """,
+            (equipment_id,),
+        )
+    else:
+        rows = _fetch_all("SELECT * FROM document_intelligence ORDER BY created_at DESC")
+    return [_decode_document_intelligence(row) for row in rows]
 
 
 def rebuild_document_chunks(connection: sqlite3.Connection) -> None:
@@ -228,6 +297,71 @@ def list_feedback(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
             (equipment_id,),
         )
     return _fetch_all("SELECT * FROM feedback ORDER BY created_at DESC, id DESC")
+
+
+def save_maintenance_label(payload: dict[str, Any]) -> None:
+    ensure_ready()
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO maintenance_labels (
+                source_type,
+                source_id,
+                equipment_id,
+                failure_mode,
+                component,
+                root_cause,
+                action_class,
+                outcome_status,
+                signal_hints,
+                usable_for_training,
+                used_live_provider,
+                provider
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_type, source_id) DO UPDATE SET
+                equipment_id=excluded.equipment_id,
+                failure_mode=excluded.failure_mode,
+                component=excluded.component,
+                root_cause=excluded.root_cause,
+                action_class=excluded.action_class,
+                outcome_status=excluded.outcome_status,
+                signal_hints=excluded.signal_hints,
+                usable_for_training=excluded.usable_for_training,
+                used_live_provider=excluded.used_live_provider,
+                provider=excluded.provider,
+                created_at=CURRENT_TIMESTAMP
+            """,
+            (
+                payload["source_type"],
+                payload["source_id"],
+                payload.get("equipment_id"),
+                payload["failure_mode"],
+                payload["component"],
+                payload["root_cause"],
+                payload["action_class"],
+                payload["outcome_status"],
+                _json_dump(payload.get("signal_hints", [])),
+                1 if payload.get("usable_for_training", True) else 0,
+                1 if payload.get("used_live_provider") else 0,
+                payload.get("provider") or "mock",
+            ),
+        )
+
+
+def list_maintenance_labels(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
+    if equipment_id:
+        rows = _fetch_all(
+            """
+            SELECT * FROM maintenance_labels
+            WHERE equipment_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (equipment_id,),
+        )
+    else:
+        rows = _fetch_all("SELECT * FROM maintenance_labels ORDER BY created_at DESC, id DESC")
+    return [_decode_maintenance_label(row) for row in rows]
 
 
 def get_user_by_id(user_id: str) -> Optional[dict[str, Any]]:
@@ -399,6 +533,46 @@ def _normalize_user(user: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
     normalized = dict(user)
     normalized["is_active"] = bool(normalized["is_active"])
     return normalized
+
+
+def _json_dump(value: Any) -> str:
+    return json.dumps(value or [], separators=(",", ":"))
+
+
+def _json_load_list(value: Any) -> list[str]:
+    if not value:
+        return []
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(decoded, list):
+        return []
+    return [str(item) for item in decoded if str(item).strip()]
+
+
+def _decode_document_intelligence(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    for field in (
+        "asset_ids",
+        "components",
+        "failure_modes",
+        "symptoms",
+        "safety_constraints",
+        "spares",
+        "thresholds",
+    ):
+        decoded[field] = _json_load_list(decoded.get(field))
+    decoded["used_live_provider"] = bool(decoded.get("used_live_provider"))
+    return decoded
+
+
+def _decode_maintenance_label(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["signal_hints"] = _json_load_list(decoded.get("signal_hints"))
+    decoded["usable_for_training"] = bool(decoded.get("usable_for_training"))
+    decoded["used_live_provider"] = bool(decoded.get("used_live_provider"))
+    return decoded
 
 
 def _fetch_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
