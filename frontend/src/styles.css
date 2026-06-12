@@ -356,6 +356,26 @@ h3 {
   margin: 0;
 }
 
+.navQuickActions {
+  border-bottom: 1px solid #dfe6ea;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+}
+
+.navQuickActions h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.navQuickActions .textButton {
+  justify-content: flex-start;
+  min-height: 38px;
+  padding: 0 10px;
+  width: 100%;
+}
+
 .sectionHeader {
   align-items: center;
   display: flex;
@@ -1099,6 +1119,7 @@ h3 {
 
 .workOrderTable {
   border: 1px solid #e1e7eb;
+  font-size: 0.84rem;
   overflow-x: auto;
 }
 
@@ -1106,28 +1127,30 @@ h3 {
 .workOrderRow {
   align-items: stretch;
   display: grid;
-  gap: 10px;
-  grid-template-columns: 130px minmax(180px, 1fr) minmax(220px, 1.3fr) 90px 120px;
-  min-width: 760px;
-  padding: 11px 14px;
+  gap: 6px;
+  grid-template-columns: minmax(66px, 0.62fr) minmax(110px, 0.95fr) minmax(140px, 1.25fr) minmax(58px, 0.52fr) minmax(62px, 0.55fr);
+  min-width: 0;
+  padding: 9px 10px;
 }
 
 .workOrderTable.assignable .workOrderHead,
 .workOrderTable.assignable .workOrderRow {
-  grid-template-columns: 120px minmax(170px, 0.9fr) minmax(210px, 1.1fr) 76px 100px minmax(190px, 0.8fr);
-  min-width: 930px;
+  grid-template-columns: minmax(54px, 0.55fr) minmax(78px, 0.9fr) minmax(92px, 1.18fr) minmax(52px, 0.52fr) minmax(52px, 0.52fr) minmax(86px, 0.82fr);
+  min-width: 0;
 }
 
 .workOrderTable.compact .workOrderHead,
 .workOrderTable.compact .workOrderRow {
-  grid-template-columns: 110px minmax(180px, 1fr) 90px 110px;
-  min-width: 520px;
+  grid-template-columns: minmax(66px, 0.75fr) minmax(120px, 1.35fr) minmax(62px, 0.65fr) minmax(70px, 0.7fr);
+  min-width: 0;
 }
 
 .workOrderHead {
   background: #d7d9db;
   color: #25323b;
+  font-size: 0.78rem;
   font-weight: 800;
+  letter-spacing: 0;
 }
 
 .workOrderRow {
@@ -1135,6 +1158,7 @@ h3 {
   border: 0;
   border-top: 1px solid #edf1f3;
   color: #394956;
+  line-height: 1.25;
   width: 100%;
 }
 
@@ -1160,13 +1184,37 @@ h3 {
   font-weight: 900;
 }
 
+.workOrderStatusCell {
+  align-content: start;
+  display: grid;
+  gap: 5px;
+}
+
+.miniActionButton {
+  background: #edf6f8;
+  border: 1px solid #8fc3cf;
+  border-radius: 999px;
+  color: #174f58;
+  font-size: 0.68rem;
+  font-weight: 800;
+  min-height: 24px;
+  padding: 0 6px;
+  width: fit-content;
+}
+
+.miniActionButton:hover {
+  background: #d9f0f4;
+  box-shadow: none;
+}
+
 .workOrderRow select {
   background: #ffffff;
   border: 1px solid #cfd9de;
   border-radius: 6px;
   color: #1f2a31;
-  min-height: 34px;
-  padding: 4px 8px;
+  font-size: 0.74rem;
+  min-height: 30px;
+  padding: 3px 5px;
   width: 100%;
 }
 
