@@ -1,4 +1,5 @@
 import re
+from collections.abc import Iterator
 from typing import Optional
 
 from app.core.config import get_settings
@@ -9,7 +10,7 @@ from app.services.retrieval import retrieve_evidence
 
 
 RISK_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
-NEO_GENERAL_MAX_TOKENS = 900
+NEO_GENERAL_MAX_TOKENS = 250
 
 
 def neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> NeoChatResponse:
@@ -51,6 +52,76 @@ def neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> NeoChat
         used_live_provider=response.used_live_provider,
         provider=response.provider,
     )
+
+
+def stream_neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> Iterator[dict[str, object]]:
+    table = _table_for_message(request.message, current_user)
+    if table:
+        response = NeoChatResponse(
+            answer=_fallback_answer(request.message, table, current_user),
+            table=table,
+            used_live_provider=False,
+            provider="deterministic",
+        )
+        yield {"type": "done", "response": response.model_dump(mode="json")}
+        return
+
+    evidence = _general_evidence_for_message(request.message)
+    content_parts: list[str] = []
+    provider = "mock"
+    used_live_provider = False
+    sent_meta = False
+    for chunk in _neo_llm_client().stream_text(
+        _neo_prompt(request, table, current_user, evidence),
+        _neo_system_prompt(),
+        lambda fallback_provider, reason: LLMTextResponse(
+            content=_fallback_answer(
+                request.message,
+                table,
+                current_user,
+                evidence=evidence,
+                live_failure_reason=reason,
+            ),
+            used_live_provider=False,
+            provider=fallback_provider,
+        ),
+        max_tokens=NEO_GENERAL_MAX_TOKENS,
+    ):
+        provider = chunk.provider
+        used_live_provider = chunk.used_live_provider
+        if not sent_meta:
+            sent_meta = True
+            yield {
+                "type": "meta",
+                "provider": provider,
+                "used_live_provider": used_live_provider,
+            }
+        if chunk.content:
+            content_parts.append(chunk.content)
+            yield {"type": "token", "content": chunk.content}
+
+    answer = "".join(content_parts)
+    if not answer:
+        fallback = _fallback_answer(
+            request.message,
+            table,
+            current_user,
+            evidence=evidence,
+            live_failure_reason="stream returned no content",
+        )
+        answer = fallback
+        provider = "mock"
+        used_live_provider = False
+        if not sent_meta:
+            yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+        yield {"type": "token", "content": fallback}
+    response = NeoChatResponse(
+        answer=answer,
+        table=None,
+        used_live_provider=used_live_provider,
+        provider=provider,
+    )
+    yield {"type": "done", "response": response.model_dump(mode="json")}
 
 
 def _neo_system_prompt() -> str:
@@ -116,12 +187,14 @@ def _neo_llm_client():
         settings.openai_model,
         settings.openai_base_url,
         settings.llm_timeout_seconds,
+        settings.llm_structured_max_tokens,
+        settings.llm_text_max_tokens,
     )
 
 
 def _general_evidence_for_message(message: str) -> list[Evidence]:
     equipment_id = _equipment_id_for_message(message)
-    return retrieve_evidence(message, equipment_id=equipment_id, limit=4, use_reranker=False)
+    return retrieve_evidence(message, equipment_id=equipment_id, limit=3, use_reranker=False)
 
 
 def _evidence_based_answer(message: str, evidence: list[Evidence], live_failure_reason: Optional[str]) -> str:

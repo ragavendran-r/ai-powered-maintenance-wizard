@@ -157,6 +157,11 @@ export interface NeoChatResponse {
   provider: string
 }
 
+export type NeoStreamEvent =
+  | { type: 'meta'; provider: string; used_live_provider: boolean }
+  | { type: 'token'; content: string }
+  | { type: 'done'; response: NeoChatResponse }
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 const AUTH_SESSION_KEY = 'maintenance_wizard_auth_session'
 
@@ -237,6 +242,57 @@ async function textRequest(path: string): Promise<string> {
     throw new ApiError(response.status, `Request failed: ${response.status}`)
   }
   return response.text()
+}
+
+async function streamRequest<TEvent>(
+  path: string,
+  init: RequestInit,
+  onEvent: (event: TEvent) => void,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      ...authHeaders(),
+      ...(init.headers ?? {}),
+    },
+    ...init,
+  })
+  if (!response.ok) {
+    if (response.status === 401) unauthorizedHandler?.()
+    throw new ApiError(response.status, `Request failed: ${response.status}`)
+  }
+  if (!response.body) throw new ApiError(response.status, 'Streaming response body is unavailable')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    buffer = flushSseBuffer(buffer, onEvent)
+  }
+  buffer += decoder.decode()
+  flushSseBuffer(`${buffer}\n\n`, onEvent)
+}
+
+function flushSseBuffer<TEvent>(buffer: string, onEvent: (event: TEvent) => void): string {
+  let remaining = buffer
+  let boundary = remaining.indexOf('\n\n')
+  while (boundary !== -1) {
+    const rawEvent = remaining.slice(0, boundary)
+    remaining = remaining.slice(boundary + 2)
+    const data = rawEvent
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n')
+    if (data) onEvent(JSON.parse(data) as TEvent)
+    boundary = remaining.indexOf('\n\n')
+  }
+  return remaining
 }
 
 export interface DocumentIngestResponse {
@@ -445,6 +501,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ message, history }),
     }),
+  neoChatStream: (
+    message: string,
+    history: { role: 'user' | 'assistant'; content: string }[] = [],
+    onEvent: (event: NeoStreamEvent) => void,
+  ) =>
+    streamRequest<NeoStreamEvent>(
+      '/api/neo/chat/stream',
+      {
+        method: 'POST',
+        body: JSON.stringify({ message, history }),
+      },
+      onEvent,
+    ),
   ingestDocumentFile: (input: { file: File; sourceType: string; equipmentId?: string; title?: string }) => {
     const body = new FormData()
     body.append('file', input.file)

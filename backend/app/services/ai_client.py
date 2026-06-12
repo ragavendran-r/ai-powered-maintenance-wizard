@@ -12,4 +12,6 @@ def configured_llm_client() -> LLMClient:
         settings.openai_model,
         settings.openai_base_url,
         settings.llm_timeout_seconds,
+        settings.llm_structured_max_tokens,
+        settings.llm_text_max_tokens,
     )

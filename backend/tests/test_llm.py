@@ -1,7 +1,7 @@
 import httpx
 
 from app.models.schemas import DocumentIntelligence
-from app.services.llm import MockLLMClient, OpenAIClient, OllamaClient
+from app.services.llm import LLMTextResponse, MockLLMClient, OpenAIClient, OllamaClient
 
 
 def test_mock_llm_returns_valid_context():
@@ -44,10 +44,87 @@ def test_openai_client_parses_structured_response(monkeypatch):
     assert context.probable_root_causes == ["Bearing wear"]
     assert context.immediate_actions == ["Reduce load"]
     assert context.confidence_adjustment == 0.1
-    assert captured_request["max_tokens"] == 512
+    assert captured_request["max_tokens"] == 300
     assert captured_request["response_format"]["type"] == "json_schema"
     assert captured_request["response_format"]["json_schema"]["name"] == "LLMContext"
     assert "summary" in captured_request["response_format"]["json_schema"]["schema"]["properties"]
+
+
+def test_openai_text_completion_respects_local_token_cap(monkeypatch):
+    captured_request = {}
+
+    def fake_post(*args, **kwargs):
+        captured_request.update(kwargs["json"])
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://example.test/v1/chat/completions"),
+            json={"choices": [{"message": {"content": "Use lockout/tagout and inspect the actuator."}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    context = OpenAIClient(
+        "test-key",
+        "test-model",
+        "https://example.test/v1",
+        2.0,
+        structured_max_tokens=300,
+        text_max_tokens=250,
+    ).complete_text(
+        "prompt",
+        "system",
+        lambda provider, reason: LLMTextResponse(content=reason, provider=provider),
+        max_tokens=900,
+    )
+
+    assert context.used_live_provider is True
+    assert context.provider == "openai"
+    assert captured_request["max_tokens"] == 250
+
+
+def test_openai_text_stream_uses_sse_and_token_cap(monkeypatch):
+    captured_request = {}
+
+    class FakeStreamResponse:
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"Use lockout/tagout "}}]}'
+            yield 'data: {"choices":[{"delta":{"content":"before inspection."}}]}'
+            yield "data: [DONE]"
+
+    class FakeStream:
+        def __enter__(self):
+            return FakeStreamResponse()
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    def fake_stream(*args, **kwargs):
+        captured_request.update(kwargs["json"])
+        return FakeStream()
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    chunks = list(
+        OpenAIClient(
+            "test-key",
+            "test-model",
+            "https://example.test/v1",
+            2.0,
+            structured_max_tokens=300,
+            text_max_tokens=250,
+        ).stream_text(
+            "prompt",
+            "system",
+            lambda provider, reason: LLMTextResponse(content=reason, provider=provider),
+            max_tokens=900,
+        )
+    )
+
+    assert captured_request["stream"] is True
+    assert captured_request["max_tokens"] == 250
+    assert [chunk.content for chunk in chunks] == ["Use lockout/tagout ", "before inspection."]
+    assert all(chunk.used_live_provider for chunk in chunks)
 
 
 def test_openai_client_parses_generic_structured_response(monkeypatch):
@@ -107,7 +184,10 @@ def test_openai_client_falls_back_on_invalid_json(monkeypatch):
 
 
 def test_ollama_client_parses_structured_response(monkeypatch):
+    captured_request = {}
+
     def fake_post(*args, **kwargs):
+        captured_request.update(kwargs["json"])
         return httpx.Response(
             200,
             request=httpx.Request("POST", "http://localhost:11434/api/chat"),
@@ -131,3 +211,4 @@ def test_ollama_client_parses_structured_response(monkeypatch):
     assert context.provider == "ollama"
     assert context.probable_root_causes == ["Sticky actuator"]
     assert context.planned_actions == ["Calibrate actuator"]
+    assert captured_request["options"]["num_predict"] == 300

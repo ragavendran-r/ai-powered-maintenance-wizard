@@ -217,6 +217,7 @@ export function App() {
   const [neoQuestion, setNeoQuestion] = useState('Show work orders needing follow-up')
   const [neoTable, setNeoTable] = useState<NeoTable | null>(null)
   const [neoLoading, setNeoLoading] = useState(false)
+  const [neoStreaming, setNeoStreaming] = useState(false)
   const [neoMessages, setNeoMessages] = useState<AssistantTurn[]>([
     {
       id: 'neo-welcome',
@@ -422,16 +423,73 @@ export function App() {
   async function sendNeoQuestion() {
     if (neoLoading) return
     const prompt = neoQuestion.trim() || 'Show assets'
+    const history = neoMessages.map((turn) => ({ role: turn.role, content: turn.content }))
     setNeoMessages((turns) => [
       ...turns,
       { id: assistantTurnId('neo-user'), role: 'user', content: prompt },
     ])
     setNeoLoading(true)
+    setNeoStreaming(false)
     try {
-      const history = neoMessages.map((turn) => ({ role: turn.role, content: turn.content }))
-      const response = await api.neoChat(prompt, history)
-      setNeoTable(response.table ?? null)
-      appendNeoResponse(response)
+      let assistantMessageId: string | null = null
+      let streamedContent = ''
+      let streamProvider = 'openai'
+      let streamUsedLiveProvider = true
+
+      const ensureAssistantMessage = () => {
+        if (assistantMessageId) return assistantMessageId
+        assistantMessageId = assistantTurnId('neo-assistant')
+        setNeoStreaming(true)
+        setNeoMessages((turns) => [
+          ...turns,
+          {
+            id: assistantMessageId ?? assistantTurnId('neo-assistant'),
+            role: 'assistant',
+            content: '',
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+          },
+        ])
+        return assistantMessageId
+      }
+
+      const updateAssistantMessage = (updates: Partial<AssistantTurn>) => {
+        if (!assistantMessageId) return
+        setNeoMessages((turns) => turns.map((turn) => (turn.id === assistantMessageId ? { ...turn, ...updates } : turn)))
+      }
+
+      await api.neoChatStream(prompt, history, (event) => {
+        if (event.type === 'meta') {
+          streamProvider = event.provider
+          streamUsedLiveProvider = event.used_live_provider
+          updateAssistantMessage({ provider: streamProvider, usedLiveProvider: streamUsedLiveProvider })
+          return
+        }
+        if (event.type === 'token') {
+          ensureAssistantMessage()
+          streamedContent += event.content
+          updateAssistantMessage({
+            content: streamedContent,
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+          })
+          return
+        }
+        if (event.type === 'done') {
+          setNeoTable(event.response.table ?? null)
+          if (assistantMessageId) {
+            const message = neoResponseMessage(event.response)
+            updateAssistantMessage({
+              content: message,
+              details: event.response.table ? [`Updated table: ${event.response.table.title}`, `${event.response.table.rows.length} row(s)`] : undefined,
+              provider: event.response.provider,
+              usedLiveProvider: event.response.used_live_provider,
+            })
+          } else {
+            appendNeoResponse(event.response)
+          }
+        }
+      })
       setNeoQuestion('')
     } catch {
       const fallback: NeoChatResponse = {
@@ -443,13 +501,18 @@ export function App() {
       appendNeoResponse(fallback)
     } finally {
       setNeoLoading(false)
+      setNeoStreaming(false)
     }
   }
 
-  function appendNeoResponse(response: NeoChatResponse) {
-    const message = response.table
+  function neoResponseMessage(response: NeoChatResponse) {
+    return response.table
       ? `I found ${response.table.rows.length} row${response.table.rows.length === 1 ? '' : 's'} for ${response.table.title}. The table is updated in the dashboard.`
       : response.answer
+  }
+
+  function appendNeoResponse(response: NeoChatResponse) {
+    const message = neoResponseMessage(response)
     setNeoMessages((turns) => [
       ...turns,
       {
@@ -898,7 +961,7 @@ export function App() {
                   {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
                 </div>
               ))}
-              {neoLoading && (
+              {neoLoading && !neoStreaming && (
                 <div className="chatBubble assistant neoThinking" aria-live="polite">
                   <span>Neo</span>
                   <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
