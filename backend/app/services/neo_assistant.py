@@ -193,6 +193,7 @@ def _neo_llm_client():
         settings.llm_timeout_seconds,
         settings.llm_structured_max_tokens,
         settings.llm_text_max_tokens,
+        settings.llm_stream_timeout_seconds,
     )
 
 

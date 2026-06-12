@@ -83,6 +83,7 @@ def test_openai_text_completion_respects_local_token_cap(monkeypatch):
 
 def test_openai_text_stream_uses_sse_and_token_cap(monkeypatch):
     captured_request = {}
+    captured_timeout = {}
 
     class FakeStreamResponse:
         def raise_for_status(self):
@@ -102,6 +103,7 @@ def test_openai_text_stream_uses_sse_and_token_cap(monkeypatch):
 
     def fake_stream(*args, **kwargs):
         captured_request.update(kwargs["json"])
+        captured_timeout["timeout"] = kwargs["timeout"]
         return FakeStream()
 
     monkeypatch.setattr(httpx, "stream", fake_stream)
@@ -113,6 +115,7 @@ def test_openai_text_stream_uses_sse_and_token_cap(monkeypatch):
             2.0,
             structured_max_tokens=300,
             text_max_tokens=250,
+            stream_timeout_seconds=45,
         ).stream_text(
             "prompt",
             "system",
@@ -123,6 +126,8 @@ def test_openai_text_stream_uses_sse_and_token_cap(monkeypatch):
 
     assert captured_request["stream"] is True
     assert captured_request["max_tokens"] == 250
+    assert captured_timeout["timeout"].read == 45
+    assert captured_timeout["timeout"].connect == 2.0
     assert [chunk.content for chunk in chunks] == ["Use lockout/tagout ", "before inspection."]
     assert all(chunk.used_live_provider for chunk in chunks)
 

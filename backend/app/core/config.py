@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     llm_timeout_seconds: float = Field(default=15.0, ge=1.0, alias="LLM_TIMEOUT_SECONDS")
+    llm_stream_timeout_seconds: float = Field(default=60.0, ge=1.0, alias="LLM_STREAM_TIMEOUT_SECONDS")
     llm_structured_max_tokens: int = Field(default=300, ge=64, le=2048, alias="LLM_STRUCTURED_MAX_TOKENS")
     llm_text_max_tokens: int = Field(default=600, ge=64, le=2048, alias="LLM_TEXT_MAX_TOKENS")
     auth_enabled: bool = Field(default=True, alias="AUTH_ENABLED")

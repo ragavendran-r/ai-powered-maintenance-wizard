@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import Optional
 
 from fastapi import HTTPException
@@ -12,12 +13,14 @@ from app.models.schemas import (
     WorkOrderCreateRequest,
 )
 from app.services.ai_client import configured_llm_client
+from app.services.llm import LLMTextResponse
 from app.services.retrieval import retrieve_evidence
 from app.services.risk import health_summary
 
 
 TECHNICIAN_ASSISTANT_NAME = "Smith"
 SUPERVISOR_ASSISTANT_NAME = "Trinity"
+WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS = 600
 
 
 class TechnicianAssistantLLMOutput(BaseModel):
@@ -94,6 +97,61 @@ def technician_assistance(request: TechnicianAssistantRequest) -> TechnicianAssi
     )
 
 
+def stream_technician_assistance(request: TechnicianAssistantRequest) -> Iterator[dict[str, object]]:
+    work_order = repository.get_work_order(request.work_order_id)
+    if not work_order:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    equipment = repository.get_equipment(work_order["equipment_id"])
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    summary = health_summary(work_order["equipment_id"])
+    evidence = retrieve_evidence(
+        " ".join([work_order["title"], work_order["description"], request.observation or ""]),
+        work_order["equipment_id"],
+    )
+    fallback = _technician_fallback(request, work_order, summary, evidence)
+    prompt = _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback)
+    content_parts: list[str] = []
+    provider = "mock"
+    used_live_provider = False
+    sent_meta = False
+    for chunk in configured_llm_client().stream_text(
+        prompt,
+        _technician_text_system_prompt(),
+        lambda fallback_provider, reason: LLMTextResponse(
+            content=_technician_stream_fallback_text(fallback, reason),
+            used_live_provider=False,
+            provider=fallback_provider,
+        ),
+        max_tokens=WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS,
+    ):
+        provider = chunk.provider
+        used_live_provider = chunk.used_live_provider
+        if not sent_meta:
+            sent_meta = True
+            yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+        if chunk.content:
+            content_parts.append(chunk.content)
+            yield {"type": "token", "content": chunk.content}
+
+    answer = "".join(content_parts).strip()
+    if not answer:
+        answer = _technician_stream_fallback_text(fallback, "stream returned no content")
+        provider = "mock"
+        used_live_provider = False
+        if not sent_meta:
+            yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+        yield {"type": "token", "content": answer}
+    response = fallback.model_copy(
+        update={
+            "next_prompt": answer,
+            "provider": provider,
+            "used_live_provider": used_live_provider,
+        }
+    )
+    yield {"type": "done", "response": response.model_dump(mode="json")}
+
+
 def supervisor_assistance(request: SupervisorAssistantRequest) -> SupervisorAssistantResponse:
     work_orders = repository.list_work_orders(follow_up_only=request.queue_name == "follow_up")
     selected = repository.get_work_order(request.work_order_id) if request.work_order_id else None
@@ -134,6 +192,54 @@ def supervisor_assistance(request: SupervisorAssistantRequest) -> SupervisorAssi
     )
 
 
+def stream_supervisor_assistance(request: SupervisorAssistantRequest) -> Iterator[dict[str, object]]:
+    work_orders = repository.list_work_orders(follow_up_only=request.queue_name == "follow_up")
+    selected = repository.get_work_order(request.work_order_id) if request.work_order_id else None
+    if request.work_order_id and not selected:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    fallback = _supervisor_fallback(request, work_orders, selected)
+    prompt = _supervisor_text_prompt(request, work_orders, selected, fallback)
+    content_parts: list[str] = []
+    provider = "mock"
+    used_live_provider = False
+    sent_meta = False
+    for chunk in configured_llm_client().stream_text(
+        prompt,
+        _supervisor_text_system_prompt(),
+        lambda fallback_provider, reason: LLMTextResponse(
+            content=_supervisor_stream_fallback_text(fallback, reason),
+            used_live_provider=False,
+            provider=fallback_provider,
+        ),
+        max_tokens=WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS,
+    ):
+        provider = chunk.provider
+        used_live_provider = chunk.used_live_provider
+        if not sent_meta:
+            sent_meta = True
+            yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+        if chunk.content:
+            content_parts.append(chunk.content)
+            yield {"type": "token", "content": chunk.content}
+
+    answer = "".join(content_parts).strip()
+    if not answer:
+        answer = _supervisor_stream_fallback_text(fallback, "stream returned no content")
+        provider = "mock"
+        used_live_provider = False
+        if not sent_meta:
+            yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+        yield {"type": "token", "content": answer}
+    response = fallback.model_copy(
+        update={
+            "summary": answer,
+            "provider": provider,
+            "used_live_provider": used_live_provider,
+        }
+    )
+    yield {"type": "done", "response": response.model_dump(mode="json")}
+
+
 def _technician_system_prompt() -> str:
     return (
         f"You are {TECHNICIAN_ASSISTANT_NAME}, a steel-plant maintenance technician assistant. Return only valid JSON "
@@ -143,12 +249,105 @@ def _technician_system_prompt() -> str:
     )
 
 
+def _technician_text_system_prompt() -> str:
+    return (
+        f"You are {TECHNICIAN_ASSISTANT_NAME}, a steel-plant maintenance technician assistant. "
+        "Stream a concise Markdown chat response for the assigned technician. Do not return JSON. "
+        "Use short headings and bullets. Include live directions, safety reminders, recommended actions, "
+        "a suggested problem code, and a completion summary. Ground every suggestion in the supplied work "
+        "order, asset state, alerts, and evidence."
+    )
+
+
 def _supervisor_system_prompt() -> str:
     return (
         f"You are {SUPERVISOR_ASSISTANT_NAME}, a maintenance supervisor assistant. Return only valid JSON matching "
         "SupervisorAssistantLLMOutput. Summarize queue state, identify follow-ups, list risks, "
         "and set draft fields only when the supplied work order needs one."
     )
+
+
+def _supervisor_text_system_prompt() -> str:
+    return (
+        f"You are {SUPERVISOR_ASSISTANT_NAME}, a maintenance supervisor assistant. "
+        "Stream a concise Markdown chat response for supervisor review. Do not return JSON. "
+        "Summarize queue state, identify follow-up actions, list risks, and say whether a draft follow-up "
+        "work order is warranted based only on supplied work-order data."
+    )
+
+
+def _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback) -> str:
+    return "\n".join(
+        [
+            f"Work order: {work_order['id']} {work_order['title']}",
+            f"Asset: {equipment['id']} {equipment['name']} in {equipment['area']}",
+            f"Status: {work_order['status']} Priority: {work_order['priority']}",
+            f"Description: {work_order['description']}",
+            f"Recommended action: {work_order['recommended_action']}",
+            f"Technician observation: {request.observation or 'No observation yet'}",
+            f"Current risk: {summary.risk_level}, health score: {summary.health_score}",
+            f"Suggested problem code from app rules: {fallback.suggested_problem_code}",
+            f"Suggested failure class from app rules: {fallback.suggested_failure_class}",
+            "Active alerts:",
+            *[f"- {alert.message}" for alert in summary.active_alerts[:4]],
+            "Evidence:",
+            *[f"- {item.title}: {item.excerpt}" for item in evidence[:4]],
+        ]
+    )
+
+
+def _supervisor_text_prompt(request, work_orders, selected, fallback) -> str:
+    return "\n".join(
+        [
+            f"Supervisor question: {request.question or 'Review work order status and follow-ups.'}",
+            f"Queue: {request.queue_name or 'all work orders'}",
+            "Selected work order:",
+            _work_order_line(selected) if selected else "None selected",
+            "Queue work orders:",
+            *[_work_order_line(item) for item in work_orders[:8]],
+            "Current app-identified follow-up actions:",
+            *[f"- {item}" for item in fallback.follow_up_actions[:5]],
+            "Current app-identified risks:",
+            *[f"- {item}" for item in fallback.risks[:5]],
+        ]
+    )
+
+
+def _technician_stream_fallback_text(response: TechnicianAssistantResponse, reason: str) -> str:
+    lines = [
+        f"### {TECHNICIAN_ASSISTANT_NAME} Guidance",
+        response.next_prompt,
+        "",
+        "### Live Directions",
+        *[f"- {item}" for item in response.live_directions],
+        "",
+        "### Recommendations",
+        *[f"- {item}" for item in response.recommendations],
+        *[f"- Safety: {item}" for item in response.safety_reminders],
+        f"- Problem code: {response.suggested_problem_code}",
+        f"- Summary: {response.completion_summary}",
+    ]
+    if reason:
+        lines.append(f"- LLM fallback reason: {reason}")
+    return "\n".join(lines)
+
+
+def _supervisor_stream_fallback_text(response: SupervisorAssistantResponse, reason: str) -> str:
+    lines = [
+        f"### {SUPERVISOR_ASSISTANT_NAME} Review",
+        response.summary,
+        "",
+        "### Follow-Ups",
+        *[f"- {item}" for item in response.follow_up_actions],
+        "",
+        "### Risks",
+        *[f"- {item}" for item in response.risks],
+    ]
+    if response.draft_work_order:
+        lines.extend(["", "### Draft Work Order", f"- {response.draft_work_order.title}"])
+    if reason:
+        lines.append(f"- LLM fallback reason: {reason}")
+    return "\n".join(lines)
 
 
 def _technician_output_from_response(response: TechnicianAssistantResponse) -> TechnicianAssistantLLMOutput:

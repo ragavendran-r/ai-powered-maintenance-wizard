@@ -109,6 +109,7 @@ class OpenAIClient(LLMClient):
         timeout_seconds: float,
         structured_max_tokens: int = 300,
         text_max_tokens: int = 600,
+        stream_timeout_seconds: Optional[float] = None,
     ):
         self.api_key = api_key
         self.model = model
@@ -116,6 +117,7 @@ class OpenAIClient(LLMClient):
         self.timeout_seconds = timeout_seconds
         self.structured_max_tokens = structured_max_tokens
         self.text_max_tokens = text_max_tokens
+        self.stream_timeout_seconds = stream_timeout_seconds or timeout_seconds
 
     @property
     def provider_name(self) -> str:
@@ -178,7 +180,7 @@ class OpenAIClient(LLMClient):
                     "max_tokens": token_budget,
                     "stream": True,
                 },
-                timeout=self.timeout_seconds,
+                timeout=self._stream_timeout(),
             ) as response:
                 response.raise_for_status()
                 yielded = False
@@ -197,6 +199,14 @@ class OpenAIClient(LLMClient):
                     yield fallback_factory("openai", "OpenAI stream returned no content")
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
             yield fallback_factory("openai", f"OpenAI stream failed: {exc}")
+
+    def _stream_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            self.stream_timeout_seconds,
+            connect=self.timeout_seconds,
+            write=self.timeout_seconds,
+            pool=self.timeout_seconds,
+        )
 
     def complete_model(
         self,
@@ -238,12 +248,14 @@ class OllamaClient(LLMClient):
         timeout_seconds: float,
         structured_max_tokens: int = 300,
         text_max_tokens: int = 600,
+        stream_timeout_seconds: Optional[float] = None,
     ):
         self.base_url = base_url
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.structured_max_tokens = structured_max_tokens
         self.text_max_tokens = text_max_tokens
+        self.stream_timeout_seconds = stream_timeout_seconds or timeout_seconds
 
     @property
     def provider_name(self) -> str:
@@ -298,7 +310,7 @@ class OllamaClient(LLMClient):
                     "stream": True,
                     "options": {"num_predict": token_budget},
                 },
-                timeout=self.timeout_seconds,
+                timeout=self._stream_timeout(),
             ) as response:
                 response.raise_for_status()
                 yielded = False
@@ -316,6 +328,14 @@ class OllamaClient(LLMClient):
                     yield fallback_factory("ollama", "Ollama stream returned no content")
         except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             yield fallback_factory("ollama", f"Ollama stream failed: {exc}")
+
+    def _stream_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            self.stream_timeout_seconds,
+            connect=self.timeout_seconds,
+            write=self.timeout_seconds,
+            pool=self.timeout_seconds,
+        )
 
     def complete_model(
         self,
@@ -356,6 +376,7 @@ def build_llm_client(
     timeout_seconds: float = 20.0,
     structured_max_tokens: int = 300,
     text_max_tokens: int = 600,
+    stream_timeout_seconds: Optional[float] = None,
 ) -> LLMClient:
     if provider == "openai":
         return OpenAIClient(
@@ -365,9 +386,17 @@ def build_llm_client(
             timeout_seconds,
             structured_max_tokens,
             text_max_tokens,
+            stream_timeout_seconds,
         )
     if provider == "ollama":
-        return OllamaClient(ollama_base_url, ollama_model, timeout_seconds, structured_max_tokens, text_max_tokens)
+        return OllamaClient(
+            ollama_base_url,
+            ollama_model,
+            timeout_seconds,
+            structured_max_tokens,
+            text_max_tokens,
+            stream_timeout_seconds,
+        )
     return MockLLMClient(provider=provider)
 
 

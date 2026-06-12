@@ -162,6 +162,11 @@ export type NeoStreamEvent =
   | { type: 'token'; content: string }
   | { type: 'done'; response: NeoChatResponse }
 
+export type AssistantStreamEvent<TResponse> =
+  | { type: 'meta'; provider: string; used_live_provider: boolean }
+  | { type: 'token'; content: string }
+  | { type: 'done'; response: TResponse }
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 const AUTH_SESSION_KEY = 'maintenance_wizard_auth_session'
 
@@ -568,11 +573,36 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ work_order_id: workOrderId, observation }),
     }),
+  technicianAssistStream: (
+    workOrderId: string,
+    observation: string | undefined,
+    onEvent: (event: AssistantStreamEvent<TechnicianAssistantResponse>) => void,
+  ) =>
+    streamRequest<AssistantStreamEvent<TechnicianAssistantResponse>>(
+      '/api/work-orders/technician-assist/stream',
+      {
+        method: 'POST',
+        body: JSON.stringify({ work_order_id: workOrderId, observation }),
+      },
+      onEvent,
+    ),
   supervisorAssist: (payload: { work_order_id?: string; queue_name?: string; question?: string }) =>
     request<SupervisorAssistantResponse>('/api/work-orders/supervisor-assist', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  supervisorAssistStream: (
+    payload: { work_order_id?: string; queue_name?: string; question?: string },
+    onEvent: (event: AssistantStreamEvent<SupervisorAssistantResponse>) => void,
+  ) =>
+    streamRequest<AssistantStreamEvent<SupervisorAssistantResponse>>(
+      '/api/work-orders/supervisor-assist/stream',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      onEvent,
+    ),
   feedback: (
     recommendationId: string,
     status: 'accepted' | 'rejected' | 'corrected',

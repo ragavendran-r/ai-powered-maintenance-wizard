@@ -64,7 +64,12 @@ from app.services.reports import recommendation_to_markdown
 from app.services.retrieval import retrieve_evidence
 from app.services.risk import active_alerts, equipment_records, health_summary, predict_failure
 from app.services.anomaly import analyze_anomalies, sensor_readings
-from app.services.work_order_assistant import supervisor_assistance, technician_assistance
+from app.services.work_order_assistant import (
+    stream_supervisor_assistance,
+    stream_technician_assistance,
+    supervisor_assistance,
+    technician_assistance,
+)
 
 
 @asynccontextmanager
@@ -346,12 +351,50 @@ def technician_assist(request: TechnicianAssistantRequest):
 
 
 @app.post(
+    "/api/work-orders/technician-assist/stream",
+    dependencies=[Depends(require_roles(*TECHNICIAN_ASSISTANT_ROLES))],
+)
+def technician_assist_stream(request: TechnicianAssistantRequest):
+    def events():
+        for event in stream_technician_assistance(request):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post(
     "/api/work-orders/supervisor-assist",
     response_model=SupervisorAssistantResponse,
     dependencies=[Depends(require_roles(*SUPERVISOR_ASSISTANT_ROLES))],
 )
 def supervisor_assist(request: SupervisorAssistantRequest):
     return supervisor_assistance(request)
+
+
+@app.post(
+    "/api/work-orders/supervisor-assist/stream",
+    dependencies=[Depends(require_roles(*SUPERVISOR_ASSISTANT_ROLES))],
+)
+def supervisor_assist_stream(request: SupervisorAssistantRequest):
+    def events():
+        for event in stream_supervisor_assistance(request):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/neo/chat", response_model=NeoChatResponse)
