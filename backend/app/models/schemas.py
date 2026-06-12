@@ -255,6 +255,8 @@ class Recommendation(BaseModel):
     evidence: list[Evidence]
     learning_notes: list[str] = []
     reasoning_explanation: Optional["ReasoningExplanation"] = None
+    used_live_provider: bool = False
+    provider: str = "mock"
     report_summary: str
 
 

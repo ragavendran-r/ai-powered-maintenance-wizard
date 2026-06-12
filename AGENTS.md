@@ -2,26 +2,31 @@
 
 ## Project Structure & Module Organization
 
-This repository is currently empty aside from contributor documentation. As code is added, keep the layout predictable:
+This repository is an implemented FastAPI + React prototype. Keep changes aligned with the existing layout:
 
-- `src/` for application source code and reusable modules.
-- `tests/` for automated tests that mirror `src/` structure.
+- `backend/` for the FastAPI application, service modules, SQLite repository, and backend tests.
+- `frontend/` for the React, TypeScript, and Vite application.
 - `assets/` for static files such as images, fixtures, prompts, or sample data.
-- `docs/` for design notes, architecture decisions, and user-facing documentation.
-- Root configuration files such as `package.json`, `pyproject.toml`, `.env.example`, or CI workflows.
+- `docs/` for design notes, architecture decisions, setup guides, and user-facing documentation.
+- `scripts/` for local stack, Kubernetes, and notification helpers.
+- Root configuration files such as `.env.example`, `README.md`, or CI workflows.
 
 Prefer small modules named by responsibility, such as `maintenance_wizard.py`, `api_client.ts`, or `work_order_parser.test.ts`.
 
 ## Build, Test, and Development Commands
 
-No build system is defined yet. When adding one, document root-level commands here. Examples:
+Use the existing backend and frontend commands:
 
-- `npm install` or `pip install -r requirements.txt`: install dependencies.
-- `npm run dev` or `python -m app`: run locally.
-- `npm test` or `pytest`: run tests.
-- `npm run lint`, `ruff check .`, or equivalent: run static checks.
+- `cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`: install backend dependencies.
+- `cd backend && source .venv/bin/activate && uvicorn app.main:app --reload`: run the backend at `http://localhost:8000`.
+- `cd frontend && npm install`: install frontend dependencies.
+- `cd frontend && npm run dev`: run the frontend at `http://localhost:5173`.
+- `scripts/run-local-stack.sh start`: run the local full stack with NATS, backend, and frontend when dependencies are already installed.
+- `PYTHONPYCACHEPREFIX=.pycache python3 -m compileall backend/app`: compile-check backend code.
+- `cd backend && .venv/bin/pytest`: run backend tests.
+- `cd frontend && npm run test && npm run build`: run frontend tests and build.
 
-Avoid duplicate command paths. If a Makefile is added, keep targets thin wrappers around underlying tools.
+Avoid duplicate command paths. If a Makefile is added later, keep targets thin wrappers around underlying tools.
 
 ## Coding Style & Naming Conventions
 
@@ -34,6 +39,19 @@ Follow the formatter and linter configured by the stack. Until tooling exists, u
 - Use `PascalCase` for classes, React components, and exported types.
 
 Keep functions focused and avoid broad utility modules.
+
+## Local LLM Configuration
+
+The backend supports mock, OpenAI-compatible, and Ollama providers. Keep deterministic fallback behavior working for all LLM changes.
+
+Recommended local setup for this Mac is LM Studio with Qwen2.5 7B Instruct GGUF:
+
+- Use `LLM_PROVIDER=openai` for LM Studio because LM Studio exposes OpenAI-compatible endpoints.
+- Set `OPENAI_BASE_URL=http://localhost:1234/v1`.
+- Set `OPENAI_API_KEY` to a non-secret local placeholder such as `lm-studio-local`.
+- Set `OPENAI_MODEL` to the exact model identifier shown by LM Studio, or load the model with a stable identifier such as `qwen2.5-7b-instruct`.
+- Keep `.env` untracked; update `.env.example` and docs instead of committing local runtime values.
+- See `docs/local-llm-lm-studio.md` for the full setup and smoke-test flow.
 
 ## Testing Guidelines
 

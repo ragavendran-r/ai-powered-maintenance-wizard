@@ -1,9 +1,12 @@
 import asyncio
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
+
+os.environ["LLM_PROVIDER"] = "mock"
 
 from app.data import repository
 from app.data.database import database_status, reset_database

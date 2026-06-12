@@ -1,4 +1,7 @@
+from typing import Optional
+
 from fastapi import HTTPException
+from pydantic import BaseModel, Field
 
 from app.data import repository
 from app.models.schemas import (
@@ -11,6 +14,29 @@ from app.models.schemas import (
 from app.services.ai_client import configured_llm_client
 from app.services.retrieval import retrieve_evidence
 from app.services.risk import health_summary
+
+
+class TechnicianAssistantLLMOutput(BaseModel):
+    next_prompt: str
+    live_directions: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+    safety_reminders: list[str] = Field(default_factory=list)
+    suggested_problem_code: str
+    suggested_failure_class: str
+    completion_summary: str
+    used_live_provider: bool = False
+    provider: str = "mock"
+
+
+class SupervisorAssistantLLMOutput(BaseModel):
+    summary: str
+    follow_up_actions: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    should_draft_follow_up: bool = False
+    draft_title: Optional[str] = None
+    draft_recommended_action: Optional[str] = None
+    used_live_provider: bool = False
+    provider: str = "mock"
 
 
 def technician_assistance(request: TechnicianAssistantRequest) -> TechnicianAssistantResponse:
@@ -43,11 +69,25 @@ def technician_assistance(request: TechnicianAssistantRequest) -> TechnicianAssi
     )
     response = configured_llm_client().complete_model(
         prompt,
-        TechnicianAssistantResponse,
+        TechnicianAssistantLLMOutput,
         _technician_system_prompt(),
-        lambda provider, reason: fallback.model_copy(update={"provider": provider, "used_live_provider": False}),
+        lambda provider, reason: _technician_output_from_response(
+            fallback.model_copy(update={"provider": provider, "used_live_provider": False})
+        ),
     )
-    return response.model_copy(update={"work_order_id": work_order["id"], "evidence": evidence})
+    return TechnicianAssistantResponse(
+        work_order_id=work_order["id"],
+        next_prompt=response.next_prompt,
+        live_directions=response.live_directions,
+        recommendations=response.recommendations,
+        safety_reminders=response.safety_reminders,
+        suggested_problem_code=response.suggested_problem_code,
+        suggested_failure_class=response.suggested_failure_class,
+        completion_summary=response.completion_summary,
+        evidence=evidence,
+        used_live_provider=response.used_live_provider,
+        provider=response.provider,
+    )
 
 
 def supervisor_assistance(request: SupervisorAssistantRequest) -> SupervisorAssistantResponse:
@@ -68,17 +108,32 @@ def supervisor_assistance(request: SupervisorAssistantRequest) -> SupervisorAssi
     )
     response = configured_llm_client().complete_model(
         prompt,
-        SupervisorAssistantResponse,
+        SupervisorAssistantLLMOutput,
         _supervisor_system_prompt(),
-        lambda provider, reason: fallback.model_copy(update={"provider": provider, "used_live_provider": False}),
+        lambda provider, reason: _supervisor_output_from_response(
+            fallback.model_copy(update={"provider": provider, "used_live_provider": False})
+        ),
     )
-    return response
+    draft = fallback.draft_work_order if response.should_draft_follow_up else None
+    if draft and response.draft_title:
+        draft.title = response.draft_title
+    if draft and response.draft_recommended_action:
+        draft.recommended_action = response.draft_recommended_action
+    return SupervisorAssistantResponse(
+        summary=response.summary,
+        follow_up_actions=response.follow_up_actions,
+        risks=response.risks,
+        draft_work_order=draft,
+        referenced_work_orders=fallback.referenced_work_orders,
+        used_live_provider=response.used_live_provider,
+        provider=response.provider,
+    )
 
 
 def _technician_system_prompt() -> str:
     return (
         "You are a steel-plant maintenance technician assistant. Return only valid JSON "
-        "matching TechnicianAssistantResponse. Give safe live directions, practical "
+        "matching TechnicianAssistantLLMOutput. Give safe live directions, practical "
         "recommendations, problem code, failure class, and a concise completion summary. "
         "Ground every suggestion in the supplied work order, asset state, alerts, and evidence."
     )
@@ -87,8 +142,35 @@ def _technician_system_prompt() -> str:
 def _supervisor_system_prompt() -> str:
     return (
         "You are a maintenance supervisor assistant. Return only valid JSON matching "
-        "SupervisorAssistantResponse. Summarize queue state, identify follow-ups, list risks, "
-        "and draft a follow-up work order only when the supplied work order needs one."
+        "SupervisorAssistantLLMOutput. Summarize queue state, identify follow-ups, list risks, "
+        "and set draft fields only when the supplied work order needs one."
+    )
+
+
+def _technician_output_from_response(response: TechnicianAssistantResponse) -> TechnicianAssistantLLMOutput:
+    return TechnicianAssistantLLMOutput(
+        next_prompt=response.next_prompt,
+        live_directions=response.live_directions,
+        recommendations=response.recommendations,
+        safety_reminders=response.safety_reminders,
+        suggested_problem_code=response.suggested_problem_code,
+        suggested_failure_class=response.suggested_failure_class,
+        completion_summary=response.completion_summary,
+        used_live_provider=response.used_live_provider,
+        provider=response.provider,
+    )
+
+
+def _supervisor_output_from_response(response: SupervisorAssistantResponse) -> SupervisorAssistantLLMOutput:
+    return SupervisorAssistantLLMOutput(
+        summary=response.summary,
+        follow_up_actions=response.follow_up_actions,
+        risks=response.risks,
+        should_draft_follow_up=response.draft_work_order is not None,
+        draft_title=response.draft_work_order.title if response.draft_work_order else None,
+        draft_recommended_action=response.draft_work_order.recommended_action if response.draft_work_order else None,
+        used_live_provider=response.used_live_provider,
+        provider=response.provider,
     )
 
 

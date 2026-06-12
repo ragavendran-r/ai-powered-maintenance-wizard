@@ -112,6 +112,8 @@ def generate_recommendation(request: DiagnosisRequest) -> Recommendation:
         evidence=evidence,
         learning_notes=learning_notes,
         reasoning_explanation=reasoning_explanation,
+        used_live_provider=llm_context.used_live_provider,
+        provider=llm_context.provider,
         report_summary=_report_summary(
             equipment["name"],
             summary.risk_level,

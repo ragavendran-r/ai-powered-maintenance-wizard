@@ -505,7 +505,7 @@ h3 {
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(0, 360px) 44px minmax(0, 360px);
+  grid-template-columns: minmax(0, 360px) auto;
   justify-content: center;
 }
 
@@ -522,7 +522,11 @@ h3 {
 }
 
 .queryRow button {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
   grid-column: 2;
+  justify-content: center;
 }
 
 .queryRow button,
@@ -590,6 +594,14 @@ h3 {
   gap: 8px;
   grid-template-columns: 1fr;
   margin: 12px 0 16px;
+}
+
+.recommendationBadges {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
 }
 
 .recommendationFacts span {
@@ -1117,6 +1129,16 @@ h3 {
   min-height: 110px;
 }
 
+.assistantComposer {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.assistantComposer textarea {
+  grid-row: span 2;
+}
+
 .buttonRow {
   display: flex;
   flex-wrap: wrap;
@@ -1128,7 +1150,47 @@ h3 {
   border-radius: 6px;
   display: grid;
   gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
   padding: 12px;
+}
+
+.chatBubble {
+  border: 1px solid #dce5ea;
+  border-radius: 6px;
+  display: grid;
+  gap: 6px;
+  max-width: 92%;
+  padding: 10px 12px;
+}
+
+.chatBubble.user {
+  background: #eaf3ff;
+  justify-self: end;
+}
+
+.chatBubble.assistant {
+  background: #f7f9fa;
+  justify-self: start;
+}
+
+.chatBubble span {
+  color: #37444c;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.chatBubble small {
+  color: #60717c;
+}
+
+.chatBubble p {
+  margin: 0;
+}
+
+.chatBubble ul {
+  margin: 0;
+  padding-left: 18px;
 }
 
 @media (max-width: 1100px) {
@@ -1166,6 +1228,14 @@ h3 {
   .workOrderRow span:nth-child(3),
   .workOrderRow span:nth-child(5) {
     display: none;
+  }
+
+  .assistantComposer {
+    grid-template-columns: 1fr;
+  }
+
+  .assistantComposer textarea {
+    grid-row: auto;
   }
 
   .statusTimeline {

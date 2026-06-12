@@ -12,7 +12,10 @@ def test_mock_llm_returns_valid_context():
 
 
 def test_openai_client_parses_structured_response(monkeypatch):
+    captured_request = {}
+
     def fake_post(*args, **kwargs):
+        captured_request.update(kwargs["json"])
         return httpx.Response(
             200,
             request=httpx.Request("POST", "https://example.test/v1/chat/completions"),
@@ -41,6 +44,10 @@ def test_openai_client_parses_structured_response(monkeypatch):
     assert context.probable_root_causes == ["Bearing wear"]
     assert context.immediate_actions == ["Reduce load"]
     assert context.confidence_adjustment == 0.1
+    assert captured_request["max_tokens"] == 512
+    assert captured_request["response_format"]["type"] == "json_schema"
+    assert captured_request["response_format"]["json_schema"]["name"] == "LLMContext"
+    assert "summary" in captured_request["response_format"]["json_schema"]["schema"]["properties"]
 
 
 def test_openai_client_parses_generic_structured_response(monkeypatch):

@@ -133,6 +133,8 @@ export interface Recommendation {
   evidence: Evidence[]
   learning_notes: string[]
   reasoning_explanation?: ReasoningExplanation | null
+  used_live_provider: boolean
+  provider: string
   report_summary: string
 }
 

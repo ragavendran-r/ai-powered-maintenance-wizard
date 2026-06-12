@@ -85,7 +85,8 @@ class OpenAIClient(LLMClient):
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.1,
-                    "response_format": {"type": "json_object"},
+                    "max_tokens": 512,
+                    "response_format": _json_schema_response_format(response_model),
                 },
                 timeout=self.timeout_seconds,
             )
@@ -153,6 +154,16 @@ def _system_prompt() -> str:
         "planned_actions, and confidence_adjustment. Keep actions practical, safe, and traceable "
         "to the provided evidence. confidence_adjustment must be between -0.2 and 0.2."
     )
+
+
+def _json_schema_response_format(response_model: type[BaseModel]) -> dict[str, object]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": response_model.__name__,
+            "schema": response_model.model_json_schema(),
+        },
+    }
 
 
 def _fallback_context(provider: str, reason: str) -> LLMContext:
