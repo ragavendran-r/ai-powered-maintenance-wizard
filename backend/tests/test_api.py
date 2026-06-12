@@ -540,6 +540,24 @@ def test_neo_chat_returns_dashboard_table_for_read_roles():
     assert payload["table"]["title"] == "Work Orders"
     assert "Work order" in payload["table"]["columns"]
     assert payload["table"]["rows"]
+    assert payload["used_live_provider"] is False
+    assert payload["provider"] == "deterministic"
+    assert all(row["Follow-up"] == "Yes" for row in payload["table"]["rows"])
+
+
+def test_neo_chat_returns_asset_table_without_llm():
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "Show assets"},
+        headers=auth_headers("operator@plant.local"),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["table"]["title"] == "Assets"
+    assert "Asset" in payload["table"]["columns"]
+    assert payload["table"]["rows"]
+    assert payload["used_live_provider"] is False
+    assert payload["provider"] == "deterministic"
 
 
 def test_neo_user_table_is_role_limited():
@@ -549,7 +567,9 @@ def test_neo_user_table_is_role_limited():
         headers=auth_headers("operator@plant.local"),
     )
     assert operator_response.status_code == 200
-    assert operator_response.json()["table"]["title"] == "Current User"
+    operator_payload = operator_response.json()
+    assert operator_payload["table"]["title"] == "Current User"
+    assert operator_payload["provider"] == "deterministic"
 
     admin_response = client.post(
         "/api/neo/chat",
@@ -557,7 +577,24 @@ def test_neo_user_table_is_role_limited():
         headers=auth_headers(),
     )
     assert admin_response.status_code == 200
-    assert admin_response.json()["table"]["title"] == "Users"
+    admin_payload = admin_response.json()
+    assert admin_payload["table"]["title"] == "Users"
+    assert admin_payload["provider"] == "deterministic"
+
+
+def test_neo_user_table_supports_role_filters_without_llm():
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "list all supervisors"},
+        headers=auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["table"]["title"] == "Supervisors"
+    assert payload["table"]["rows"]
+    assert {row["Role"] for row in payload["table"]["rows"]} == {"maintenance_supervisor"}
+    assert payload["used_live_provider"] is False
+    assert payload["provider"] == "deterministic"
 
 
 def test_feedback_is_accepted():
