@@ -71,7 +71,9 @@ LLM_PROVIDER=openai
 OPENAI_API_KEY=lm-studio-local
 OPENAI_BASE_URL=http://localhost:1234/v1
 OPENAI_MODEL=qwen2.5-7b-instruct
-LLM_TIMEOUT_SECONDS=45
+LLM_TIMEOUT_SECONDS=15
+LLM_STRUCTURED_MAX_TOKENS=300
+LLM_TEXT_MAX_TOKENS=250
 ```
 
 If you do not load the model with the stable identifier above, set `OPENAI_MODEL` to the exact model id returned by:
@@ -126,6 +128,19 @@ curl http://localhost:1234/v1/chat/completions \
     }
   }'
 ```
+
+## 15 Second Local Response Target
+
+Local 7B inference can be slow when the app asks for long responses, sends large context, or waits for complete non-streaming output. Use these settings for a practical 15 second target on LM Studio:
+
+- Use `Qwen2.5 7B Instruct GGUF` with `Q4_K_M` or another 4-bit quantization.
+- Load the model with high GPU offload, for example `lms load <downloaded-model-id> --identifier qwen2.5-7b-instruct --gpu=max`.
+- Keep LM Studio context length at `4096` unless a specific workflow needs more retrieved context.
+- Keep `.env` at `LLM_TIMEOUT_SECONDS=15`, `LLM_STRUCTURED_MAX_TOKENS=300`, and `LLM_TEXT_MAX_TOKENS=250`.
+- Keep retrieved context small; Neo uses only the most relevant evidence snippets for general questions.
+- Neo streams general maintenance answers from `/api/neo/chat/stream`, so the dashboard can render tokens as Qwen produces them instead of waiting for the whole answer.
+
+The backend still falls back deterministically if the local model misses the timeout. Structured JSON routes such as diagnosis, document intelligence, and technician/supervisor assistant responses remain request/response because they need a complete valid JSON object before the backend can validate and merge them with app data.
 
 The response should contain `choices[0].message.content` as valid JSON with:
 

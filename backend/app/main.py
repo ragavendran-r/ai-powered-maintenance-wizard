@@ -1,9 +1,11 @@
+import json
 import sqlite3
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from app.core.auth import (
     ADMIN_ROLES,
@@ -55,7 +57,7 @@ from app.models.schemas import (
 from app.services.document_intelligence import analyze_documents, document_intelligence
 from app.services.iot_streaming import StreamingIngestionService
 from app.services.maintenance_labeling import label_feedback, label_maintenance_event, label_maintenance_history, stored_labels
-from app.services.neo_assistant import neo_assistance
+from app.services.neo_assistant import neo_assistance, stream_neo_assistance
 from app.services.recommendations import generate_recommendation
 from app.services.document_parser import parse_upload_to_document
 from app.services.reports import recommendation_to_markdown
@@ -358,6 +360,25 @@ def neo_chat(
     current_user: UserPublic = Depends(require_roles(*READ_ROLES)),
 ):
     return neo_assistance(request, current_user)
+
+
+@app.post("/api/neo/chat/stream")
+def neo_chat_stream(
+    request: NeoChatRequest,
+    current_user: UserPublic = Depends(require_roles(*READ_ROLES)),
+):
+    def events():
+        for event in stream_neo_assistance(request, current_user):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(require_roles(*DECISION_ROLES))])

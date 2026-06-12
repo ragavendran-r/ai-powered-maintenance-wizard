@@ -545,6 +545,23 @@ def test_neo_chat_returns_dashboard_table_for_read_roles():
     assert all(row["Follow-up"] == "Yes" for row in payload["table"]["rows"])
 
 
+def test_neo_chat_stream_returns_sse_done_event_for_table_query():
+    with client.stream(
+        "POST",
+        "/api/neo/chat/stream",
+        json={"message": "Show work orders needing follow-up"},
+        headers=auth_headers("operator@plant.local"),
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        body = "".join(response.iter_text())
+
+    assert "data:" in body
+    assert '"type": "done"' in body
+    assert '"title": "Work Orders"' in body
+    assert '"provider": "deterministic"' in body
+
+
 def test_neo_chat_returns_asset_table_without_llm():
     response = client.post(
         "/api/neo/chat",
@@ -614,6 +631,23 @@ def test_neo_general_maintenance_query_uses_evidence_fallback_when_llm_is_slow()
     assert "### Evidence Used" in payload["answer"]
     assert "inlet guide vane" in payload["answer"].lower()
     assert "Ask me to show assets" not in payload["answer"]
+
+
+def test_neo_chat_stream_returns_token_events_for_general_queries():
+    with client.stream(
+        "POST",
+        "/api/neo/chat/stream",
+        json={"message": "how to inspect Blast Furnace Combustion Air Blower"},
+        headers=auth_headers(),
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert '"type": "meta"' in body
+    assert '"type": "token"' in body
+    assert '"type": "done"' in body
+    assert "BF-BLOWER-02" in body
+    assert "Safety Checks" in body
 
 
 def test_feedback_is_accepted():

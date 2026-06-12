@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import { api, type UserRole } from './services/api'
+import { api, type NeoChatResponse, type NeoStreamEvent, type UserRole } from './services/api'
 
 const sampleFiles = [
   {
@@ -56,6 +56,20 @@ const sampleFiles = [
 ]
 
 let neoResponseDelayMs = 0
+
+function neoStreamResponse(response: NeoChatResponse, tokenChunks: string[] = []) {
+  const events: NeoStreamEvent[] = tokenChunks.length
+    ? [
+        { type: 'meta', provider: response.provider, used_live_provider: response.used_live_provider },
+        ...tokenChunks.map((content) => ({ type: 'token' as const, content })),
+        { type: 'done', response },
+      ]
+    : [{ type: 'done', response }]
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
 
 const dashboard = {
   equipment_count: 5,
@@ -353,38 +367,36 @@ beforeEach(() => {
       if (url.endsWith('/api/dashboard/summary')) {
         return Promise.resolve(new Response(JSON.stringify(dashboard), { status: 200 }))
       }
-      if (url.endsWith('/api/neo/chat')) {
+      if (url.endsWith('/api/neo/chat/stream')) {
         const body = JSON.parse((init?.body as string) ?? '{}')
         if (body.message === 'Format markdown response') {
+          const response = {
+            answer:
+              'To inspect BF-BLOWER-02, follow these steps: ### Safety Checks: 1. **Lockout/Tagout**: Isolate and tag all power sources. 2. **Ventilation**: Confirm safe airflow before access. ### Inspection Steps: - Inspect inlet guide vane response. - Verify actuator calibration.',
+            table: null,
+            used_live_provider: true,
+            provider: 'openai',
+          }
           return Promise.resolve(
-            new Response(
-              JSON.stringify({
-                answer:
-                  'To inspect BF-BLOWER-02, follow these steps: ### Safety Checks: 1. **Lockout/Tagout**: Isolate and tag all power sources. 2. **Ventilation**: Confirm safe airflow before access. ### Inspection Steps: - Inspect inlet guide vane response. - Verify actuator calibration.',
-                table: null,
-                used_live_provider: true,
-                provider: 'openai',
-              }),
-              { status: 200 },
-            ),
+            neoStreamResponse(response, [
+              'To inspect BF-BLOWER-02, follow these steps: ### Safety Checks: 1. **Lockout/Tagout**: Isolate and tag all power sources. ',
+              '2. **Ventilation**: Confirm safe airflow before access. ### Inspection Steps: - Inspect inlet guide vane response. - Verify actuator calibration.',
+            ]),
           )
         }
-        const response = new Response(
-          JSON.stringify({
-            answer: 'Neo found work orders that need attention. WO-8304 and WO-8297 require follow-up.',
-            table: {
-              title: 'Work Orders',
-              columns: ['Work order', 'Asset', 'Status', 'Priority'],
-              rows: [
-                { 'Work order': 'WO-8304', Asset: 'RM-DRIVE-01', Status: 'INPRG', Priority: 1 },
-                { 'Work order': 'WO-8297', Asset: 'OH-CRANE-05', Status: 'COMP', Priority: 1 },
-              ],
-            },
-            used_live_provider: false,
-            provider: 'mock',
-          }),
-          { status: 200 },
-        )
+        const response = neoStreamResponse({
+          answer: 'Neo found work orders that need attention. WO-8304 and WO-8297 require follow-up.',
+          table: {
+            title: 'Work Orders',
+            columns: ['Work order', 'Asset', 'Status', 'Priority'],
+            rows: [
+              { 'Work order': 'WO-8304', Asset: 'RM-DRIVE-01', Status: 'INPRG', Priority: 1 },
+              { 'Work order': 'WO-8297', Asset: 'OH-CRANE-05', Status: 'COMP', Priority: 1 },
+            ],
+          },
+          used_live_provider: false,
+          provider: 'mock',
+        })
         if (neoResponseDelayMs > 0) {
           return new Promise((resolve) => {
             window.setTimeout(() => resolve(response), neoResponseDelayMs)

@@ -194,7 +194,7 @@ Supported LLM provider values:
 - `openai`: OpenAI-compatible chat completions adapter using `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL`.
 - `ollama`: Ollama chat adapter using `OLLAMA_BASE_URL` and `OLLAMA_MODEL`.
 
-For local LM Studio inference, use the `openai` provider mode with `OPENAI_BASE_URL=http://localhost:1234/v1`. The recommended local model for this project is Qwen2.5 7B Instruct GGUF with a 4-bit quantization. See `docs/local-llm-lm-studio.md` for install, model, `.env`, and smoke-test steps.
+For local LM Studio inference, use the `openai` provider mode with `OPENAI_BASE_URL=http://localhost:1234/v1`. The recommended local model for this project is Qwen2.5 7B Instruct GGUF with a 4-bit quantization. Keep local response controls at `LLM_TIMEOUT_SECONDS=15`, `LLM_STRUCTURED_MAX_TOKENS=300`, and `LLM_TEXT_MAX_TOKENS=250`; Neo streams general dashboard answers as tokens arrive. See `docs/local-llm-lm-studio.md` for install, model, `.env`, and smoke-test steps.
 
 Provider responses must return the structured JSON contract requested by each feature. Recommendation generation expects `summary`, `probable_root_causes`, `immediate_actions`, `planned_actions`, and `confidence_adjustment`; document intelligence, maintenance labels, anomaly context, retrieval reranking, and reasoning explanations each use their own Pydantic-validated JSON schemas. Missing keys, malformed JSON, timeout, or network failure automatically fall back to deterministic local reasoning so the prototype remains runnable without secrets.
 

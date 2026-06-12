@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import json
+from collections.abc import Iterator
 from typing import Callable, Optional, TypeVar
 
 import httpx
@@ -43,9 +44,18 @@ class LLMClient(ABC):
         prompt: str,
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
-        max_tokens: int = 512,
+        max_tokens: int = 250,
     ) -> LLMTextResponse:
         return fallback_factory(self.provider_name, "text completion is not supported by this provider")
+
+    def stream_text(
+        self,
+        prompt: str,
+        system_prompt: str,
+        fallback_factory: Callable[[str, str], LLMTextResponse],
+        max_tokens: int = 250,
+    ) -> Iterator[LLMTextResponse]:
+        yield self.complete_text(prompt, system_prompt, fallback_factory, max_tokens=max_tokens)
 
     @property
     def provider_name(self) -> str:
@@ -76,7 +86,7 @@ class MockLLMClient(LLMClient):
         prompt: str,
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
-        max_tokens: int = 512,
+        max_tokens: int = 250,
     ) -> LLMTextResponse:
         return fallback_factory(self.provider, self.reason)
 
@@ -91,11 +101,21 @@ class MockLLMClient(LLMClient):
 
 
 class OpenAIClient(LLMClient):
-    def __init__(self, api_key: Optional[str], model: str, base_url: str, timeout_seconds: float):
+    def __init__(
+        self,
+        api_key: Optional[str],
+        model: str,
+        base_url: str,
+        timeout_seconds: float,
+        structured_max_tokens: int = 300,
+        text_max_tokens: int = 250,
+    ):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.structured_max_tokens = structured_max_tokens
+        self.text_max_tokens = text_max_tokens
 
     @property
     def provider_name(self) -> str:
@@ -106,10 +126,11 @@ class OpenAIClient(LLMClient):
         prompt: str,
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
-        max_tokens: int = 512,
+        max_tokens: int = 250,
     ) -> LLMTextResponse:
         if not self.api_key:
             return fallback_factory("openai", "OPENAI_API_KEY is not set")
+        token_budget = min(max_tokens, self.text_max_tokens)
         try:
             response = httpx.post(
                 f"{self.base_url}/chat/completions",
@@ -121,7 +142,7 @@ class OpenAIClient(LLMClient):
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.1,
-                    "max_tokens": max_tokens,
+                    "max_tokens": token_budget,
                 },
                 timeout=self.timeout_seconds,
             )
@@ -130,6 +151,52 @@ class OpenAIClient(LLMClient):
             return LLMTextResponse(content=content, used_live_provider=True, provider="openai")
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
             return fallback_factory("openai", f"OpenAI text call failed: {exc}")
+
+    def stream_text(
+        self,
+        prompt: str,
+        system_prompt: str,
+        fallback_factory: Callable[[str, str], LLMTextResponse],
+        max_tokens: int = 250,
+    ) -> Iterator[LLMTextResponse]:
+        if not self.api_key:
+            yield fallback_factory("openai", "OPENAI_API_KEY is not set")
+            return
+        token_budget = min(max_tokens, self.text_max_tokens)
+        try:
+            with httpx.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": token_budget,
+                    "stream": True,
+                },
+                timeout=self.timeout_seconds,
+            ) as response:
+                response.raise_for_status()
+                yielded = False
+                for line in response.iter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line.removeprefix("data:").strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    payload = json.loads(data)
+                    delta = payload["choices"][0].get("delta", {}).get("content", "")
+                    if delta:
+                        yielded = True
+                        yield LLMTextResponse(content=delta, used_live_provider=True, provider="openai")
+                if not yielded:
+                    yield fallback_factory("openai", "OpenAI stream returned no content")
+        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            yield fallback_factory("openai", f"OpenAI stream failed: {exc}")
 
     def complete_model(
         self,
@@ -151,7 +218,7 @@ class OpenAIClient(LLMClient):
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.1,
-                    "max_tokens": 512,
+                    "max_tokens": self.structured_max_tokens,
                     "response_format": _json_schema_response_format(response_model),
                 },
                 timeout=self.timeout_seconds,
@@ -164,10 +231,19 @@ class OpenAIClient(LLMClient):
 
 
 class OllamaClient(LLMClient):
-    def __init__(self, base_url: str, model: str, timeout_seconds: float):
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        timeout_seconds: float,
+        structured_max_tokens: int = 300,
+        text_max_tokens: int = 250,
+    ):
         self.base_url = base_url
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.structured_max_tokens = structured_max_tokens
+        self.text_max_tokens = text_max_tokens
 
     @property
     def provider_name(self) -> str:
@@ -178,8 +254,9 @@ class OllamaClient(LLMClient):
         prompt: str,
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
-        max_tokens: int = 512,
+        max_tokens: int = 250,
     ) -> LLMTextResponse:
+        token_budget = min(max_tokens, self.text_max_tokens)
         try:
             response = httpx.post(
                 f"{self.base_url.rstrip('/')}/api/chat",
@@ -190,6 +267,7 @@ class OllamaClient(LLMClient):
                         {"role": "user", "content": prompt},
                     ],
                     "stream": False,
+                    "options": {"num_predict": token_budget},
                 },
                 timeout=self.timeout_seconds,
             )
@@ -198,6 +276,46 @@ class OllamaClient(LLMClient):
             return LLMTextResponse(content=content, used_live_provider=True, provider="ollama")
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             return fallback_factory("ollama", f"Ollama text call failed: {exc}")
+
+    def stream_text(
+        self,
+        prompt: str,
+        system_prompt: str,
+        fallback_factory: Callable[[str, str], LLMTextResponse],
+        max_tokens: int = 250,
+    ) -> Iterator[LLMTextResponse]:
+        token_budget = min(max_tokens, self.text_max_tokens)
+        try:
+            with httpx.stream(
+                "POST",
+                f"{self.base_url.rstrip('/')}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "stream": True,
+                    "options": {"num_predict": token_budget},
+                },
+                timeout=self.timeout_seconds,
+            ) as response:
+                response.raise_for_status()
+                yielded = False
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    payload = json.loads(line)
+                    delta = payload.get("message", {}).get("content", "")
+                    if delta:
+                        yielded = True
+                        yield LLMTextResponse(content=delta, used_live_provider=True, provider="ollama")
+                    if payload.get("done"):
+                        break
+                if not yielded:
+                    yield fallback_factory("ollama", "Ollama stream returned no content")
+        except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            yield fallback_factory("ollama", f"Ollama stream failed: {exc}")
 
     def complete_model(
         self,
@@ -217,6 +335,7 @@ class OllamaClient(LLMClient):
                     ],
                     "stream": False,
                     "format": "json",
+                    "options": {"num_predict": self.structured_max_tokens},
                 },
                 timeout=self.timeout_seconds,
             )
@@ -235,11 +354,20 @@ def build_llm_client(
     openai_model: str = "gpt-4o-mini",
     openai_base_url: str = "https://api.openai.com/v1",
     timeout_seconds: float = 20.0,
+    structured_max_tokens: int = 300,
+    text_max_tokens: int = 250,
 ) -> LLMClient:
     if provider == "openai":
-        return OpenAIClient(openai_api_key, openai_model, openai_base_url, timeout_seconds)
+        return OpenAIClient(
+            openai_api_key,
+            openai_model,
+            openai_base_url,
+            timeout_seconds,
+            structured_max_tokens,
+            text_max_tokens,
+        )
     if provider == "ollama":
-        return OllamaClient(ollama_base_url, ollama_model, timeout_seconds)
+        return OllamaClient(ollama_base_url, ollama_model, timeout_seconds, structured_max_tokens, text_max_tokens)
     return MockLLMClient(provider=provider)
 
 
