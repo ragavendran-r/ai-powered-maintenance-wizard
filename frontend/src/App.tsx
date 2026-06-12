@@ -87,7 +87,7 @@ const fallbackWorkOrders: WorkOrder[] = [
     equipment_id: 'RM-DRIVE-01',
     title: 'Inspect main drive bearing vibration',
     description: 'Inspect bearing housing, coupling alignment, lubrication condition, and foundation bolts.',
-    status: 'INPRG',
+    status: 'APPR',
     priority: 1,
     work_type: 'CM',
     failure_class: 'MECH',
@@ -110,7 +110,7 @@ const fallbackWorkOrders: WorkOrder[] = [
     equipment_id: 'BF-BLOWER-02',
     title: 'Verify inlet guide vane actuator response',
     description: 'Check actuator travel, linkage looseness, and position feedback drift.',
-    status: 'APPR',
+    status: 'WAPPR',
     priority: 2,
     work_type: 'CM',
     failure_class: 'CTRL',
@@ -151,10 +151,40 @@ const fallbackWorkOrders: WorkOrder[] = [
     completed_at: '2026-06-11T16:35:00+05:30',
     logs: [],
   },
+  {
+    id: 'WO-8275',
+    equipment_id: 'HYD-SYS-04',
+    title: 'Investigate hydraulic oil temperature rise',
+    description: 'Inspect cooler fouling, pump cartridge condition, and pressure pulsation.',
+    status: 'WMATL',
+    priority: 2,
+    work_type: 'PM',
+    failure_class: 'HYD',
+    problem_code: 'OILTEMP',
+    classification: 'Hydraulic temperature',
+    assigned_to: 'Hydraulic Technician',
+    supervisor: 'Rolling Mill Supervisor',
+    due_date: '2026-06-14T10:00:00+05:30',
+    recommended_action: 'Reserve pump cartridge assembly and inspect cooler differential temperature.',
+    follow_up_required: false,
+    ai_summary: 'Hydraulic temperature work is waiting for material coordination.',
+    completion_summary: null,
+    created_at: '2026-06-11T10:00:00+05:30',
+    updated_at: '2026-06-11T10:30:00+05:30',
+    completed_at: null,
+    logs: [],
+  },
 ]
 
 function hasRole(user: AuthUser | undefined, roles: UserRole[]) {
   return Boolean(user && roles.includes(user.role))
+}
+
+function fallbackWorkOrdersForUser(user?: AuthUser | null) {
+  if (user?.role === 'maintenance_technician') {
+    return fallbackWorkOrders.filter((order) => order.assigned_to === user.display_name)
+  }
+  return fallbackWorkOrders
 }
 
 type AssistantTurn = {
@@ -265,11 +295,13 @@ export function App() {
   const canStreaming = hasRole(currentUser, streamingRoles)
   const canAdminUsers = currentUser?.role === 'admin'
   const canAssignWorkOrders = hasRole(currentUser, workOrderAssignmentRoles)
+  const canApproveWorkOrders = canAssignWorkOrders
 
   function clearSession(message = '') {
     api.setSession(null)
     setSession(null)
     setActiveView('dashboard')
+    setWorkOrders(fallbackWorkOrders)
     setRecommendation(null)
     setAnswer('')
     setAuthMessage(message)
@@ -283,6 +315,7 @@ export function App() {
       const nextSession = { accessToken: result.access_token, user: result.user }
       api.setSession(nextSession)
       setSession(nextSession)
+      setWorkOrders(fallbackWorkOrdersForUser(result.user))
       setLoginPassword('')
       setActiveView('dashboard')
     } catch {
@@ -332,7 +365,7 @@ export function App() {
       .workOrders()
       .then((items) => {
         if (!Array.isArray(items)) {
-          setWorkOrders(fallbackWorkOrders)
+          setWorkOrders(fallbackWorkOrdersForUser(currentUser))
           return
         }
         setWorkOrders(items)
@@ -340,7 +373,7 @@ export function App() {
           setSelectedWorkOrderId(items[0].id)
         }
       })
-      .catch(() => setWorkOrders(fallbackWorkOrders))
+      .catch(() => setWorkOrders(fallbackWorkOrdersForUser(currentUser)))
   }
 
   useEffect(() => {
@@ -356,6 +389,7 @@ export function App() {
         const nextSession = { accessToken: restored.accessToken, user }
         api.setSession(nextSession)
         setSession(nextSession)
+        setWorkOrders(fallbackWorkOrdersForUser(user))
       })
       .catch(() => clearSession('Session expired. Sign in again.'))
       .finally(() => setAuthReady(true))
@@ -755,6 +789,17 @@ export function App() {
     }
   }
 
+  async function startWorkOrder(workOrderId: string) {
+    try {
+      const updated = await api.updateWorkOrder(workOrderId, { status: 'INPRG' })
+      setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+      setSelectedWorkOrderId(updated.id)
+      setWorkOrderMessage(`${updated.id} started`)
+    } catch {
+      setWorkOrderMessage('Work order could not be moved to in progress')
+    }
+  }
+
   async function assignWorkOrder(workOrderId: string, assignedTo: string) {
     if (!assignedTo) return
     try {
@@ -764,6 +809,17 @@ export function App() {
       setWorkOrderMessage(`${updated.id} assigned to ${assignedTo}`)
     } catch {
       setWorkOrderMessage('Work order assignment could not be saved')
+    }
+  }
+
+  async function approveWorkOrder(workOrderId: string) {
+    try {
+      const updated = await api.updateWorkOrder(workOrderId, { status: 'APPR' })
+      setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+      setSelectedWorkOrderId(updated.id)
+      setWorkOrderMessage(`${updated.id} approved`)
+    } catch {
+      setWorkOrderMessage('Work order approval could not be saved')
     }
   }
 
@@ -1155,6 +1211,10 @@ export function App() {
             <WorkOrderTable
               compact
               workOrders={workOrders}
+              canApprove={canApproveWorkOrders}
+              canStart={canTechnicianAssistant}
+              onApprove={approveWorkOrder}
+              onStart={startWorkOrder}
               onOpen={(id) => {
                 setSelectedWorkOrderId(id)
                 setActiveView('workOrders')
@@ -1173,19 +1233,6 @@ export function App() {
           <section className="detailPanel slaPanel">
             <h2>SLA compliance by incident priority</h2>
             <MiniBars values={[92, 78, 64, 88]} />
-          </section>
-          <section className="detailPanel quickActionsPanel">
-            <h2>Quick actions</h2>
-            <button className="textButton" onClick={() => createWorkOrderFromContext()}>
-              <Briefcase size={16} />
-              Create work order
-            </button>
-            {canSupervisorAssistant && (
-              <button className="textButton" onClick={() => runSupervisorAssistant()}>
-                <Bot size={16} />
-                Review follow-ups
-              </button>
-            )}
           </section>
         </div>
       </div>
@@ -1236,7 +1283,15 @@ export function App() {
       </section>
       <section className="detailPanel">
         <h2>Maintenance history</h2>
-        <WorkOrderTable workOrders={assetWorkOrders} compact onOpen={(id) => { setSelectedWorkOrderId(id); setActiveView('workOrders') }} />
+        <WorkOrderTable
+          workOrders={assetWorkOrders}
+          compact
+          canApprove={canApproveWorkOrders}
+          canStart={canTechnicianAssistant}
+          onApprove={approveWorkOrder}
+          onStart={startWorkOrder}
+          onOpen={(id) => { setSelectedWorkOrderId(id); setActiveView('workOrders') }}
+        />
       </section>
       <LineChartCard title="Primary signal trend" health={selectedHealth} />
       <LineChartCard title="Secondary signal trend" health={selectedHealth} />
@@ -1390,8 +1445,12 @@ export function App() {
             workOrders={workOrders}
             onOpen={(id) => setSelectedWorkOrderId(id)}
             canAssign={canAssignWorkOrders}
+            canApprove={canApproveWorkOrders}
+            canStart={canTechnicianAssistant}
             technicians={technicians}
             onAssign={assignWorkOrder}
+            onApprove={approveWorkOrder}
+            onStart={startWorkOrder}
           />
           {canTechnicianAssistant && selectedWorkOrder && (
             <button
@@ -1742,6 +1801,19 @@ export function App() {
             <button className="linkButton" onClick={() => setActiveView('workOrders')}>Work Orders</button>
             <button className="linkButton" onClick={() => openAsset(selectedEquipment)}>Selected Asset</button>
           </section>
+          <section className="navQuickActions" aria-label="Quick actions">
+            <h2>Quick actions</h2>
+            <button className="textButton" onClick={() => createWorkOrderFromContext()}>
+              <Briefcase size={16} />
+              Create work order
+            </button>
+            {canSupervisorAssistant && (
+              <button className="textButton" onClick={() => runSupervisorAssistant()}>
+                <Bot size={16} />
+                Review follow-ups
+              </button>
+            )}
+          </section>
           <div className="sectionHeader compactHeader">
             <Wrench size={18} />
             <h2>Priority Assets ({dashboard.highest_risk_equipment.length})</h2>
@@ -1949,18 +2021,26 @@ function WorkOrderTable({
   onOpen,
   compact = false,
   canAssign = false,
+  canApprove = false,
+  canStart = false,
   technicians = [],
   onAssign,
+  onApprove,
+  onStart,
 }: {
   workOrders: WorkOrder[]
   onOpen: (id: string) => void
   compact?: boolean
   canAssign?: boolean
+  canApprove?: boolean
+  canStart?: boolean
   technicians?: AuthUser[]
   onAssign?: (workOrderId: string, assignedTo: string) => void
+  onApprove?: (workOrderId: string) => void
+  onStart?: (workOrderId: string) => void
 }) {
   return (
-    <div className={`workOrderTable ${compact ? 'compact' : ''} ${canAssign && !compact ? 'assignable' : ''}`}>
+    <div className={`workOrderTable ${compact ? 'compact' : ''} ${canAssign && !compact ? 'assignable' : ''} ${canApprove ? 'approvable' : ''}`}>
       <div className="workOrderHead">
         <span>Work order</span>
         <span>Description</span>
@@ -1982,6 +2062,8 @@ function WorkOrderTable({
               },
               ...technicians,
             ]
+        const canApproveOrder = canApprove && order.status === 'WAPPR'
+        const canStartOrder = canStart && ['APPR', 'WMATL'].includes(order.status)
         return (
           <div className="workOrderRow" key={order.id}>
             <button className="workOrderCellButton workOrderIdButton" type="button" onClick={() => onOpen(order.id)}>
@@ -1991,7 +2073,29 @@ function WorkOrderTable({
               {order.title}
             </button>
             {!compact && <span>{order.recommended_action}</span>}
-            <span>{order.status}</span>
+            <span className="workOrderStatusCell">
+              <span>{order.status}</span>
+              {canApproveOrder && (
+                <button
+                  aria-label={`Approve ${order.id}`}
+                  className="miniActionButton"
+                  type="button"
+                  onClick={() => onApprove?.(order.id)}
+                >
+                  Approve
+                </button>
+              )}
+              {canStartOrder && (
+                <button
+                  aria-label={`Start ${order.id}`}
+                  className="miniActionButton"
+                  type="button"
+                  onClick={() => onStart?.(order.id)}
+                >
+                  Start work
+                </button>
+              )}
+            </span>
             <span>{order.equipment_id}</span>
             {canAssign && !compact && (
               <select

@@ -247,7 +247,7 @@ const workOrders = [
     equipment_id: 'RM-DRIVE-01',
     title: 'Inspect main drive bearing vibration',
     description: 'Inspect bearing housing, coupling alignment, lubrication condition, and foundation bolts.',
-    status: 'INPRG',
+    status: 'APPR',
     priority: 1,
     work_type: 'CM',
     failure_class: 'MECH',
@@ -270,7 +270,7 @@ const workOrders = [
     equipment_id: 'OH-CRANE-05',
     title: 'Inspect hoist brake temperature and current',
     description: 'Review hoist current and brake temperature after heavy-lift restriction.',
-    status: 'COMP',
+    status: 'WAPPR',
     priority: 1,
     work_type: 'EM',
     failure_class: 'ELEC',
@@ -286,6 +286,29 @@ const workOrders = [
     created_at: '2026-06-10T09:00:00+05:30',
     updated_at: '2026-06-11T16:35:00+05:30',
     completed_at: '2026-06-11T16:35:00+05:30',
+    logs: [],
+  },
+  {
+    id: 'WO-8275',
+    equipment_id: 'HYD-SYS-04',
+    title: 'Investigate hydraulic oil temperature rise',
+    description: 'Inspect cooler fouling, pump cartridge condition, and pressure pulsation.',
+    status: 'WMATL',
+    priority: 2,
+    work_type: 'PM',
+    failure_class: 'HYD',
+    problem_code: 'OILTEMP',
+    classification: 'Hydraulic temperature',
+    assigned_to: 'Hydraulic Technician',
+    supervisor: 'Rolling Mill Supervisor',
+    due_date: '2026-06-14T10:00:00+05:30',
+    recommended_action: 'Reserve pump cartridge assembly and inspect cooler differential temperature.',
+    follow_up_required: false,
+    ai_summary: 'Hydraulic temperature work is waiting for material coordination.',
+    completion_summary: null,
+    created_at: '2026-06-11T10:00:00+05:30',
+    updated_at: '2026-06-11T10:30:00+05:30',
+    completed_at: null,
     logs: [],
   },
 ]
@@ -419,7 +442,7 @@ beforeEach(() => {
             title: 'Work Orders',
             columns: ['Work order', 'Asset', 'Status', 'Priority'],
             rows: [
-              { 'Work order': 'WO-8304', Asset: 'RM-DRIVE-01', Status: 'INPRG', Priority: 1 },
+              { 'Work order': 'WO-8304', Asset: 'RM-DRIVE-01', Status: 'APPR', Priority: 1 },
               { 'Work order': 'WO-8297', Asset: 'OH-CRANE-05', Status: 'COMP', Priority: 1 },
             ],
           },
@@ -482,7 +505,7 @@ beforeEach(() => {
           {
             summary: 'Trinity reviewed 2 work orders and found 2 follow-ups.',
             follow_up_actions: ['Review WO-8297 brake shoe replacement planning.'],
-            risks: ['WO-8304 remains priority 1 and INPRG.'],
+            risks: ['WO-8304 remains priority 1 and APPR.'],
             draft_work_order: null,
             referenced_work_orders: ['WO-8304', 'WO-8297'],
             used_live_provider: false,
@@ -503,7 +526,7 @@ beforeEach(() => {
             JSON.stringify({
               summary: '2 work order(s) reviewed; 2 require follow-up action.',
               follow_up_actions: ['Review WO-8297 brake shoe replacement planning.'],
-              risks: ['WO-8304 remains priority 1 and INPRG.'],
+              risks: ['WO-8304 remains priority 1 and APPR.'],
               draft_work_order: null,
               referenced_work_orders: ['WO-8304', 'WO-8297'],
               used_live_provider: false,
@@ -595,6 +618,10 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByRole('heading', { name: 'Neo' })).toBeInTheDocument()
     expect(screen.getByText('Dashboard AI assistant')).toBeInTheDocument()
     expect(screen.getByText('Priority Assets (5)')).toBeInTheDocument()
+    const navigation = screen.getByLabelText('Maintenance navigation')
+    const quickActions = within(navigation).getByLabelText('Quick actions')
+    expect(within(quickActions).getByRole('heading', { name: 'Quick actions' })).toBeInTheDocument()
+    expect(within(quickActions).getByRole('button', { name: /create work order/i })).toBeInTheDocument()
     expect(screen.getByText('Melt Shop Overhead Crane')).toBeInTheDocument()
     expect(screen.getByText('Hot Rolling Hydraulic System')).toBeInTheDocument()
     const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText('Hot Strip Mill Main Drive Motor').closest('button')
@@ -719,11 +746,23 @@ describe('Maintenance Wizard dashboard', () => {
     expect(Boolean(assistantUnavailable.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(within(rightPane).queryByText('Smith and Trinity are available to technician and supervisor accounts.')).not.toBeInTheDocument()
 
+    expect(screen.getByRole('button', { name: 'Approve WO-8297' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve WO-8275' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Approve WO-8297' }))
+    await screen.findByText('WO-8297 approved')
+    const approveCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => url.toString().includes('/api/work-orders/WO-8297') && init?.method === 'PATCH')
+    expect(JSON.parse((approveCall?.[1] as RequestInit).body as string)).toEqual({ status: 'APPR' })
+
     fireEvent.change(screen.getByLabelText('Assign WO-8297'), { target: { value: 'Maintenance Technician' } })
     await screen.findByText('WO-8297 assigned to Maintenance Technician')
     const assignCall = vi
       .mocked(fetch)
-      .mock.calls.find(([url, init]) => url.toString().includes('/api/work-orders/WO-8297') && init?.method === 'PATCH')
+      .mock.calls.find(([url, init]) => {
+        if (!url.toString().includes('/api/work-orders/WO-8297') || init?.method !== 'PATCH') return false
+        return JSON.parse((init.body as string) ?? '{}').assigned_to === 'Maintenance Technician'
+      })
     expect(JSON.parse((assignCall?.[1] as RequestInit).body as string)).toEqual({ assigned_to: 'Maintenance Technician' })
   })
 
@@ -745,6 +784,12 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
     expect(within(centerPane).getByRole('button', { name: 'WO-8304' })).toBeInTheDocument()
     expect(within(centerPane).queryByRole('button', { name: 'WO-8297' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Start WO-8304' }))
+    await screen.findByText('WO-8304 started')
+    const startCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => url.toString().includes('/api/work-orders/WO-8304') && init?.method === 'PATCH')
+    expect(JSON.parse((startCall?.[1] as RequestInit).body as string)).toEqual({ status: 'INPRG' })
 
     fireEvent.change(screen.getByLabelText('Technician observation'), {
       target: { value: 'Connections 3 and 5 were loose.' },
@@ -778,6 +823,8 @@ describe('Maintenance Wizard dashboard', () => {
     expect(within(centerPane).getByText('Supervisor AI assistant with shared LLM configuration')).toBeInTheDocument()
     expect(within(rightPane).queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('Assign WO-8304')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve WO-8297' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve WO-8275' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(within(screen.getByLabelText('Trinity supervisor chat')).getByText('Summarize follow-up actions for completed work orders.')).toBeInTheDocument()
@@ -883,7 +930,7 @@ describe('Maintenance Wizard dashboard', () => {
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new.operator@plant.local' } })
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Operator' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'NewOperator123!' } })
-    fireEvent.click(screen.getByRole('button', { name: /create/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
     await waitFor(() => {
       expect(screen.getByText('User created')).toBeInTheDocument()

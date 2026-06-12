@@ -241,6 +241,57 @@ def test_admin_and_supervisor_can_list_assignment_technicians():
     assert [user["display_name"] for user in supervisor_response.json()] == ["Maintenance Technician"]
 
 
+def test_assigned_technician_can_start_approved_or_material_waiting_work_order():
+    technician_headers = auth_headers("technician@plant.local")
+    admin_headers = auth_headers()
+
+    approved_response = client.patch(
+        "/api/work-orders/WO-8304",
+        json={"status": "INPRG"},
+        headers=technician_headers,
+    )
+    assert approved_response.status_code == 200
+    assert approved_response.json()["status"] == "INPRG"
+
+    material_response = client.patch(
+        "/api/work-orders/WO-8304",
+        json={"status": "WMATL"},
+        headers=admin_headers,
+    )
+    assert material_response.status_code == 200
+
+    started_from_material_response = client.patch(
+        "/api/work-orders/WO-8304",
+        json={"status": "INPRG"},
+        headers=technician_headers,
+    )
+    assert started_from_material_response.status_code == 200
+    assert started_from_material_response.json()["status"] == "INPRG"
+
+
+def test_technician_cannot_start_unassigned_work_order():
+    response = client.patch(
+        "/api/work-orders/WO-8311",
+        json={"status": "INPRG"},
+        headers=auth_headers("technician@plant.local"),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Technician can update only assigned work orders"
+
+
+def test_only_waiting_approval_work_orders_can_be_approved():
+    headers = auth_headers()
+
+    approve_response = client.patch("/api/work-orders/WO-8311", json={"status": "APPR"}, headers=headers)
+    material_response = client.patch("/api/work-orders/WO-8275", json={"status": "APPR"}, headers=headers)
+
+    assert approve_response.status_code == 200
+    assert approve_response.json()["status"] == "APPR"
+    assert material_response.status_code == 400
+    assert material_response.json()["detail"] == "Only WAPPR work orders can be approved"
+
+
 def test_create_update_and_log_work_order():
     headers = auth_headers("planner@plant.local")
 

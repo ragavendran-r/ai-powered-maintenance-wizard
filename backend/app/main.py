@@ -343,12 +343,31 @@ def get_work_order(work_order_id: str):
 @app.patch(
     "/api/work-orders/{work_order_id}",
     response_model=WorkOrder,
-    dependencies=[Depends(require_roles(*WORK_ORDER_ACTION_ROLES))],
 )
-def update_work_order(work_order_id: str, request: WorkOrderUpdateRequest):
-    work_order = repository.update_work_order(work_order_id, request.model_dump(exclude_unset=True))
-    if not work_order:
+def update_work_order(
+    work_order_id: str,
+    request: WorkOrderUpdateRequest,
+    current_user: UserPublic = Depends(require_roles(*WORK_ORDER_ACTION_ROLES)),
+):
+    existing_work_order = repository.get_work_order(work_order_id)
+    if not existing_work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
+    payload = request.model_dump(exclude_unset=True)
+    requested_status = payload.get("status")
+    if requested_status == "APPR" and existing_work_order["status"] != "WAPPR":
+        raise HTTPException(status_code=400, detail="Only WAPPR work orders can be approved")
+    if current_user.role == "maintenance_technician":
+        if existing_work_order["assigned_to"] != current_user.display_name:
+            raise HTTPException(status_code=403, detail="Technician can update only assigned work orders")
+        if "assigned_to" in payload:
+            raise HTTPException(status_code=403, detail="Technicians cannot reassign work orders")
+        if requested_status == "INPRG" and existing_work_order["status"] not in {"APPR", "WMATL"}:
+            raise HTTPException(status_code=400, detail="Technician can start only APPR or WMATL work orders")
+        if requested_status == "COMP" and existing_work_order["status"] != "INPRG":
+            raise HTTPException(status_code=400, detail="Technician can complete only INPRG work orders")
+        if requested_status and requested_status not in {"INPRG", "COMP"}:
+            raise HTTPException(status_code=403, detail="Technician status update is not permitted")
+    work_order = repository.update_work_order(work_order_id, payload)
     return work_order
 
 
