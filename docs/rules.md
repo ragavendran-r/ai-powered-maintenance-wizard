@@ -42,3 +42,8 @@ Use this file for durable product and engineering rules. Use `docs/hooks.md` for
 - Uploaded documents must be parsed into SQLite documents and retrieval chunks.
 - Feedback must be persisted so recommendation outcomes can support future learning.
 - Markdown report export should remain available for supervisor/demo handoff.
+
+## UI Consistency
+
+- Buttons must use the shared theme in `frontend/src/styles.css`: `textButton` for primary actions, `outlineButton` or `subtleButton` for secondary actions, `iconTextButton` for icon-plus-label actions, and `linkButton` only for low-emphasis navigation links.
+- Do not add browser-default buttons. New button areas should inherit the shared radius, typography, icon spacing, focus state, and disabled state from the button theme.

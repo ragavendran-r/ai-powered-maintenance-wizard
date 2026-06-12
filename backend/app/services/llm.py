@@ -19,6 +19,12 @@ class LLMContext(BaseModel):
     provider: str = "mock"
 
 
+class LLMTextResponse(BaseModel):
+    content: str
+    used_live_provider: bool = False
+    provider: str = "mock"
+
+
 class LLMProviderError(RuntimeError):
     pass
 
@@ -31,6 +37,19 @@ class LLMClient(ABC):
             _system_prompt(),
             lambda provider, reason: _fallback_context(provider, reason),
         )
+
+    def complete_text(
+        self,
+        prompt: str,
+        system_prompt: str,
+        fallback_factory: Callable[[str, str], LLMTextResponse],
+        max_tokens: int = 512,
+    ) -> LLMTextResponse:
+        return fallback_factory(self.provider_name, "text completion is not supported by this provider")
+
+    @property
+    def provider_name(self) -> str:
+        return "mock"
 
     @abstractmethod
     def complete_model(
@@ -48,6 +67,19 @@ class MockLLMClient(LLMClient):
         self.provider = provider
         self.reason = reason
 
+    @property
+    def provider_name(self) -> str:
+        return self.provider
+
+    def complete_text(
+        self,
+        prompt: str,
+        system_prompt: str,
+        fallback_factory: Callable[[str, str], LLMTextResponse],
+        max_tokens: int = 512,
+    ) -> LLMTextResponse:
+        return fallback_factory(self.provider, self.reason)
+
     def complete_model(
         self,
         prompt: str,
@@ -64,6 +96,40 @@ class OpenAIClient(LLMClient):
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+
+    @property
+    def provider_name(self) -> str:
+        return "openai"
+
+    def complete_text(
+        self,
+        prompt: str,
+        system_prompt: str,
+        fallback_factory: Callable[[str, str], LLMTextResponse],
+        max_tokens: int = 512,
+    ) -> LLMTextResponse:
+        if not self.api_key:
+            return fallback_factory("openai", "OPENAI_API_KEY is not set")
+        try:
+            response = httpx.post(
+                f"{self.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": max_tokens,
+                },
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+            return LLMTextResponse(content=content, used_live_provider=True, provider="openai")
+        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+            return fallback_factory("openai", f"OpenAI text call failed: {exc}")
 
     def complete_model(
         self,
@@ -102,6 +168,36 @@ class OllamaClient(LLMClient):
         self.base_url = base_url
         self.model = model
         self.timeout_seconds = timeout_seconds
+
+    @property
+    def provider_name(self) -> str:
+        return "ollama"
+
+    def complete_text(
+        self,
+        prompt: str,
+        system_prompt: str,
+        fallback_factory: Callable[[str, str], LLMTextResponse],
+        max_tokens: int = 512,
+    ) -> LLMTextResponse:
+        try:
+            response = httpx.post(
+                f"{self.base_url.rstrip('/')}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "stream": False,
+                },
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            content = response.json()["message"]["content"]
+            return LLMTextResponse(content=content, used_live_provider=True, provider="ollama")
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            return fallback_factory("ollama", f"Ollama text call failed: {exc}")
 
     def complete_model(
         self,

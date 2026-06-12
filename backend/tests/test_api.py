@@ -597,6 +597,25 @@ def test_neo_user_table_supports_role_filters_without_llm():
     assert payload["provider"] == "deterministic"
 
 
+def test_neo_general_maintenance_query_uses_evidence_fallback_when_llm_is_slow():
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "how to inspect Blast Furnace Combustion Air Blower"},
+        headers=auth_headers(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["table"] is None
+    assert payload["used_live_provider"] is False
+    assert payload["provider"] == "mock"
+    assert "BF-BLOWER-02" in payload["answer"]
+    assert "### Safety Checks" in payload["answer"]
+    assert "### Inspection Steps" in payload["answer"]
+    assert "### Evidence Used" in payload["answer"]
+    assert "inlet guide vane" in payload["answer"].lower()
+    assert "Ask me to show assets" not in payload["answer"]
+
+
 def test_feedback_is_accepted():
     response = client.post(
         "/api/recommendations/rec-test/feedback",
