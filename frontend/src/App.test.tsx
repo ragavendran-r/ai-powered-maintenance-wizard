@@ -202,6 +202,8 @@ const recommendation = {
       equipment_id: 'RM-DRIVE-01',
     },
   ],
+  used_live_provider: false,
+  provider: 'mock',
   report_summary: 'Critical risk with estimated RUL of 23 days.',
 }
 
@@ -554,9 +556,10 @@ describe('Maintenance Wizard dashboard', () => {
     fireEvent.change(screen.getByLabelText('Technician observation'), {
       target: { value: 'Connections 3 and 5 were loose.' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Get live directions' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(within(screen.getByLabelText('Technician assistant chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
     expect(await screen.findByText('Verify torque on bolted connections.')).toBeInTheDocument()
-    expect(screen.getByText('Connections were tightened to spec.')).toBeInTheDocument()
+    expect(screen.getByText(/Connections were tightened to spec./)).toBeInTheDocument()
     expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
   })
 
@@ -570,7 +573,8 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Supervisor AI Assistant')).toBeInTheDocument()
     expect(screen.getByText('LLM follow-up review for maintenance supervisors')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Review status' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(within(screen.getByLabelText('Supervisor assistant chat')).getByText('Summarize follow-up actions for completed work orders.')).toBeInTheDocument()
     expect(await screen.findByText('2 work order(s) reviewed; 2 require follow-up action.')).toBeInTheDocument()
     expect(screen.getByText('Review WO-8297 brake shoe replacement planning.')).toBeInTheDocument()
     expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()

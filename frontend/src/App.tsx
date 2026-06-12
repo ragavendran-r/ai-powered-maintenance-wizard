@@ -152,6 +152,19 @@ function hasRole(user: AuthUser | undefined, roles: UserRole[]) {
   return Boolean(user && roles.includes(user.role))
 }
 
+type AssistantTurn = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  details?: string[]
+  provider?: string
+  usedLiveProvider?: boolean
+}
+
+function assistantTurnId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 export function App() {
   const [session, setSession] = useState<AuthSession | null>(() => api.restoreSession())
   const [authReady, setAuthReady] = useState(false)
@@ -168,8 +181,22 @@ export function App() {
   const [workOrderMessage, setWorkOrderMessage] = useState('')
   const [technicianObservation, setTechnicianObservation] = useState('There are hotspots and looseness around the checked connections.')
   const [technicianAssistant, setTechnicianAssistant] = useState<TechnicianAssistantResponse | null>(null)
+  const [technicianChat, setTechnicianChat] = useState<AssistantTurn[]>([
+    {
+      id: 'technician-welcome',
+      role: 'assistant',
+      content: 'Let’s start the work order. Do you observe any problems?',
+    },
+  ])
   const [supervisorQuestion, setSupervisorQuestion] = useState('Summarize follow-up actions for completed work orders.')
   const [supervisorAssistant, setSupervisorAssistant] = useState<SupervisorAssistantResponse | null>(null)
+  const [supervisorChat, setSupervisorChat] = useState<AssistantTurn[]>([
+    {
+      id: 'supervisor-welcome',
+      role: 'assistant',
+      content: 'Ask me to summarize follow-ups, risks, or draft a follow-up work order.',
+    },
+  ])
   const [question, setQuestion] = useState('Why is the hot strip mill main drive vibrating?')
   const [answer, setAnswer] = useState('')
   const [apiState, setApiState] = useState<'connected' | 'fallback'>('fallback')
@@ -433,12 +460,35 @@ export function App() {
 
   async function runTechnicianAssistant() {
     if (!selectedWorkOrder) return
+    const prompt = technicianObservation.trim() || 'Give me live directions for this work order.'
+    setTechnicianChat((turns) => [
+      ...turns,
+      { id: assistantTurnId('technician-user'), role: 'user', content: prompt },
+    ])
     try {
-      const response = await api.technicianAssist(selectedWorkOrder.id, technicianObservation)
+      const response = await api.technicianAssist(selectedWorkOrder.id, prompt)
       setTechnicianAssistant(response)
+      setTechnicianChat((turns) => [
+        ...turns,
+        {
+          id: assistantTurnId('technician-assistant'),
+          role: 'assistant',
+          content: response.next_prompt,
+          details: [
+            ...response.live_directions,
+            ...response.recommendations,
+            ...response.safety_reminders.map((item) => `Safety: ${item}`),
+            `Problem code: ${response.suggested_problem_code}`,
+            `Summary: ${response.completion_summary}`,
+          ],
+          provider: response.provider,
+          usedLiveProvider: response.used_live_provider,
+        },
+      ])
+      setTechnicianObservation('')
       setWorkOrderMessage('Technician assistant updated the recommended problem code and summary')
     } catch {
-      setTechnicianAssistant({
+      const fallbackResponse = {
         work_order_id: selectedWorkOrder.id,
         next_prompt: 'What abnormal condition do you observe?',
         live_directions: [selectedWorkOrder.recommended_action],
@@ -446,11 +496,29 @@ export function App() {
         safety_reminders: ['Apply lockout/tagout before intrusive inspection.'],
         suggested_problem_code: selectedWorkOrder.problem_code,
         suggested_failure_class: selectedWorkOrder.failure_class,
-        completion_summary: technicianObservation,
+        completion_summary: prompt,
         evidence: [],
         used_live_provider: false,
         provider: 'fallback',
-      })
+      }
+      setTechnicianAssistant(fallbackResponse)
+      setTechnicianChat((turns) => [
+        ...turns,
+        {
+          id: assistantTurnId('technician-fallback'),
+          role: 'assistant',
+          content: fallbackResponse.next_prompt,
+          details: [
+            ...fallbackResponse.live_directions,
+            ...fallbackResponse.recommendations,
+            ...fallbackResponse.safety_reminders.map((item) => `Safety: ${item}`),
+            `Problem code: ${fallbackResponse.suggested_problem_code}`,
+            `Summary: ${fallbackResponse.completion_summary}`,
+          ],
+          provider: fallbackResponse.provider,
+          usedLiveProvider: fallbackResponse.used_live_provider,
+        },
+      ])
     }
   }
 
@@ -472,16 +540,37 @@ export function App() {
   }
 
   async function runSupervisorAssistant(workOrderId?: string) {
+    const prompt = supervisorQuestion.trim() || 'Review follow-up status.'
+    setSupervisorChat((turns) => [
+      ...turns,
+      { id: assistantTurnId('supervisor-user'), role: 'user', content: prompt },
+    ])
     try {
       const response = await api.supervisorAssist({
         work_order_id: workOrderId,
         queue_name: 'follow_up',
-        question: supervisorQuestion,
+        question: prompt,
       })
       setSupervisorAssistant(response)
+      setSupervisorChat((turns) => [
+        ...turns,
+        {
+          id: assistantTurnId('supervisor-assistant'),
+          role: 'assistant',
+          content: response.summary,
+          details: [
+            ...response.follow_up_actions,
+            ...response.risks.map((item) => `Risk: ${item}`),
+            ...(response.draft_work_order ? [`Draft work order: ${response.draft_work_order.title}`] : []),
+          ],
+          provider: response.provider,
+          usedLiveProvider: response.used_live_provider,
+        },
+      ])
+      setSupervisorQuestion('')
       setWorkOrderMessage('Supervisor assistant reviewed follow-ups')
     } catch {
-      setSupervisorAssistant({
+      const fallbackResponse = {
         summary: `${workOrders.length} work order(s) reviewed locally.`,
         follow_up_actions: workOrders.filter((item) => item.follow_up_required).map((item) => `${item.id}: ${item.recommended_action}`),
         risks: workOrders.filter((item) => item.priority === 1 && !['COMP', 'CLOSE'].includes(item.status)).map((item) => `${item.id} remains ${item.status}`),
@@ -489,7 +578,22 @@ export function App() {
         referenced_work_orders: workOrders.map((item) => item.id),
         used_live_provider: false,
         provider: 'fallback',
-      })
+      }
+      setSupervisorAssistant(fallbackResponse)
+      setSupervisorChat((turns) => [
+        ...turns,
+        {
+          id: assistantTurnId('supervisor-fallback'),
+          role: 'assistant',
+          content: fallbackResponse.summary,
+          details: [
+            ...fallbackResponse.follow_up_actions,
+            ...fallbackResponse.risks.map((item) => `Risk: ${item}`),
+          ],
+          provider: fallbackResponse.provider,
+          usedLiveProvider: fallbackResponse.used_live_provider,
+        },
+      ])
     }
   }
 
@@ -613,7 +717,12 @@ export function App() {
       {recommendation ? (
         <>
           <p className="diagnosis">{recommendation.diagnosis}</p>
-          <span className={`riskBadge ${recommendation.risk_level}`}>{recommendation.risk_level}</span>
+          <div className="recommendationBadges">
+            <span className={`riskBadge ${recommendation.risk_level}`}>{recommendation.risk_level}</span>
+            <span className="rolePill">
+              {recommendation.used_live_provider ? 'Live LLM' : 'LLM fallback'} · {recommendation.provider}
+            </span>
+          </div>
           <div className="recommendationFacts">
             <span>
               <small>Urgency</small>
@@ -733,10 +842,12 @@ export function App() {
           <Briefcase size={16} />
           Create work order
         </button>
-        <button className="textButton" onClick={() => runSupervisorAssistant()}>
-          <Bot size={16} />
-          Review follow-ups
-        </button>
+        {canSupervisorAssistant && (
+          <button className="textButton" onClick={() => runSupervisorAssistant()}>
+            <Bot size={16} />
+            Review follow-ups
+          </button>
+        )}
       </section>
     </section>
   )
@@ -819,6 +930,7 @@ export function App() {
               <textarea aria-label="Engineer question" rows={3} value={question} onChange={(event) => setQuestion(event.target.value)} />
               <button onClick={sendQuestion} title="Ask maintenance wizard">
                 <Send size={18} />
+                <span>Send</span>
               </button>
             </div>
             {answer && <p className="answer">{answer}</p>}
@@ -872,27 +984,31 @@ export function App() {
                       <small>LLM work-order guidance for assigned technicians</small>
                     </div>
                   </div>
-                  <p>{technicianAssistant?.next_prompt ?? 'Let’s start the work order. Do you observe any problems?'}</p>
-                  <textarea
-                    aria-label="Technician observation"
-                    value={technicianObservation}
-                    onChange={(event) => setTechnicianObservation(event.target.value)}
-                  />
-                  <div className="buttonRow">
-                    <button className="textButton" onClick={runTechnicianAssistant}>Get live directions</button>
-                    <button className="textButton" onClick={completeSelectedWorkOrder}>Submit completed work</button>
+                  <div className="assistantTranscript" aria-label="Technician assistant chat">
+                    {technicianChat.map((turn) => (
+                      <div className={`chatBubble ${turn.role}`} key={turn.id}>
+                        <span>{turn.role === 'assistant' ? 'Assistant' : 'You'}</span>
+                        {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
+                        <p>{turn.content}</p>
+                        {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+                      </div>
+                    ))}
                   </div>
-                  {technicianAssistant && (
-                    <div className="assistantTranscript">
-                      <span className="rolePill">
-                        {technicianAssistant.used_live_provider ? 'Live LLM' : 'LLM fallback'} · {technicianAssistant.provider}
-                      </span>
-                      <strong>Live directions</strong>
-                      <ul>{technicianAssistant.live_directions.map((item) => <li key={item}>{item}</li>)}</ul>
-                      <strong>Summary</strong>
-                      <p>{technicianAssistant.completion_summary}</p>
-                    </div>
-                  )}
+                  <form className="assistantComposer" onSubmit={(event) => {
+                    event.preventDefault()
+                    runTechnicianAssistant()
+                  }}>
+                    <textarea
+                      aria-label="Technician observation"
+                      value={technicianObservation}
+                      onChange={(event) => setTechnicianObservation(event.target.value)}
+                    />
+                    <button className="textButton" type="submit">
+                      <Send size={16} />
+                      Send
+                    </button>
+                    <button className="textButton" type="button" onClick={completeSelectedWorkOrder}>Submit completed work</button>
+                  </form>
                 </section>
               )}
               {canSupervisorAssistant && (
@@ -904,22 +1020,30 @@ export function App() {
                       <small>LLM follow-up review for maintenance supervisors</small>
                     </div>
                   </div>
-                  <textarea
-                    aria-label="Supervisor question"
-                    value={supervisorQuestion}
-                    onChange={(event) => setSupervisorQuestion(event.target.value)}
-                  />
-                  <button className="textButton" onClick={() => runSupervisorAssistant(selectedWorkOrder.id)}>Review status</button>
-                  {supervisorAssistant && (
-                    <div className="assistantTranscript">
-                      <span className="rolePill">
-                        {supervisorAssistant.used_live_provider ? 'Live LLM' : 'LLM fallback'} · {supervisorAssistant.provider}
-                      </span>
-                      <p>{supervisorAssistant.summary}</p>
-                      <ul>{supervisorAssistant.follow_up_actions.map((item) => <li key={item}>{item}</li>)}</ul>
-                      {supervisorAssistant.draft_work_order && <p>Draft: {supervisorAssistant.draft_work_order.title}</p>}
-                    </div>
-                  )}
+                  <div className="assistantTranscript" aria-label="Supervisor assistant chat">
+                    {supervisorChat.map((turn) => (
+                      <div className={`chatBubble ${turn.role}`} key={turn.id}>
+                        <span>{turn.role === 'assistant' ? 'Assistant' : 'You'}</span>
+                        {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
+                        <p>{turn.content}</p>
+                        {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+                      </div>
+                    ))}
+                  </div>
+                  <form className="assistantComposer" onSubmit={(event) => {
+                    event.preventDefault()
+                    runSupervisorAssistant(selectedWorkOrder.id)
+                  }}>
+                    <textarea
+                      aria-label="Supervisor question"
+                      value={supervisorQuestion}
+                      onChange={(event) => setSupervisorQuestion(event.target.value)}
+                    />
+                    <button className="textButton" type="submit">
+                      <Send size={16} />
+                      Send
+                    </button>
+                  </form>
                 </section>
               )}
               {!canTechnicianAssistant && !canSupervisorAssistant && (

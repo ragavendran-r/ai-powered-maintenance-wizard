@@ -50,6 +50,7 @@ Important docs:
 - `docs/goal-tracker.md`: durable goal ledger from project start.
 - `docs/progress.md`: session-level progress notes and verification history.
 - `docs/demo_script.md`: suggested demo walkthrough.
+- `docs/local-llm-lm-studio.md`: LM Studio setup for local OpenAI-compatible LLM inference.
 - `docs/submission-guide.md`: hackathon packaging guide.
 - `docs/production-hardening.md`: production-readiness gaps and next steps.
 
@@ -192,6 +193,8 @@ Supported LLM provider values:
 - `mock`: deterministic local fallback for development.
 - `openai`: OpenAI-compatible chat completions adapter using `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL`.
 - `ollama`: Ollama chat adapter using `OLLAMA_BASE_URL` and `OLLAMA_MODEL`.
+
+For local LM Studio inference, use the `openai` provider mode with `OPENAI_BASE_URL=http://localhost:1234/v1`. The recommended local model for this project is Qwen2.5 7B Instruct GGUF with a 4-bit quantization. See `docs/local-llm-lm-studio.md` for install, model, `.env`, and smoke-test steps.
 
 Provider responses must return the structured JSON contract requested by each feature. Recommendation generation expects `summary`, `probable_root_causes`, `immediate_actions`, `planned_actions`, and `confidence_adjustment`; document intelligence, maintenance labels, anomaly context, retrieval reranking, and reasoning explanations each use their own Pydantic-validated JSON schemas. Missing keys, malformed JSON, timeout, or network failure automatically fall back to deterministic local reasoning so the prototype remains runnable without secrets.
 

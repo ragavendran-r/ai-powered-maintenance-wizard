@@ -49,7 +49,13 @@ class Settings(BaseSettings):
         alias="DATABASE_PATH",
     )
 
-    model_config = {"env_file": ".env", "extra": "ignore"}
+    model_config = {
+        "env_file": (
+            Path(__file__).resolve().parents[3] / ".env",
+            ".env",
+        ),
+        "extra": "ignore",
+    }
 
     @property
     def cors_origins(self) -> list[str]:
