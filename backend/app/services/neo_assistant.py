@@ -10,7 +10,8 @@ from app.services.retrieval import retrieve_evidence
 
 
 RISK_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
-NEO_GENERAL_MAX_TOKENS = 250
+NEO_GENERAL_MAX_TOKENS = 600
+NEO_GENERAL_TARGET_WORDS = 320
 
 
 def neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> NeoChatResponse:
@@ -129,8 +130,11 @@ def _neo_system_prompt() -> str:
         "You are Neo, a concise AI copilot for a steel-plant maintenance dashboard. "
         "Answer like a helpful chatbot. "
         "For general maintenance questions, use the supplied equipment and evidence context. "
-        "Give practical inspection steps, safety checks, and escalation criteria. "
-        "Format general answers as concise Markdown with short headings, numbered steps, and bullets. "
+        "Give practical inspection steps, safety checks, escalation criteria, and closeout guidance. "
+        "Format general answers as concise Markdown with exactly four sections: Safety, Inspection, Escalation, Closeout. "
+        "Do not add Data Review, Documentation, Evidence Used, or any extra section headings. "
+        f"Keep the complete answer under {NEO_GENERAL_TARGET_WORDS} words and finish all sections within "
+        f"{NEO_GENERAL_MAX_TOKENS} output tokens. Do not start a section unless you can complete it. "
         "Do not invent rows, permissions, private user details, or measurements not in the evidence."
     )
 
