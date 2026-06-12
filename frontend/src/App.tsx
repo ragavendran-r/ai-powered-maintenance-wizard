@@ -203,6 +203,7 @@ export function App() {
   const [answer, setAnswer] = useState('')
   const [neoQuestion, setNeoQuestion] = useState('Show work orders needing follow-up')
   const [neoTable, setNeoTable] = useState<NeoTable | null>(null)
+  const [neoLoading, setNeoLoading] = useState(false)
   const [neoMessages, setNeoMessages] = useState<AssistantTurn[]>([
     {
       id: 'neo-welcome',
@@ -406,11 +407,13 @@ export function App() {
   }
 
   async function sendNeoQuestion() {
+    if (neoLoading) return
     const prompt = neoQuestion.trim() || 'Show assets'
     setNeoMessages((turns) => [
       ...turns,
       { id: assistantTurnId('neo-user'), role: 'user', content: prompt },
     ])
+    setNeoLoading(true)
     try {
       const history = neoMessages.map((turn) => ({ role: turn.role, content: turn.content }))
       const response = await api.neoChat(prompt, history)
@@ -425,16 +428,21 @@ export function App() {
         provider: 'fallback',
       }
       appendNeoResponse(fallback)
+    } finally {
+      setNeoLoading(false)
     }
   }
 
   function appendNeoResponse(response: NeoChatResponse) {
+    const message = response.table
+      ? `I found ${response.table.rows.length} row${response.table.rows.length === 1 ? '' : 's'} for ${response.table.title}. The table is updated in the dashboard.`
+      : response.answer
     setNeoMessages((turns) => [
       ...turns,
       {
         id: assistantTurnId('neo-assistant'),
         role: 'assistant',
-        content: response.answer,
+        content: message,
         details: response.table ? [`Updated table: ${response.table.title}`, `${response.table.rows.length} row(s)`] : undefined,
         provider: response.provider,
         usedLiveProvider: response.used_live_provider,
@@ -856,13 +864,6 @@ export function App() {
         <KpiCard title="Overdue emergency work" value={`${dashboardMetrics.overdueEmergency}`} unit="work orders" detail="Priority 1 open work requiring supervisor attention." />
         <KpiCard title="PM Work orders overdue" value={`${dashboardMetrics.pmOverdue}`} unit="work orders" detail="Preventive maintenance items waiting on material or approval." />
         <KpiCard title="Equipment performance" value={`${dashboardMetrics.equipmentPerformance}`} unit="%" detail="Average health across tracked steel-plant assets." />
-        <section className="detailPanel neoResultPanel">
-          <div className="sectionHeader">
-            <Sparkles size={18} />
-            <h2>{neoTable?.title ?? 'Neo Results'}</h2>
-          </div>
-          {neoTable ? <NeoResultTable table={neoTable} /> : <p className="emptyState">Ask Neo to show assets, work orders, or users. Results appear here.</p>}
-        </section>
         <section className="detailPanel queuePanel">
           <div className="sectionHeader">
             <Search size={18} />
@@ -875,13 +876,6 @@ export function App() {
               setActiveView('workOrders')
             }}
           />
-        </section>
-        <section className="detailPanel chartPanel">
-          <div className="sectionHeader">
-            <BarChart3 size={18} />
-            <h2>Equipment efficiency</h2>
-          </div>
-          <BarChart assets={dashboard.highest_risk_equipment} />
         </section>
         <section className="detailPanel">
           <h2>SLA compliance by incident priority</h2>
@@ -906,44 +900,67 @@ export function App() {
           )}
         </section>
       </div>
-      <aside className="neoPanel" aria-label="Neo dashboard assistant">
-        <div className="neoHeader">
-          <span className="neoAvatar">N</span>
-          <div>
-            <h2>Neo</h2>
-            <small>Dashboard AI assistant</small>
-          </div>
-        </div>
-        <div className="neoTranscript" aria-label="Neo chat transcript">
-          {neoMessages.map((turn) => (
-            <div className={`chatBubble ${turn.role}`} key={turn.id}>
-              <span>{turn.role === 'assistant' ? 'Neo' : 'You'}</span>
-              {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
-              <p>{turn.content}</p>
-              {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+      <div className="neoCenterColumn">
+        <section className="neoPanel" aria-label="Neo dashboard assistant" aria-busy={neoLoading}>
+          <div className="neoHeader">
+            <span className="neoAvatar">N</span>
+            <div>
+              <h2>Neo</h2>
+              <small>Dashboard AI assistant</small>
             </div>
-          ))}
+          </div>
+          <div className="neoTranscript" aria-label="Neo chat transcript">
+            {neoMessages.map((turn) => (
+              <div className={`chatBubble ${turn.role}`} key={turn.id}>
+                <span>{turn.role === 'assistant' ? 'Neo' : 'You'}</span>
+                {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
+                <p>{turn.content}</p>
+                {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+              </div>
+            ))}
+            {neoLoading && (
+              <div className="chatBubble assistant neoThinking" aria-live="polite">
+                <span>Neo</span>
+                <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
+              </div>
+            )}
+          </div>
+          <div className="neoPromptChips" aria-label="Neo prompt shortcuts">
+            <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show assets at risk')}>Assets</button>
+            <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show work orders needing follow-up')}>Work orders</button>
+            <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show users and roles')}>User table</button>
+          </div>
+          <form className="neoComposer" onSubmit={(event) => {
+            event.preventDefault()
+            sendNeoQuestion()
+          }}>
+            <textarea
+              aria-label="Ask Neo"
+              value={neoQuestion}
+              disabled={neoLoading}
+              onChange={(event) => setNeoQuestion(event.target.value)}
+            />
+            <button className="textButton" type="submit" disabled={neoLoading}>
+              {neoLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
+              Send
+            </button>
+          </form>
+        </section>
+        <section className="detailPanel neoResultPanel">
+          <div className="sectionHeader">
+            <Sparkles size={18} />
+            <h2>{neoTable?.title ?? 'Neo Results'}</h2>
+          </div>
+          {neoTable ? <NeoResultTable table={neoTable} /> : <p className="emptyState">Ask Neo to show assets, work orders, or users. Results appear here.</p>}
+        </section>
+      </div>
+      <section className="detailPanel chartPanel dashboardEfficiency">
+        <div className="sectionHeader">
+          <BarChart3 size={18} />
+          <h2>Equipment efficiency</h2>
         </div>
-        <div className="neoPromptChips" aria-label="Neo prompt shortcuts">
-          <button type="button" onClick={() => setNeoQuestion('Show assets at risk')}>Assets</button>
-          <button type="button" onClick={() => setNeoQuestion('Show work orders needing follow-up')}>Work orders</button>
-          <button type="button" onClick={() => setNeoQuestion('Show users and roles')}>User table</button>
-        </div>
-        <form className="neoComposer" onSubmit={(event) => {
-          event.preventDefault()
-          sendNeoQuestion()
-        }}>
-          <textarea
-            aria-label="Ask Neo"
-            value={neoQuestion}
-            onChange={(event) => setNeoQuestion(event.target.value)}
-          />
-          <button className="textButton" type="submit">
-            <Send size={16} />
-            Send
-          </button>
-        </form>
-      </aside>
+        <BarChart assets={dashboard.highest_risk_equipment} />
+      </section>
     </section>
   )
 

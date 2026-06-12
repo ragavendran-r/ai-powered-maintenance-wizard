@@ -809,14 +809,14 @@ h3 {
 .dashboardWithNeo {
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  grid-template-columns: minmax(420px, 1.08fr) minmax(360px, 0.94fr) minmax(340px, 0.9fr);
   align-items: start;
 }
 
 .dashboardGrid {
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .kpiCard {
@@ -875,7 +875,7 @@ h3 {
 }
 
 .neoResultPanel {
-  grid-column: 1 / -1;
+  min-height: 250px;
 }
 
 .neoResultTable {
@@ -913,6 +913,18 @@ h3 {
   min-height: 560px;
   overflow: hidden;
   padding: 14px;
+  position: sticky;
+  top: 16px;
+}
+
+.neoCenterColumn {
+  display: grid;
+  gap: 16px;
+}
+
+.dashboardEfficiency {
+  grid-column: auto;
+  min-height: 420px;
   position: sticky;
   top: 16px;
 }
@@ -957,6 +969,29 @@ h3 {
   padding: 10px;
 }
 
+.neoThinking p {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.loadingSpinner {
+  animation: spin 0.75s linear infinite;
+  border: 2px solid #c7d6dc;
+  border-top-color: #1f6f78;
+  border-radius: 50%;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 16px;
+  width: 16px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .neoPromptChips {
   display: flex;
   flex-wrap: wrap;
@@ -971,6 +1006,13 @@ h3 {
   font-weight: 800;
   min-height: 32px;
   padding: 0 10px;
+}
+
+.neoPromptChips button:disabled,
+.neoComposer textarea:disabled,
+.neoComposer .textButton:disabled {
+  cursor: wait;
+  opacity: 0.68;
 }
 
 .neoComposer {
@@ -1342,6 +1384,11 @@ h3 {
 
   .neoPanel {
     max-height: none;
+    min-height: 0;
+    position: static;
+  }
+
+  .dashboardEfficiency {
     min-height: 0;
     position: static;
   }
