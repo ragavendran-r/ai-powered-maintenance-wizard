@@ -16,6 +16,8 @@ flowchart LR
   auth --> streamStatus["Streaming Status API"]
   auth --> diagnosis["Diagnosis, Chat, And Recommendation APIs"]
   auth --> prediction["Prediction API"]
+  auth --> workOrders["Work Order APIs<br/>Queue, detail, logs, lifecycle"]
+  auth --> assistants["Work Order AI Assistants<br/>Technician and supervisor"]
   auth --> report["Markdown Report API"]
   auth --> feedback["Feedback API<br/>Root cause, action, outcome"]
   auth --> userAdmin["User Management API"]
@@ -32,6 +34,7 @@ flowchart LR
   anomaly --> anomalyContext["Anomaly Context<br/>LLM/SLM classification and inspection steps"]
   diagnosis --> risk["Risk And Prediction Services<br/>Criticality, alerts, spares, history, labels, RUL"]
   diagnosis --> llm["LLM Adapter<br/>Mock, OpenAI-compatible, Ollama"]
+  assistants --> llm
   diagnosis --> explainer["Reasoning Explainer<br/>Prediction and recommendation explanations"]
   llm --> fallback["Deterministic Fallback<br/>Validated safe recommendations"]
   diagnosis --> recommendations["Recommendation Service<br/>Root causes, actions, spares, evidence, learning notes, confidence"]
@@ -65,13 +68,14 @@ flowchart LR
   report --> frontend
   feedback --> frontend
   sqlite --> dashboard
+  sqlite --> workOrders
 ```
 
 ## Components
 
-- React frontend: operator dashboard, left-nav ingestion view, maintenance chat, asset detail, recommendation, report, and detailed feedback views.
+- React frontend: operational dashboard, dedicated asset detail views, work-order queue/detail/execution/review screens, left-nav ingestion view, maintenance chat, recommendation, report, and detailed feedback views.
 - Auth/RBAC layer: local login, JWT validation, current-user context, role guards, and role-aware navigation for admin, maintenance engineer, reliability engineer, planner, operator, and API-only IoT service users.
-- FastAPI backend: HTTP API layer for dashboard data, ingestion, diagnosis, prediction, chat, reports, and feedback.
+- FastAPI backend: HTTP API layer for dashboard data, work orders, role-specific assistants, ingestion, diagnosis, prediction, chat, reports, and feedback.
 - Async IoT streaming ingestion: optional NATS JetStream durable consumer for plant applications, PLC gateways, and historians that publish alerts, sensor readings, equipment, spares, and maintenance events.
 - Data services: seed SQLite from five sample steel-plant assets and expose repository functions for equipment, alerts, sensor readings, spares, maintenance history, documents, document chunks, and feedback.
 - Document parser: extracts text from uploaded text-like files and embedded-text PDFs before indexing.
@@ -81,6 +85,7 @@ flowchart LR
 - Anomaly service: rolling-baseline and z-score analysis over persisted sensor readings, plus optional LLM/SLM context classification and inspection steps.
 - Maintenance labeling service: optional LLM/SLM normalization of maintenance history and feedback into failure-mode, component, root-cause, action-class, outcome, and signal-hint labels.
 - Recommendation service: combines retrieved evidence, risk scoring, prediction, normalized labels, prior engineer feedback, reasoning explanations, and optional LLM-adapter context.
+- Work-order assistant service: combines persisted work-order state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM structured output to suggest live directions, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work.
 - Report service: formats recommendations as structured Markdown for supervisor handoff or demo export, including learning notes.
 - LLM adapter: common structured interface for mock, OpenAI-compatible chat completions, and Ollama chat providers.
 
@@ -107,6 +112,14 @@ flowchart LR
   - `POST /api/equipment/{equipment_id}/maintenance-labels` generates normalized labels from history and feedback.
   - `POST /api/chat` and `POST /api/diagnose` generate evidence-backed recommendations.
   - `POST /api/predict` returns failure probability, estimated RUL, and drivers.
+- Work orders and assistants:
+  - `GET /api/work-orders` lists work orders, with optional asset and follow-up filters.
+  - `POST /api/work-orders` creates a work order with assignment, priority, problem code, recommended action, and follow-up fields.
+  - `GET /api/work-orders/{work_order_id}` returns detail and work logs.
+  - `PATCH /api/work-orders/{work_order_id}` updates lifecycle status, assignment, problem code, follow-up, and completion summary.
+  - `POST /api/work-orders/{work_order_id}/logs` appends technician, supervisor, or assistant log entries.
+  - `POST /api/work-orders/technician-assist` returns live directions, safety reminders, recommended actions, problem-code suggestions, and completion summary.
+  - `POST /api/work-orders/supervisor-assist` summarizes queue/follow-up risk and can draft a follow-up work order.
 - Reporting and learning:
   - `GET /api/reports/{equipment_id}/markdown` exports a structured maintenance decision report.
   - `POST /api/recommendations/{recommendation_id}/feedback` stores engineer feedback with equipment id, status, corrected diagnosis, actual root cause, action taken, outcome, and notes.
@@ -129,9 +142,9 @@ flowchart LR
 
 ## LLM Boundaries
 
-LLM/SLM use is isolated behind validated service contracts. Diagnosis, chat, and report endpoints call the recommendation pipeline, which can include optional LLM-generated root causes, immediate actions, planned actions, summaries, confidence adjustment, and reasoning explanation. Document ingestion, retrieval, anomaly context, and maintenance labeling can also call the same provider adapter for structured enrichment.
+LLM/SLM use is isolated behind validated service contracts. Diagnosis, chat, and report endpoints call the recommendation pipeline, which can include optional LLM-generated root causes, immediate actions, planned actions, summaries, confidence adjustment, and reasoning explanation. Document ingestion, retrieval, anomaly context, maintenance labeling, technician work-order assistance, and supervisor follow-up review can also call the same provider adapter for structured enrichment.
 
-The LLM/SLM is not the source of truth for raw ingestion, NATS streaming ingestion, deterministic anomaly scores, risk scoring, RUL calculation, dashboard aggregation, or feedback persistence. These parts remain deterministic so the demo works without external credentials.
+The LLM/SLM is not the source of truth for raw ingestion, NATS streaming ingestion, deterministic anomaly scores, risk scoring, RUL calculation, dashboard aggregation, work-order persistence, status transitions, or feedback persistence. These parts remain deterministic so the demo works without external credentials.
 
 Provider output must validate to the expected structured JSON contract. Missing credentials, network errors, malformed JSON, invalid schema, or provider timeout automatically fall back to deterministic local reasoning.
 

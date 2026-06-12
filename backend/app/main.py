@@ -34,10 +34,18 @@ from app.models.schemas import (
     PredictionRequest,
     Recommendation,
     StreamingStatus,
+    SupervisorAssistantRequest,
+    SupervisorAssistantResponse,
+    TechnicianAssistantRequest,
+    TechnicianAssistantResponse,
     TokenResponse,
     UserCreateRequest,
     UserPublic,
     UserUpdateRequest,
+    WorkOrder,
+    WorkOrderCreateRequest,
+    WorkOrderLogRequest,
+    WorkOrderUpdateRequest,
 )
 from app.services.document_intelligence import analyze_documents, document_intelligence
 from app.services.iot_streaming import StreamingIngestionService
@@ -48,6 +56,7 @@ from app.services.reports import recommendation_to_markdown
 from app.services.retrieval import retrieve_evidence
 from app.services.risk import active_alerts, equipment_records, health_summary, predict_failure
 from app.services.anomaly import analyze_anomalies, sensor_readings
+from app.services.work_order_assistant import supervisor_assistance, technician_assistance
 
 
 @asynccontextmanager
@@ -268,6 +277,73 @@ def generate_maintenance_labels(equipment_id: str):
 )
 def get_maintenance_labels(equipment_id: str):
     return MaintenanceLabelsResponse(equipment_id=equipment_id, labels=stored_labels(equipment_id))
+
+
+@app.get("/api/work-orders", response_model=list[WorkOrder], dependencies=[Depends(require_roles(*READ_ROLES))])
+def list_work_orders(equipment_id: Optional[str] = None, follow_up_only: bool = False):
+    return repository.list_work_orders(equipment_id=equipment_id, follow_up_only=follow_up_only)
+
+
+@app.post(
+    "/api/work-orders",
+    response_model=WorkOrder,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles(*DECISION_ROLES))],
+)
+def create_work_order(request: WorkOrderCreateRequest):
+    if not repository.get_equipment(request.equipment_id):
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    return repository.create_work_order(request.model_dump())
+
+
+@app.get("/api/work-orders/{work_order_id}", response_model=WorkOrder, dependencies=[Depends(require_roles(*READ_ROLES))])
+def get_work_order(work_order_id: str):
+    work_order = repository.get_work_order(work_order_id)
+    if not work_order:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    return work_order
+
+
+@app.patch(
+    "/api/work-orders/{work_order_id}",
+    response_model=WorkOrder,
+    dependencies=[Depends(require_roles(*DECISION_ROLES))],
+)
+def update_work_order(work_order_id: str, request: WorkOrderUpdateRequest):
+    work_order = repository.update_work_order(work_order_id, request.model_dump(exclude_unset=True))
+    if not work_order:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    return work_order
+
+
+@app.post(
+    "/api/work-orders/{work_order_id}/logs",
+    response_model=WorkOrder,
+    dependencies=[Depends(require_roles(*DECISION_ROLES))],
+)
+def add_work_order_log(work_order_id: str, request: WorkOrderLogRequest):
+    work_order = repository.add_work_order_log(work_order_id, request.model_dump())
+    if not work_order:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    return work_order
+
+
+@app.post(
+    "/api/work-orders/technician-assist",
+    response_model=TechnicianAssistantResponse,
+    dependencies=[Depends(require_roles(*DECISION_ROLES))],
+)
+def technician_assist(request: TechnicianAssistantRequest):
+    return technician_assistance(request)
+
+
+@app.post(
+    "/api/work-orders/supervisor-assist",
+    response_model=SupervisorAssistantResponse,
+    dependencies=[Depends(require_roles(*DECISION_ROLES))],
+)
+def supervisor_assist(request: SupervisorAssistantRequest):
+    return supervisor_assistance(request)
 
 
 @app.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(require_roles(*DECISION_ROLES))])

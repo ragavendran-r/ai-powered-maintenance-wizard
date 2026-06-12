@@ -65,12 +65,14 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "5"
+    assert status["schema_version"] == "6"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["document_chunks"] >= 8
     assert "document_intelligence" in status["counts"]
     assert "maintenance_labels" in status["counts"]
     assert "streaming_messages" in status["counts"]
+    assert "work_orders" in status["counts"]
+    assert "work_order_logs" in status["counts"]
     assert status["counts"]["users"] == 6
 
 
@@ -198,6 +200,97 @@ def test_dashboard_summary_contains_sample_equipment():
     assert len(payload["highest_risk_equipment"]) == 5
     equipment_ids = {item["equipment"]["id"] for item in payload["highest_risk_equipment"]}
     assert {"HYD-SYS-04", "OH-CRANE-05"}.issubset(equipment_ids)
+
+
+def test_work_orders_are_seeded_and_filter_by_asset():
+    headers = auth_headers()
+
+    response = client.get("/api/work-orders?equipment_id=RM-DRIVE-01", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert any(item["id"] == "WO-8304" for item in payload)
+    assert all(item["equipment_id"] == "RM-DRIVE-01" for item in payload)
+    assert payload[0]["logs"] == []
+
+
+def test_create_update_and_log_work_order():
+    headers = auth_headers("planner@plant.local")
+
+    create_response = client.post(
+        "/api/work-orders",
+        json={
+            "equipment_id": "BF-BLOWER-02",
+            "title": "Inspect blower actuator linkage",
+            "description": "Inspect inlet guide vane actuator linkage after pressure variance trend.",
+            "priority": 2,
+            "work_type": "CM",
+            "failure_class": "CTRL",
+            "problem_code": "IGVACT",
+            "classification": "Control actuator",
+            "assigned_to": "Reliability Engineer",
+            "supervisor": "Blast Furnace Supervisor",
+            "due_date": "2026-06-14T09:00:00+05:30",
+            "recommended_action": "Stroke actuator and verify position feedback.",
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 201
+    work_order = create_response.json()
+    assert work_order["id"].startswith("WO-")
+    assert work_order["status"] == "WAPPR"
+
+    update_response = client.patch(
+        f"/api/work-orders/{work_order['id']}",
+        json={"status": "INPRG", "problem_code": "LWTQCONNECT"},
+        headers=headers,
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["status"] == "INPRG"
+    assert update_response.json()["problem_code"] == "LWTQCONNECT"
+
+    log_response = client.post(
+        f"/api/work-orders/{work_order['id']}/logs",
+        json={"author": "Reliability Engineer", "entry_type": "observation", "content": "Actuator linkage has minor play."},
+        headers=headers,
+    )
+    assert log_response.status_code == 200
+    assert any("minor play" in item["content"] for item in log_response.json()["logs"])
+
+
+def test_technician_assistant_suggests_problem_code_from_observation():
+    headers = auth_headers("maintenance@plant.local")
+
+    response = client.post(
+        "/api/work-orders/technician-assist",
+        json={"work_order_id": "WO-8304", "observation": "Connections 3 and 5 were loose; insulation has hotspots."},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["work_order_id"] == "WO-8304"
+    assert payload["suggested_problem_code"] in {"LWTQCONNECT", "INSUL"}
+    assert payload["live_directions"]
+    assert payload["completion_summary"]
+    assert payload["evidence"]
+
+
+def test_supervisor_assistant_reviews_follow_up_queue_and_drafts_order():
+    headers = auth_headers("planner@plant.local")
+
+    response = client.post(
+        "/api/work-orders/supervisor-assist",
+        json={"work_order_id": "WO-8297", "queue_name": "follow_up", "question": "What needs follow-up?"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "work order" in payload["summary"].lower()
+    assert payload["follow_up_actions"]
+    assert "WO-8297" in payload["referenced_work_orders"]
+    assert payload["draft_work_order"]["equipment_id"] == "OH-CRANE-05"
 
 
 def test_streaming_status_is_disabled_by_default():

@@ -287,6 +287,82 @@ export interface MaintenanceLabelsResponse {
   labels: MaintenanceLabel[]
 }
 
+export type WorkOrderStatus = 'WAPPR' | 'WMATL' | 'APPR' | 'INPRG' | 'COMP' | 'CLOSE'
+
+export interface WorkOrderLog {
+  id: number
+  work_order_id: string
+  author: string
+  entry_type: string
+  content: string
+  created_at: string
+}
+
+export interface WorkOrder {
+  id: string
+  equipment_id: string
+  title: string
+  description: string
+  status: WorkOrderStatus
+  priority: number
+  work_type: string
+  failure_class: string
+  problem_code: string
+  classification: string
+  assigned_to: string
+  supervisor: string
+  due_date: string
+  recommended_action: string
+  follow_up_required: boolean
+  ai_summary?: string | null
+  completion_summary?: string | null
+  created_at: string
+  updated_at: string
+  completed_at?: string | null
+  logs: WorkOrderLog[]
+}
+
+export interface WorkOrderCreateRequest {
+  equipment_id: string
+  title: string
+  description: string
+  priority: number
+  work_type: string
+  failure_class: string
+  problem_code: string
+  classification: string
+  assigned_to: string
+  supervisor: string
+  due_date: string
+  recommended_action: string
+  follow_up_required?: boolean
+  ai_summary?: string
+}
+
+export interface TechnicianAssistantResponse {
+  work_order_id: string
+  next_prompt: string
+  live_directions: string[]
+  recommendations: string[]
+  safety_reminders: string[]
+  suggested_problem_code: string
+  suggested_failure_class: string
+  completion_summary: string
+  evidence: Evidence[]
+  used_live_provider: boolean
+  provider: string
+}
+
+export interface SupervisorAssistantResponse {
+  summary: string
+  follow_up_actions: string[]
+  risks: string[]
+  draft_work_order?: WorkOrderCreateRequest | null
+  referenced_work_orders: string[]
+  used_live_provider: boolean
+  provider: string
+}
+
 export interface UserCreateRequest {
   email: string
   display_name: string
@@ -372,6 +448,39 @@ export const api = {
   generateMaintenanceLabels: (equipmentId: string) =>
     request<MaintenanceLabelsResponse>(`/api/equipment/${equipmentId}/maintenance-labels`, {
       method: 'POST',
+    }),
+  workOrders: (equipmentId?: string, followUpOnly = false) => {
+    const params = new URLSearchParams()
+    if (equipmentId) params.set('equipment_id', equipmentId)
+    if (followUpOnly) params.set('follow_up_only', 'true')
+    const query = params.toString()
+    return request<WorkOrder[]>(`/api/work-orders${query ? `?${query}` : ''}`)
+  },
+  workOrder: (workOrderId: string) => request<WorkOrder>(`/api/work-orders/${workOrderId}`),
+  createWorkOrder: (payload: WorkOrderCreateRequest) =>
+    request<WorkOrder>('/api/work-orders', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateWorkOrder: (workOrderId: string, payload: Partial<WorkOrder>) =>
+    request<WorkOrder>(`/api/work-orders/${workOrderId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  addWorkOrderLog: (workOrderId: string, payload: { author: string; entry_type: string; content: string }) =>
+    request<WorkOrder>(`/api/work-orders/${workOrderId}/logs`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  technicianAssist: (workOrderId: string, observation?: string) =>
+    request<TechnicianAssistantResponse>('/api/work-orders/technician-assist', {
+      method: 'POST',
+      body: JSON.stringify({ work_order_id: workOrderId, observation }),
+    }),
+  supervisorAssist: (payload: { work_order_id?: string; queue_name?: string; question?: string }) =>
+    request<SupervisorAssistantResponse>('/api/work-orders/supervisor-assist', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
   feedback: (
     recommendationId: string,

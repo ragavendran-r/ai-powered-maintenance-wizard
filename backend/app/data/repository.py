@@ -66,6 +66,165 @@ def list_maintenance_events(equipment_id: Optional[str] = None) -> list[dict[str
     return _fetch_all("SELECT * FROM maintenance_events ORDER BY date DESC")
 
 
+def list_work_orders(
+    equipment_id: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    follow_up_only: bool = False,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if equipment_id:
+        clauses.append("equipment_id = ?")
+        params.append(equipment_id)
+    if assigned_to:
+        clauses.append("assigned_to = ?")
+        params.append(assigned_to)
+    if follow_up_only:
+        clauses.append("follow_up_required = 1")
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = _fetch_all(
+        f"""
+        SELECT * FROM work_orders
+        {where_sql}
+        ORDER BY priority ASC, due_date ASC, updated_at DESC
+        """,
+        tuple(params),
+    )
+    return [_decode_work_order(row, include_logs=False) for row in rows]
+
+
+def get_work_order(work_order_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM work_orders WHERE id = ?", (work_order_id,))
+    if not row:
+        return None
+    return _decode_work_order(row, include_logs=True)
+
+
+def create_work_order(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    work_order_id = payload.get("id") or _next_work_order_id()
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO work_orders (
+                id,
+                equipment_id,
+                title,
+                description,
+                status,
+                priority,
+                work_type,
+                failure_class,
+                problem_code,
+                classification,
+                assigned_to,
+                supervisor,
+                due_date,
+                recommended_action,
+                follow_up_required,
+                ai_summary,
+                completion_summary,
+                completed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                work_order_id,
+                payload["equipment_id"],
+                payload["title"],
+                payload["description"],
+                payload.get("status") or "WAPPR",
+                payload["priority"],
+                payload.get("work_type") or "CM",
+                payload.get("failure_class") or "MECH",
+                payload.get("problem_code") or "INVESTIGATE",
+                payload.get("classification") or "Corrective",
+                payload.get("assigned_to") or "Maintenance Engineer",
+                payload.get("supervisor") or "Maintenance Supervisor",
+                payload["due_date"],
+                payload.get("recommended_action") or "Inspect asset and update work log with findings.",
+                1 if payload.get("follow_up_required") else 0,
+                payload.get("ai_summary"),
+                payload.get("completion_summary"),
+                payload.get("completed_at"),
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO work_order_logs (work_order_id, author, entry_type, content)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                work_order_id,
+                "Maintenance Wizard",
+                "created",
+                payload.get("ai_summary") or "Work order created from maintenance operations dashboard.",
+            ),
+        )
+    work_order = get_work_order(work_order_id)
+    if not work_order:
+        raise RuntimeError("Work order was not persisted")
+    return work_order
+
+
+def update_work_order(work_order_id: str, payload: dict[str, Any]) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    existing = get_work_order(work_order_id)
+    if not existing:
+        return None
+    fields: list[str] = []
+    values: list[Any] = []
+    for field in (
+        "status",
+        "priority",
+        "assigned_to",
+        "supervisor",
+        "due_date",
+        "recommended_action",
+        "problem_code",
+        "failure_class",
+        "classification",
+        "ai_summary",
+        "completion_summary",
+    ):
+        if payload.get(field) is not None:
+            fields.append(f"{field} = ?")
+            values.append(payload[field])
+    if payload.get("follow_up_required") is not None:
+        fields.append("follow_up_required = ?")
+        values.append(1 if payload["follow_up_required"] else 0)
+    if payload.get("status") in {"COMP", "CLOSE"} and not existing.get("completed_at"):
+        fields.append("completed_at = CURRENT_TIMESTAMP")
+    if not fields:
+        return existing
+    fields.append("updated_at = CURRENT_TIMESTAMP")
+    values.append(work_order_id)
+    with connect() as connection:
+        connection.execute(f"UPDATE work_orders SET {', '.join(fields)} WHERE id = ?", values)
+    return get_work_order(work_order_id)
+
+
+def add_work_order_log(work_order_id: str, payload: dict[str, Any]) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    if not get_work_order(work_order_id):
+        return None
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO work_order_logs (work_order_id, author, entry_type, content)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                work_order_id,
+                payload["author"],
+                payload.get("entry_type") or "note",
+                payload["content"],
+            ),
+        )
+        connection.execute("UPDATE work_orders SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (work_order_id,))
+    return get_work_order(work_order_id)
+
+
 def list_documents(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
     if equipment_id:
         return _fetch_all(
@@ -245,6 +404,26 @@ def add_records(payload: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
         "spares": ["id", "equipment_id", "name", "available_qty", "lead_time_days", "criticality"],
         "sensor_readings": ["id", "equipment_id", "timestamp", "signal", "value", "unit", "threshold"],
         "maintenance_events": ["id", "equipment_id", "date", "issue", "root_cause", "action", "downtime_hours"],
+        "work_orders": [
+            "id",
+            "equipment_id",
+            "title",
+            "description",
+            "status",
+            "priority",
+            "work_type",
+            "failure_class",
+            "problem_code",
+            "classification",
+            "assigned_to",
+            "supervisor",
+            "due_date",
+            "recommended_action",
+            "follow_up_required",
+            "ai_summary",
+            "completion_summary",
+            "completed_at",
+        ],
     }
     counts: dict[str, int] = {}
     with connect() as connection:
@@ -584,6 +763,31 @@ def _decode_maintenance_label(row: dict[str, Any]) -> dict[str, Any]:
     decoded["usable_for_training"] = bool(decoded.get("usable_for_training"))
     decoded["used_live_provider"] = bool(decoded.get("used_live_provider"))
     return decoded
+
+
+def _decode_work_order(row: dict[str, Any], include_logs: bool) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["follow_up_required"] = bool(decoded.get("follow_up_required"))
+    if include_logs:
+        decoded["logs"] = _fetch_all(
+            "SELECT * FROM work_order_logs WHERE work_order_id = ? ORDER BY created_at ASC, id ASC",
+            (decoded["id"],),
+        )
+    else:
+        decoded["logs"] = []
+    return decoded
+
+
+def _next_work_order_id() -> str:
+    rows = _fetch_all("SELECT id FROM work_orders WHERE id LIKE 'WO-%'")
+    numeric_ids: list[int] = []
+    for row in rows:
+        try:
+            numeric_ids.append(int(str(row["id"]).split("-", 1)[1]))
+        except (IndexError, ValueError):
+            continue
+    next_number = max(numeric_ids, default=8300) + 1
+    return f"WO-{next_number}"
 
 
 def _fetch_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
