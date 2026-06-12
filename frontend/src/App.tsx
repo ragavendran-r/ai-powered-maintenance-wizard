@@ -173,6 +173,13 @@ function assistantProviderLabel(turn: AssistantTurn) {
   return `${turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · ${turn.provider}`
 }
 
+function AssistantMessageContent({ turn }: { turn: AssistantTurn }) {
+  if (turn.role === 'assistant') {
+    return <FormattedAssistantContent content={turn.content} />
+  }
+  return <p>{turn.content}</p>
+}
+
 export function App() {
   const [session, setSession] = useState<AuthSession | null>(() => api.restoreSession())
   const [authReady, setAuthReady] = useState(false)
@@ -887,7 +894,7 @@ export function App() {
                 <div className={`chatBubble ${turn.role}`} key={turn.id}>
                   <span>{turn.role === 'assistant' ? 'Neo' : 'You'}</span>
                   {assistantProviderLabel(turn) && <small>{assistantProviderLabel(turn)}</small>}
-                  <p>{turn.content}</p>
+                  <AssistantMessageContent turn={turn} />
                   {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
                 </div>
               ))}
@@ -1108,7 +1115,7 @@ export function App() {
                       <div className={`chatBubble ${turn.role}`} key={turn.id}>
                         <span>{turn.role === 'assistant' ? 'Assistant' : 'You'}</span>
                         {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
-                        <p>{turn.content}</p>
+                        <AssistantMessageContent turn={turn} />
                         {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
                       </div>
                     ))}
@@ -1144,7 +1151,7 @@ export function App() {
                       <div className={`chatBubble ${turn.role}`} key={turn.id}>
                         <span>{turn.role === 'assistant' ? 'Assistant' : 'You'}</span>
                         {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
-                        <p>{turn.content}</p>
+                        <AssistantMessageContent turn={turn} />
                         {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
                       </div>
                     ))}
@@ -1548,6 +1555,125 @@ function KpiCard({ title, value, unit, detail, ai, className = '' }: { title: st
       {open && <div className="aiPopover">{ai}</div>}
     </section>
   )
+}
+
+type AssistantContentBlock =
+  | { type: 'heading'; level: number; text: string }
+  | { type: 'paragraph'; text: string }
+  | { type: 'ol' | 'ul'; items: string[] }
+
+function FormattedAssistantContent({ content }: { content: string }) {
+  const blocks = parseAssistantContent(content)
+  return (
+    <div className="assistantFormattedContent">
+      {blocks.map((block, index) => {
+        if (block.type === 'heading') {
+          const HeadingTag = block.level >= 4 ? 'h4' : 'h3'
+          return <HeadingTag key={`heading-${index}`}>{renderInlineMarkdown(block.text, `heading-${index}`)}</HeadingTag>
+        }
+        if (block.type === 'ol') {
+          return (
+            <ol key={`ol-${index}`}>
+              {block.items.map((item, itemIndex) => (
+                <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item, `ol-${index}-${itemIndex}`)}</li>
+              ))}
+            </ol>
+          )
+        }
+        if (block.type === 'ul') {
+          return (
+            <ul key={`ul-${index}`}>
+              {block.items.map((item, itemIndex) => (
+                <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item, `ul-${index}-${itemIndex}`)}</li>
+              ))}
+            </ul>
+          )
+        }
+        if (block.type === 'paragraph') {
+          return <p key={`paragraph-${index}`}>{renderInlineMarkdown(block.text, `paragraph-${index}`)}</p>
+        }
+        return null
+      })}
+    </div>
+  )
+}
+
+function parseAssistantContent(content: string): AssistantContentBlock[] {
+  const normalized = normalizeAssistantContent(content)
+  const blocks: AssistantContentBlock[] = []
+  let listType: 'ol' | 'ul' | null = null
+  let listItems: string[] = []
+
+  function flushList() {
+    if (listType && listItems.length > 0) {
+      blocks.push({ type: listType, items: listItems })
+    }
+    listType = null
+    listItems = []
+  }
+
+  normalized.split('\n').forEach((line) => {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      flushList()
+      return
+    }
+
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/)
+    if (heading) {
+      flushList()
+      blocks.push({
+        type: 'heading',
+        level: heading[1].length,
+        text: stripMarkdownHeadingSuffix(heading[2]),
+      })
+      return
+    }
+
+    const ordered = trimmed.match(/^\d+\.\s+(.+)$/)
+    if (ordered) {
+      if (listType !== 'ol') flushList()
+      listType = 'ol'
+      listItems.push(ordered[1])
+      return
+    }
+
+    const unordered = trimmed.match(/^[-*]\s+(.+)$/)
+    if (unordered) {
+      if (listType !== 'ul') flushList()
+      listType = 'ul'
+      listItems.push(unordered[1])
+      return
+    }
+
+    flushList()
+    blocks.push({ type: 'paragraph', text: trimmed })
+  })
+
+  flushList()
+  return blocks.length > 0 ? blocks : [{ type: 'paragraph', text: content }]
+}
+
+function normalizeAssistantContent(content: string) {
+  return content
+    .replace(/\r\n/g, '\n')
+    .replace(/\s+(#{1,4}\s+)/g, '\n$1')
+    .replace(/(#{1,4}\s+[^:\n]+:)\s+(\d+\.\s+)/g, '$1\n$2')
+    .replace(/\s+(\d+\.\s+(?:\*\*|[A-Z]))/g, '\n$1')
+    .replace(/\s+-\s+(?=[A-Z*])/g, '\n- ')
+}
+
+function stripMarkdownHeadingSuffix(text: string) {
+  return text.replace(/\s+#+$/, '')
+}
+
+function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`${keyPrefix}-strong-${index}`}>{part.slice(2, -2)}</strong>
+    }
+    return <span key={`${keyPrefix}-text-${index}`}>{part}</span>
+  })
 }
 
 function NeoResultTable({ table }: { table: NeoTable }) {

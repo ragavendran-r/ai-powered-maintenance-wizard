@@ -354,6 +354,21 @@ beforeEach(() => {
         return Promise.resolve(new Response(JSON.stringify(dashboard), { status: 200 }))
       }
       if (url.endsWith('/api/neo/chat')) {
+        const body = JSON.parse((init?.body as string) ?? '{}')
+        if (body.message === 'Format markdown response') {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                answer:
+                  'To inspect BF-BLOWER-02, follow these steps: ### Safety Checks: 1. **Lockout/Tagout**: Isolate and tag all power sources. 2. **Ventilation**: Confirm safe airflow before access. ### Inspection Steps: - Inspect inlet guide vane response. - Verify actuator calibration.',
+                table: null,
+                used_live_provider: true,
+                provider: 'openai',
+              }),
+              { status: 200 },
+            ),
+          )
+        }
         const response = new Response(
           JSON.stringify({
             answer: 'Neo found work orders that need attention. WO-8304 and WO-8297 require follow-up.',
@@ -525,6 +540,23 @@ describe('Maintenance Wizard dashboard', () => {
     expect(within(neoResultTable).getByText('OH-CRANE-05')).toBeInTheDocument()
     const transcript = screen.getByLabelText('Neo chat transcript')
     expect(within(transcript).queryByText('Neo found work orders that need attention. WO-8304 and WO-8297 require follow-up.')).not.toBeInTheDocument()
+  })
+
+  it('formats Markdown-like Neo responses into readable sections', async () => {
+    render(<App />)
+    await signIn()
+
+    fireEvent.change(screen.getByLabelText('Ask Neo'), { target: { value: 'Format markdown response' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    const transcript = screen.getByLabelText('Neo chat transcript')
+    expect(await within(transcript).findByRole('heading', { name: 'Safety Checks:' })).toBeInTheDocument()
+    expect(within(transcript).getByRole('heading', { name: 'Inspection Steps:' })).toBeInTheDocument()
+    expect(within(transcript).getByText('Lockout/Tagout')).toBeInTheDocument()
+    expect(within(transcript).getByText(/Isolate and tag all power sources/)).toBeInTheDocument()
+    expect(within(transcript).getByText(/Inspect inlet guide vane response/)).toBeInTheDocument()
+    expect(transcript.textContent).not.toContain('###')
+    expect(transcript.textContent).not.toContain('**')
   })
 
   it('runs diagnosis and exposes report export action', async () => {
