@@ -44,7 +44,7 @@ class LLMClient(ABC):
         prompt: str,
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
-        max_tokens: int = 250,
+        max_tokens: int = 600,
     ) -> LLMTextResponse:
         return fallback_factory(self.provider_name, "text completion is not supported by this provider")
 
@@ -53,7 +53,7 @@ class LLMClient(ABC):
         prompt: str,
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
-        max_tokens: int = 250,
+        max_tokens: int = 600,
     ) -> Iterator[LLMTextResponse]:
         yield self.complete_text(prompt, system_prompt, fallback_factory, max_tokens=max_tokens)
 
@@ -86,7 +86,7 @@ class MockLLMClient(LLMClient):
         prompt: str,
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
-        max_tokens: int = 250,
+        max_tokens: int = 600,
     ) -> LLMTextResponse:
         return fallback_factory(self.provider, self.reason)
 
@@ -108,7 +108,7 @@ class OpenAIClient(LLMClient):
         base_url: str,
         timeout_seconds: float,
         structured_max_tokens: int = 300,
-        text_max_tokens: int = 250,
+        text_max_tokens: int = 600,
     ):
         self.api_key = api_key
         self.model = model
@@ -126,7 +126,7 @@ class OpenAIClient(LLMClient):
         prompt: str,
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
-        max_tokens: int = 250,
+        max_tokens: int = 600,
     ) -> LLMTextResponse:
         if not self.api_key:
             return fallback_factory("openai", "OPENAI_API_KEY is not set")
@@ -157,7 +157,7 @@ class OpenAIClient(LLMClient):
         prompt: str,
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
-        max_tokens: int = 250,
+        max_tokens: int = 600,
     ) -> Iterator[LLMTextResponse]:
         if not self.api_key:
             yield fallback_factory("openai", "OPENAI_API_KEY is not set")
@@ -237,7 +237,7 @@ class OllamaClient(LLMClient):
         model: str,
         timeout_seconds: float,
         structured_max_tokens: int = 300,
-        text_max_tokens: int = 250,
+        text_max_tokens: int = 600,
     ):
         self.base_url = base_url
         self.model = model
@@ -254,7 +254,7 @@ class OllamaClient(LLMClient):
         prompt: str,
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
-        max_tokens: int = 250,
+        max_tokens: int = 600,
     ) -> LLMTextResponse:
         token_budget = min(max_tokens, self.text_max_tokens)
         try:
@@ -282,7 +282,7 @@ class OllamaClient(LLMClient):
         prompt: str,
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
-        max_tokens: int = 250,
+        max_tokens: int = 600,
     ) -> Iterator[LLMTextResponse]:
         token_budget = min(max_tokens, self.text_max_tokens)
         try:
@@ -355,7 +355,7 @@ def build_llm_client(
     openai_base_url: str = "https://api.openai.com/v1",
     timeout_seconds: float = 20.0,
     structured_max_tokens: int = 300,
-    text_max_tokens: int = 250,
+    text_max_tokens: int = 600,
 ) -> LLMClient:
     if provider == "openai":
         return OpenAIClient(
