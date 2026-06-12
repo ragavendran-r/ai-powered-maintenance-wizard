@@ -371,7 +371,7 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "failure_class": "MECH",
             "problem_code": "BRGVIB",
             "classification": "Bearing vibration",
-            "assigned_to": "Maintenance Engineer",
+            "assigned_to": "Maintenance Technician",
             "supervisor": "Maintenance Supervisor",
             "due_date": "2026-06-12T18:00:00+05:30",
             "recommended_action": "Reduce load if vibration persists, inspect bearing housing temperature, verify coupling alignment, and document final root cause.",

@@ -74,6 +74,7 @@ const roleOptions: UserRole[] = [
 const decisionRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer', 'planner']
 const technicianAssistantRoles: UserRole[] = ['maintenance_technician']
 const supervisorAssistantRoles: UserRole[] = ['maintenance_supervisor']
+const workOrderAssignmentRoles: UserRole[] = ['admin', 'maintenance_supervisor']
 const technicianAssistantName = 'Smith'
 const supervisorAssistantName = 'Trinity'
 const feedbackRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer']
@@ -92,7 +93,7 @@ const fallbackWorkOrders: WorkOrder[] = [
     failure_class: 'MECH',
     problem_code: 'BRGVIB',
     classification: 'Bearing vibration',
-    assigned_to: 'Maintenance Engineer',
+    assigned_to: 'Maintenance Technician',
     supervisor: 'Maintenance Supervisor',
     due_date: '2026-06-12T18:00:00+05:30',
     recommended_action: 'Reduce load if vibration persists and verify coupling alignment.',
@@ -246,6 +247,7 @@ export function App() {
   const [feedbackNotes, setFeedbackNotes] = useState('')
   const [reportMessage, setReportMessage] = useState('')
   const [users, setUsers] = useState<AuthUser[]>([])
+  const [technicians, setTechnicians] = useState<AuthUser[]>([])
   const [userMessage, setUserMessage] = useState('')
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserName, setNewUserName] = useState('')
@@ -262,6 +264,7 @@ export function App() {
   const canIngest = hasRole(currentUser, ingestionRoles)
   const canStreaming = hasRole(currentUser, streamingRoles)
   const canAdminUsers = currentUser?.role === 'admin'
+  const canAssignWorkOrders = hasRole(currentUser, workOrderAssignmentRoles)
 
   function clearSession(message = '') {
     api.setSession(null)
@@ -317,6 +320,13 @@ export function App() {
       .catch(() => setUserMessage('Users could not be loaded'))
   }
 
+  function loadTechnicians() {
+    return api
+      .technicians()
+      .then((items) => setTechnicians(items))
+      .catch(() => setTechnicians([]))
+  }
+
   function loadWorkOrders() {
     return api
       .workOrders()
@@ -357,6 +367,7 @@ export function App() {
     loadDashboard()
     loadWorkOrders()
     if (canStreaming) loadStreamingStatus()
+    if (canAssignWorkOrders) loadTechnicians()
   }, [authReady, session?.user.id])
 
   useEffect(() => {
@@ -741,6 +752,18 @@ export function App() {
       setWorkOrderMessage(`${updated.id} completed`)
     } catch {
       setWorkOrderMessage('Work order completion could not be saved')
+    }
+  }
+
+  async function assignWorkOrder(workOrderId: string, assignedTo: string) {
+    if (!assignedTo) return
+    try {
+      const updated = await api.updateWorkOrder(workOrderId, { assigned_to: assignedTo })
+      setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+      setSelectedWorkOrderId(updated.id)
+      setWorkOrderMessage(`${updated.id} assigned to ${assignedTo}`)
+    } catch {
+      setWorkOrderMessage('Work order assignment could not be saved')
     }
   }
 
@@ -1260,37 +1283,9 @@ export function App() {
 
   const workOrdersView = (
     <section className="workOrderLayout">
-      <section className="detailPanel">
-        <div className="sectionHeader">
-          <Briefcase size={18} />
-          <h2>WOs with follow up actions</h2>
-        </div>
-        <WorkOrderTable workOrders={workOrders} onOpen={(id) => setSelectedWorkOrderId(id)} />
-        {workOrderMessage && <p className="inlineStatus">{workOrderMessage}</p>}
-      </section>
-      <section className="detailPanel workOrderDetail">
-        {selectedWorkOrder ? (
-          <>
-            <div className="sectionHeader">
-              <FileText size={18} />
-              <h2>Work Order {selectedWorkOrder.id.replace('WO-', '')}</h2>
-            </div>
-            <StatusTimeline status={selectedWorkOrder.status} />
-            <div className="workOrderSummary">
-              <span className="statusPill connected">Priority {selectedWorkOrder.priority}</span>
-              <span className="statusPill fallback">{selectedWorkOrder.status}</span>
-              <p>{selectedWorkOrder.description}</p>
-              <dl>
-                <dt>Assigned to</dt>
-                <dd>{selectedWorkOrder.assigned_to}</dd>
-                <dt>Problem code</dt>
-                <dd>{technicianAssistant?.suggested_problem_code ?? selectedWorkOrder.problem_code}</dd>
-                <dt>Failure class</dt>
-                <dd>{technicianAssistant?.suggested_failure_class ?? selectedWorkOrder.failure_class}</dd>
-                <dt>Due date</dt>
-                <dd>{formatDate(selectedWorkOrder.due_date)}</dd>
-              </dl>
-            </div>
+      <section className="workOrderCenterColumn" aria-label="Work order center pane">
+        <section className="detailPanel workOrderAssistantPanel">
+          {selectedWorkOrder ? (
             <div className={canTechnicianAssistant && canSupervisorAssistant ? 'assistantSplit' : 'assistantSplit singleAssistant'}>
               {canTechnicianAssistant && (
                 <section className="assistantBox technician" aria-busy={technicianLoading}>
@@ -1331,7 +1326,6 @@ export function App() {
                       {technicianLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
                       Send
                     </button>
-                    <button className="textButton" type="button" disabled={technicianLoading} onClick={completeSelectedWorkOrder}>Submit completed work</button>
                   </form>
                 </section>
               )}
@@ -1383,10 +1377,64 @@ export function App() {
                 </section>
               )}
             </div>
-          </>
-        ) : (
-          <p className="emptyState">Select a work order to review.</p>
-        )}
+          ) : (
+            <p className="emptyState">Select a work order to use the assistant.</p>
+          )}
+        </section>
+        <section className="detailPanel workOrderQueuePanel">
+          <div className="sectionHeader">
+            <Briefcase size={18} />
+            <h2>WOs with follow up actions</h2>
+          </div>
+          <WorkOrderTable
+            workOrders={workOrders}
+            onOpen={(id) => setSelectedWorkOrderId(id)}
+            canAssign={canAssignWorkOrders}
+            technicians={technicians}
+            onAssign={assignWorkOrder}
+          />
+          {canTechnicianAssistant && selectedWorkOrder && (
+            <button
+              className="textButton completeWorkOrderButton"
+              type="button"
+              disabled={technicianLoading || !technicianAssistant}
+              onClick={completeSelectedWorkOrder}
+            >
+              Submit completed work
+            </button>
+          )}
+          {workOrderMessage && <p className="inlineStatus">{workOrderMessage}</p>}
+        </section>
+      </section>
+      <section className="workOrderRightColumn" aria-label="Work order right pane">
+        <section className="detailPanel workOrderDetail">
+          {selectedWorkOrder ? (
+            <>
+              <div className="sectionHeader">
+                <FileText size={18} />
+                <h2>Work Order {selectedWorkOrder.id.replace('WO-', '')}</h2>
+              </div>
+              <StatusTimeline status={selectedWorkOrder.status} />
+              <div className="workOrderSummary">
+                <span className="statusPill connected">Priority {selectedWorkOrder.priority}</span>
+                <span className="statusPill fallback">{selectedWorkOrder.status}</span>
+                <p>{selectedWorkOrder.description}</p>
+                <dl>
+                  <dt>Assigned to</dt>
+                  <dd>{selectedWorkOrder.assigned_to}</dd>
+                  <dt>Problem code</dt>
+                  <dd>{technicianAssistant?.suggested_problem_code ?? selectedWorkOrder.problem_code}</dd>
+                  <dt>Failure class</dt>
+                  <dd>{technicianAssistant?.suggested_failure_class ?? selectedWorkOrder.failure_class}</dd>
+                  <dt>Due date</dt>
+                  <dd>{formatDate(selectedWorkOrder.due_date)}</dd>
+                </dl>
+              </div>
+            </>
+          ) : (
+            <p className="emptyState">Select a work order to review.</p>
+          )}
+        </section>
       </section>
     </section>
   )
@@ -1900,29 +1948,67 @@ function WorkOrderTable({
   workOrders,
   onOpen,
   compact = false,
+  canAssign = false,
+  technicians = [],
+  onAssign,
 }: {
   workOrders: WorkOrder[]
   onOpen: (id: string) => void
   compact?: boolean
+  canAssign?: boolean
+  technicians?: AuthUser[]
+  onAssign?: (workOrderId: string, assignedTo: string) => void
 }) {
   return (
-    <div className={`workOrderTable ${compact ? 'compact' : ''}`}>
+    <div className={`workOrderTable ${compact ? 'compact' : ''} ${canAssign && !compact ? 'assignable' : ''}`}>
       <div className="workOrderHead">
         <span>Work order</span>
         <span>Description</span>
         {!compact && <span>Recommended action</span>}
         <span>Status</span>
         <span>Asset</span>
+        {canAssign && !compact && <span>Assigned to</span>}
       </div>
-      {workOrders.map((order) => (
-        <button className="workOrderRow" onClick={() => onOpen(order.id)} key={order.id}>
-          <strong>{order.id}</strong>
-          <span>{order.title}</span>
-          {!compact && <span>{order.recommended_action}</span>}
-          <span>{order.status}</span>
-          <span>{order.equipment_id}</span>
-        </button>
-      ))}
+      {workOrders.map((order) => {
+        const technicianOptions = technicians.some((technician) => technician.display_name === order.assigned_to)
+          ? technicians
+          : [
+              {
+                id: `current-${order.id}`,
+                email: '',
+                display_name: order.assigned_to,
+                role: 'maintenance_technician' as UserRole,
+                is_active: true,
+              },
+              ...technicians,
+            ]
+        return (
+          <div className="workOrderRow" key={order.id}>
+            <button className="workOrderCellButton workOrderIdButton" type="button" onClick={() => onOpen(order.id)}>
+              {order.id}
+            </button>
+            <button className="workOrderCellButton" type="button" onClick={() => onOpen(order.id)}>
+              {order.title}
+            </button>
+            {!compact && <span>{order.recommended_action}</span>}
+            <span>{order.status}</span>
+            <span>{order.equipment_id}</span>
+            {canAssign && !compact && (
+              <select
+                aria-label={`Assign ${order.id}`}
+                value={order.assigned_to}
+                onChange={(event) => onAssign?.(order.id, event.target.value)}
+              >
+                {technicianOptions.map((technician) => (
+                  <option value={technician.display_name} key={`${order.id}-${technician.id}`}>
+                    {technician.display_name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

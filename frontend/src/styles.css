@@ -1104,11 +1104,18 @@ h3 {
 
 .workOrderHead,
 .workOrderRow {
+  align-items: stretch;
   display: grid;
   gap: 10px;
   grid-template-columns: 130px minmax(180px, 1fr) minmax(220px, 1.3fr) 90px 120px;
   min-width: 760px;
   padding: 11px 14px;
+}
+
+.workOrderTable.assignable .workOrderHead,
+.workOrderTable.assignable .workOrderRow {
+  grid-template-columns: 120px minmax(170px, 0.9fr) minmax(210px, 1.1fr) 76px 100px minmax(190px, 0.8fr);
+  min-width: 930px;
 }
 
 .workOrderTable.compact .workOrderHead,
@@ -1128,7 +1135,44 @@ h3 {
   border: 0;
   border-top: 1px solid #edf1f3;
   color: #394956;
+  width: 100%;
+}
+
+.workOrderCellButton {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: #3974a6;
+  justify-content: flex-start;
+  min-height: 0;
+  padding: 0;
   text-align: left;
+}
+
+.workOrderCellButton:hover {
+  background: transparent;
+  box-shadow: none;
+  color: #174f58;
+  text-decoration: underline;
+}
+
+.workOrderIdButton {
+  font-weight: 900;
+}
+
+.workOrderRow select {
+  background: #ffffff;
+  border: 1px solid #cfd9de;
+  border-radius: 6px;
+  color: #1f2a31;
+  min-height: 34px;
+  padding: 4px 8px;
+  width: 100%;
+}
+
+.completeWorkOrderButton {
+  justify-content: center;
+  margin-top: 12px;
   width: 100%;
 }
 
@@ -1288,9 +1332,40 @@ h3 {
 }
 
 .workOrderLayout {
+  align-items: start;
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(420px, 1fr) minmax(480px, 1.2fr);
+  grid-template-columns: minmax(520px, 1.35fr) minmax(360px, 0.9fr);
+}
+
+.workOrderCenterColumn,
+.workOrderRightColumn {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.workOrderCenterColumn {
+  grid-column: 1;
+}
+
+.workOrderRightColumn {
+  grid-column: 2;
+}
+
+.workOrderQueuePanel,
+.workOrderAssistantPanel,
+.workOrderDetail {
+  min-width: 0;
+}
+
+.workOrderAssistantPanel {
+  min-height: 340px;
+}
+
+.workOrderDetail {
+  position: sticky;
+  top: 16px;
 }
 
 .statusTimeline {
@@ -1362,11 +1437,16 @@ h3 {
 .assistantComposer {
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
 .assistantComposer textarea {
-  grid-row: span 2;
+  min-height: 110px;
+  width: 100%;
+}
+
+.assistantComposer .textButton {
+  justify-content: center;
+  width: 100%;
 }
 
 .buttonRow {
@@ -1485,6 +1565,11 @@ h3 {
     grid-column: auto;
   }
 
+  .workOrderCenterColumn,
+  .workOrderRightColumn {
+    grid-column: auto;
+  }
+
   .queuePanel,
   .chartPanel,
   .assetVisual,
@@ -1504,12 +1589,21 @@ h3 {
     position: static;
   }
 
+  .workOrderDetail {
+    position: static;
+  }
+
   .workOrderHead,
   .workOrderRow,
   .workOrderTable.compact .workOrderHead,
   .workOrderTable.compact .workOrderRow {
     grid-template-columns: 92px minmax(0, 1fr) 74px;
     min-width: 0;
+  }
+
+  .workOrderTable.assignable .workOrderHead,
+  .workOrderTable.assignable .workOrderRow {
+    grid-template-columns: 92px minmax(0, 1fr) 74px minmax(140px, 0.8fr);
   }
 
   .workOrderHead span:nth-child(3),

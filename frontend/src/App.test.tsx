@@ -253,7 +253,7 @@ const workOrders = [
     failure_class: 'MECH',
     problem_code: 'BRGVIB',
     classification: 'Bearing vibration',
-    assigned_to: 'Maintenance Engineer',
+    assigned_to: 'Maintenance Technician',
     supervisor: 'Maintenance Supervisor',
     due_date: '2026-06-12T18:00:00+05:30',
     recommended_action: 'Reduce load if vibration persists and verify coupling alignment.',
@@ -321,6 +321,13 @@ function userFor(email = 'admin@plant.local') {
   }
 }
 
+function userFromRequest(init?: RequestInit) {
+  const headers = (init?.headers ?? {}) as Record<string, string>
+  const authorization = headers.Authorization ?? headers.authorization ?? ''
+  const email = authorization.startsWith('Bearer token-') ? authorization.replace('Bearer token-', '') : 'admin@plant.local'
+  return userFor(email)
+}
+
 async function signIn(email = 'admin@plant.local') {
   if (email !== 'admin@plant.local') {
     fireEvent.change(await screen.findByLabelText('Email'), { target: { value: email } })
@@ -376,6 +383,9 @@ beforeEach(() => {
           )
         }
         return Promise.resolve(new Response(JSON.stringify([userFor(), userFor('operator@plant.local')]), { status: 200 }))
+      }
+      if (url.endsWith('/api/users/technicians')) {
+        return Promise.resolve(new Response(JSON.stringify([userFor('technician@plant.local')]), { status: 200 }))
       }
       if (url.includes('/api/users/') && url.endsWith('/reset-password')) {
         return Promise.resolve(new Response(JSON.stringify(userFor('operator@plant.local')), { status: 200 }))
@@ -512,9 +522,15 @@ beforeEach(() => {
         }
         if (init?.method === 'PATCH') {
           const body = JSON.parse((init.body as string) ?? '{}')
-          return Promise.resolve(new Response(JSON.stringify({ ...workOrders[0], ...body }), { status: 200 }))
+          const workOrderId = url.match(/\/api\/work-orders\/([^/?]+)/)?.[1]
+          const original = workOrders.find((item) => item.id === workOrderId) ?? workOrders[0]
+          return Promise.resolve(new Response(JSON.stringify({ ...original, ...body }), { status: 200 }))
         }
-        return Promise.resolve(new Response(JSON.stringify(workOrders), { status: 200 }))
+        const requestUser = userFromRequest(init)
+        const rows = requestUser.role === 'maintenance_technician'
+          ? workOrders.filter((order) => order.assigned_to === requestUser.display_name)
+          : workOrders
+        return Promise.resolve(new Response(JSON.stringify(rows), { status: 200 }))
       }
       if (url.endsWith('/api/streaming/status')) {
         return Promise.resolve(
@@ -692,10 +708,23 @@ describe('Maintenance Wizard dashboard', () => {
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
     expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
+    const centerPane = screen.getByLabelText('Work order center pane')
+    const rightPane = screen.getByLabelText('Work order right pane')
     expect(screen.getByText('Work Order 8304')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Smith' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
-    expect(screen.getByText('Smith and Trinity are available to technician and supervisor accounts.')).toBeInTheDocument()
+    const assistantUnavailable = within(centerPane).getByText('Smith and Trinity are available to technician and supervisor accounts.')
+    const workOrdersHeading = screen.getByRole('heading', { name: 'WOs with follow up actions' })
+    expect(assistantUnavailable).toBeInTheDocument()
+    expect(Boolean(assistantUnavailable.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(within(rightPane).queryByText('Smith and Trinity are available to technician and supervisor accounts.')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Assign WO-8297'), { target: { value: 'Maintenance Technician' } })
+    await screen.findByText('WO-8297 assigned to Maintenance Technician')
+    const assignCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => url.toString().includes('/api/work-orders/WO-8297') && init?.method === 'PATCH')
+    expect(JSON.parse((assignCall?.[1] as RequestInit).body as string)).toEqual({ assigned_to: 'Maintenance Technician' })
   })
 
   it('shows only the technician LLM assistant to technician users', async () => {
@@ -705,9 +734,17 @@ describe('Maintenance Wizard dashboard', () => {
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
     expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Smith' })).toBeInTheDocument()
-    expect(screen.getByText('Technician AI assistant with shared LLM configuration')).toBeInTheDocument()
+    const centerPane = screen.getByLabelText('Work order center pane')
+    const rightPane = screen.getByLabelText('Work order right pane')
+    const smithHeading = within(centerPane).getByRole('heading', { name: 'Smith' })
+    const workOrdersHeading = screen.getByRole('heading', { name: 'WOs with follow up actions' })
+    expect(smithHeading).toBeInTheDocument()
+    expect(Boolean(smithHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(within(centerPane).getByText('Technician AI assistant with shared LLM configuration')).toBeInTheDocument()
+    expect(within(rightPane).queryByRole('heading', { name: 'Smith' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
+    expect(within(centerPane).getByRole('button', { name: 'WO-8304' })).toBeInTheDocument()
+    expect(within(centerPane).queryByRole('button', { name: 'WO-8297' })).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Technician observation'), {
       target: { value: 'Connections 3 and 5 were loose.' },
@@ -719,6 +756,9 @@ describe('Maintenance Wizard dashboard', () => {
     expect(await screen.findByText('Verify torque on bolted connections.')).toBeInTheDocument()
     expect(screen.getByText(/Connections were tightened to spec./)).toBeInTheDocument()
     expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
+    const submitCompleted = screen.getByRole('button', { name: 'Submit completed work' })
+    const workOrderButton = within(centerPane).getByRole('button', { name: 'WO-8304' })
+    expect(Boolean(workOrderButton.compareDocumentPosition(submitCompleted) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   })
 
   it('shows only the supervisor LLM assistant to supervisor users', async () => {
@@ -728,9 +768,16 @@ describe('Maintenance Wizard dashboard', () => {
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
     expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
+    const centerPane = screen.getByLabelText('Work order center pane')
+    const rightPane = screen.getByLabelText('Work order right pane')
     expect(screen.queryByRole('heading', { name: 'Smith' })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Trinity' })).toBeInTheDocument()
-    expect(screen.getByText('Supervisor AI assistant with shared LLM configuration')).toBeInTheDocument()
+    const trinityHeading = within(centerPane).getByRole('heading', { name: 'Trinity' })
+    const workOrdersHeading = screen.getByRole('heading', { name: 'WOs with follow up actions' })
+    expect(trinityHeading).toBeInTheDocument()
+    expect(Boolean(trinityHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(within(centerPane).getByText('Supervisor AI assistant with shared LLM configuration')).toBeInTheDocument()
+    expect(within(rightPane).queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Assign WO-8304')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(within(screen.getByLabelText('Trinity supervisor chat')).getByText('Summarize follow-up actions for completed work orders.')).toBeInTheDocument()

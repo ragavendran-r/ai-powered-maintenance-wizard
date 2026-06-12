@@ -471,6 +471,7 @@ export const api = {
   me: () => request<AuthUser>('/api/auth/me'),
   logout: () => request<{ status: string }>('/api/auth/logout', { method: 'POST' }),
   users: () => request<AuthUser[]>('/api/users'),
+  technicians: () => request<AuthUser[]>('/api/users/technicians'),
   createUser: (payload: UserCreateRequest) =>
     request<AuthUser>('/api/users', {
       method: 'POST',
