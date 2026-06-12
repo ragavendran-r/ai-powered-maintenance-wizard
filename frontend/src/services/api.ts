@@ -144,6 +144,19 @@ export interface ChatResponse {
   evidence: Evidence[]
 }
 
+export interface NeoTable {
+  title: string
+  columns: string[]
+  rows: Record<string, string | number | boolean | null>[]
+}
+
+export interface NeoChatResponse {
+  answer: string
+  table?: NeoTable | null
+  used_live_provider: boolean
+  provider: string
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 const AUTH_SESSION_KEY = 'maintenance_wizard_auth_session'
 
@@ -426,6 +439,11 @@ export const api = {
     request<ChatResponse>('/api/chat', {
       method: 'POST',
       body: JSON.stringify({ equipment_id: equipmentId, message }),
+    }),
+  neoChat: (message: string, history: { role: 'user' | 'assistant'; content: string }[] = []) =>
+    request<NeoChatResponse>('/api/neo/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message, history }),
     }),
   ingestDocumentFile: (input: { file: File; sourceType: string; equipmentId?: string; title?: string }) => {
     const body = new FormData()

@@ -34,6 +34,8 @@ import {
   type AuthUser,
   type DashboardSummary,
   type HealthSummary,
+  type NeoChatResponse,
+  type NeoTable,
   type Recommendation,
   type SupervisorAssistantResponse,
   type TechnicianAssistantResponse,
@@ -199,6 +201,15 @@ export function App() {
   ])
   const [question, setQuestion] = useState('Why is the hot strip mill main drive vibrating?')
   const [answer, setAnswer] = useState('')
+  const [neoQuestion, setNeoQuestion] = useState('Show work orders needing follow-up')
+  const [neoTable, setNeoTable] = useState<NeoTable | null>(null)
+  const [neoMessages, setNeoMessages] = useState<AssistantTurn[]>([
+    {
+      id: 'neo-welcome',
+      role: 'assistant',
+      content: 'I’m Neo. Ask me for assets, work orders, or users and I’ll update the dashboard table.',
+    },
+  ])
   const [apiState, setApiState] = useState<'connected' | 'fallback'>('fallback')
   const [ingestSourceType, setIngestSourceType] = useState('sop')
   const [ingestTitle, setIngestTitle] = useState('')
@@ -392,6 +403,43 @@ export function App() {
         setApiState('fallback')
         setAnswer('Backend is not reachable yet. The planned API will answer this with cited SOP, manual, alert, and maintenance history evidence.')
       })
+  }
+
+  async function sendNeoQuestion() {
+    const prompt = neoQuestion.trim() || 'Show assets'
+    setNeoMessages((turns) => [
+      ...turns,
+      { id: assistantTurnId('neo-user'), role: 'user', content: prompt },
+    ])
+    try {
+      const history = neoMessages.map((turn) => ({ role: turn.role, content: turn.content }))
+      const response = await api.neoChat(prompt, history)
+      setNeoTable(response.table ?? null)
+      appendNeoResponse(response)
+      setNeoQuestion('')
+    } catch {
+      const fallback: NeoChatResponse = {
+        answer: 'Neo could not reach the assistant service. Try assets, work orders, or users again after the backend reconnects.',
+        table: null,
+        used_live_provider: false,
+        provider: 'fallback',
+      }
+      appendNeoResponse(fallback)
+    }
+  }
+
+  function appendNeoResponse(response: NeoChatResponse) {
+    setNeoMessages((turns) => [
+      ...turns,
+      {
+        id: assistantTurnId('neo-assistant'),
+        role: 'assistant',
+        content: response.answer,
+        details: response.table ? [`Updated table: ${response.table.title}`, `${response.table.rows.length} row(s)`] : undefined,
+        provider: response.provider,
+        usedLiveProvider: response.used_live_provider,
+      },
+    ])
   }
 
   function sendFeedback(status: 'accepted' | 'rejected' | 'corrected') {
@@ -796,59 +844,106 @@ export function App() {
   )
 
   const operationalDashboardView = (
-    <section className="dashboardGrid">
-      <KpiCard
-        title="Assets at risk"
-        value={`${dashboardMetrics.assetsAtRisk}`}
-        unit="assets"
-        detail="Key contributors: sensor trends, incomplete maintenance, and health score."
-        ai="AI explained: asset risk uses current health, alert severity, work status, and anomaly context."
-      />
-      <KpiCard title="Overdue emergency work" value={`${dashboardMetrics.overdueEmergency}`} unit="work orders" detail="Priority 1 open work requiring supervisor attention." />
-      <KpiCard title="PM Work orders overdue" value={`${dashboardMetrics.pmOverdue}`} unit="work orders" detail="Preventive maintenance items waiting on material or approval." />
-      <KpiCard title="Equipment performance" value={`${dashboardMetrics.equipmentPerformance}`} unit="%" detail="Average health across tracked steel-plant assets." />
-      <section className="detailPanel queuePanel">
-        <div className="sectionHeader">
-          <Search size={18} />
-          <h2>Work queues</h2>
-        </div>
-        <WorkOrderTable
-          workOrders={workOrders}
-          onOpen={(id) => {
-            setSelectedWorkOrderId(id)
-            setActiveView('workOrders')
-          }}
+    <section className="dashboardWithNeo">
+      <div className="dashboardGrid">
+        <KpiCard
+          title="Assets at risk"
+          value={`${dashboardMetrics.assetsAtRisk}`}
+          unit="assets"
+          detail="Key contributors: sensor trends, incomplete maintenance, and health score."
+          ai="AI explained: asset risk uses current health, alert severity, work status, and anomaly context."
         />
-      </section>
-      <section className="detailPanel chartPanel">
-        <div className="sectionHeader">
-          <BarChart3 size={18} />
-          <h2>Equipment efficiency</h2>
-        </div>
-        <BarChart assets={dashboard.highest_risk_equipment} />
-      </section>
-      <section className="detailPanel">
-        <h2>SLA compliance by incident priority</h2>
-        <MiniBars values={[92, 78, 64, 88]} />
-      </section>
-      <section className="detailPanel">
-        <h2>Favorites</h2>
-        <button className="linkButton" onClick={() => setActiveView('workOrders')}>Work Orders</button>
-        <button className="linkButton" onClick={() => openAsset(selectedEquipment)}>Selected Asset</button>
-      </section>
-      <section className="detailPanel">
-        <h2>Quick actions</h2>
-        <button className="textButton" onClick={() => createWorkOrderFromContext()}>
-          <Briefcase size={16} />
-          Create work order
-        </button>
-        {canSupervisorAssistant && (
-          <button className="textButton" onClick={() => runSupervisorAssistant()}>
-            <Bot size={16} />
-            Review follow-ups
+        <KpiCard title="Overdue emergency work" value={`${dashboardMetrics.overdueEmergency}`} unit="work orders" detail="Priority 1 open work requiring supervisor attention." />
+        <KpiCard title="PM Work orders overdue" value={`${dashboardMetrics.pmOverdue}`} unit="work orders" detail="Preventive maintenance items waiting on material or approval." />
+        <KpiCard title="Equipment performance" value={`${dashboardMetrics.equipmentPerformance}`} unit="%" detail="Average health across tracked steel-plant assets." />
+        <section className="detailPanel neoResultPanel">
+          <div className="sectionHeader">
+            <Sparkles size={18} />
+            <h2>{neoTable?.title ?? 'Neo Results'}</h2>
+          </div>
+          {neoTable ? <NeoResultTable table={neoTable} /> : <p className="emptyState">Ask Neo to show assets, work orders, or users. Results appear here.</p>}
+        </section>
+        <section className="detailPanel queuePanel">
+          <div className="sectionHeader">
+            <Search size={18} />
+            <h2>Work queues</h2>
+          </div>
+          <WorkOrderTable
+            workOrders={workOrders}
+            onOpen={(id) => {
+              setSelectedWorkOrderId(id)
+              setActiveView('workOrders')
+            }}
+          />
+        </section>
+        <section className="detailPanel chartPanel">
+          <div className="sectionHeader">
+            <BarChart3 size={18} />
+            <h2>Equipment efficiency</h2>
+          </div>
+          <BarChart assets={dashboard.highest_risk_equipment} />
+        </section>
+        <section className="detailPanel">
+          <h2>SLA compliance by incident priority</h2>
+          <MiniBars values={[92, 78, 64, 88]} />
+        </section>
+        <section className="detailPanel">
+          <h2>Favorites</h2>
+          <button className="linkButton" onClick={() => setActiveView('workOrders')}>Work Orders</button>
+          <button className="linkButton" onClick={() => openAsset(selectedEquipment)}>Selected Asset</button>
+        </section>
+        <section className="detailPanel">
+          <h2>Quick actions</h2>
+          <button className="textButton" onClick={() => createWorkOrderFromContext()}>
+            <Briefcase size={16} />
+            Create work order
           </button>
-        )}
-      </section>
+          {canSupervisorAssistant && (
+            <button className="textButton" onClick={() => runSupervisorAssistant()}>
+              <Bot size={16} />
+              Review follow-ups
+            </button>
+          )}
+        </section>
+      </div>
+      <aside className="neoPanel" aria-label="Neo dashboard assistant">
+        <div className="neoHeader">
+          <span className="neoAvatar">N</span>
+          <div>
+            <h2>Neo</h2>
+            <small>Dashboard AI assistant</small>
+          </div>
+        </div>
+        <div className="neoTranscript" aria-label="Neo chat transcript">
+          {neoMessages.map((turn) => (
+            <div className={`chatBubble ${turn.role}`} key={turn.id}>
+              <span>{turn.role === 'assistant' ? 'Neo' : 'You'}</span>
+              {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
+              <p>{turn.content}</p>
+              {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+            </div>
+          ))}
+        </div>
+        <div className="neoPromptChips" aria-label="Neo prompt shortcuts">
+          <button type="button" onClick={() => setNeoQuestion('Show assets at risk')}>Assets</button>
+          <button type="button" onClick={() => setNeoQuestion('Show work orders needing follow-up')}>Work orders</button>
+          <button type="button" onClick={() => setNeoQuestion('Show users and roles')}>User table</button>
+        </div>
+        <form className="neoComposer" onSubmit={(event) => {
+          event.preventDefault()
+          sendNeoQuestion()
+        }}>
+          <textarea
+            aria-label="Ask Neo"
+            value={neoQuestion}
+            onChange={(event) => setNeoQuestion(event.target.value)}
+          />
+          <button className="textButton" type="submit">
+            <Send size={16} />
+            Send
+          </button>
+        </form>
+      </aside>
     </section>
   )
 
@@ -1423,6 +1518,21 @@ function KpiCard({ title, value, unit, detail, ai }: { title: string; value: str
       <small>{detail}</small>
       {open && <div className="aiPopover">{ai}</div>}
     </section>
+  )
+}
+
+function NeoResultTable({ table }: { table: NeoTable }) {
+  return (
+    <div className="neoResultTable" aria-label={`${table.title} results table`}>
+      <div className="neoResultHead" style={{ gridTemplateColumns: `repeat(${table.columns.length}, minmax(120px, 1fr))` }}>
+        {table.columns.map((column) => <span key={column}>{column}</span>)}
+      </div>
+      {table.rows.map((row, index) => (
+        <div className="neoResultRow" style={{ gridTemplateColumns: `repeat(${table.columns.length}, minmax(120px, 1fr))` }} key={`${table.title}-${index}`}>
+          {table.columns.map((column) => <span key={column}>{String(row[column] ?? '')}</span>)}
+        </div>
+      ))}
+    </div>
   )
 }
 
