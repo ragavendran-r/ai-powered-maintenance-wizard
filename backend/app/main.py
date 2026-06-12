@@ -17,6 +17,7 @@ from app.core.auth import (
     TECHNICIAN_ASSISTANT_ROLES,
     STREAMING_STATUS_ROLES,
     WORK_ORDER_ACTION_ROLES,
+    WORK_ORDER_ASSIGNMENT_ROLES,
     get_current_user,
     require_roles,
 )
@@ -147,6 +148,19 @@ def logout(current_user: UserPublic = Depends(get_current_user)) -> dict[str, st
 @app.get("/api/users", response_model=list[UserPublic], dependencies=[Depends(require_roles(*ADMIN_ROLES))])
 def list_users():
     return [UserPublic(**user) for user in repository.list_users()]
+
+
+@app.get(
+    "/api/users/technicians",
+    response_model=list[UserPublic],
+    dependencies=[Depends(require_roles(*WORK_ORDER_ASSIGNMENT_ROLES))],
+)
+def list_technicians():
+    return [
+        UserPublic(**user)
+        for user in repository.list_users()
+        if user["role"] == "maintenance_technician" and user["is_active"]
+    ]
 
 
 @app.post(
@@ -292,9 +306,18 @@ def get_maintenance_labels(equipment_id: str):
     return MaintenanceLabelsResponse(equipment_id=equipment_id, labels=stored_labels(equipment_id))
 
 
-@app.get("/api/work-orders", response_model=list[WorkOrder], dependencies=[Depends(require_roles(*READ_ROLES))])
-def list_work_orders(equipment_id: Optional[str] = None, follow_up_only: bool = False):
-    return repository.list_work_orders(equipment_id=equipment_id, follow_up_only=follow_up_only)
+@app.get("/api/work-orders", response_model=list[WorkOrder])
+def list_work_orders(
+    equipment_id: Optional[str] = None,
+    follow_up_only: bool = False,
+    current_user: UserPublic = Depends(require_roles(*READ_ROLES)),
+):
+    assigned_to = current_user.display_name if current_user.role == "maintenance_technician" else None
+    return repository.list_work_orders(
+        equipment_id=equipment_id,
+        assigned_to=assigned_to,
+        follow_up_only=follow_up_only,
+    )
 
 
 @app.post(

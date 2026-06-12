@@ -217,6 +217,30 @@ def test_work_orders_are_seeded_and_filter_by_asset():
     assert payload[0]["logs"] == []
 
 
+def test_technician_sees_only_assigned_work_orders():
+    headers = auth_headers("technician@plant.local")
+
+    response = client.get("/api/work-orders", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    assert {item["id"] for item in payload} == {"WO-8304"}
+    assert {item["assigned_to"] for item in payload} == {"Maintenance Technician"}
+
+
+def test_admin_and_supervisor_can_list_assignment_technicians():
+    admin_response = client.get("/api/users/technicians", headers=auth_headers())
+    supervisor_response = client.get("/api/users/technicians", headers=auth_headers("supervisor@plant.local"))
+    technician_response = client.get("/api/users/technicians", headers=auth_headers("technician@plant.local"))
+
+    assert admin_response.status_code == 200
+    assert supervisor_response.status_code == 200
+    assert technician_response.status_code == 403
+    assert [user["role"] for user in admin_response.json()] == ["maintenance_technician"]
+    assert [user["display_name"] for user in supervisor_response.json()] == ["Maintenance Technician"]
+
+
 def test_create_update_and_log_work_order():
     headers = auth_headers("planner@plant.local")
 
