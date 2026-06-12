@@ -2,6 +2,8 @@ export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export type UserRole =
   | 'admin'
   | 'maintenance_engineer'
+  | 'maintenance_technician'
+  | 'maintenance_supervisor'
   | 'reliability_engineer'
   | 'planner'
   | 'operator'

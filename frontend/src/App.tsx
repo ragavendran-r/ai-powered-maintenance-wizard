@@ -50,6 +50,8 @@ type AssetTab = 'summary' | 'maintenance' | 'performance' | 'reliability' | 'doc
 const roleLabels: Record<UserRole, string> = {
   admin: 'Admin',
   maintenance_engineer: 'Maintenance Engineer',
+  maintenance_technician: 'Maintenance Technician',
+  maintenance_supervisor: 'Maintenance Supervisor',
   reliability_engineer: 'Reliability Engineer',
   planner: 'Planner',
   operator: 'Operator',
@@ -59,6 +61,8 @@ const roleLabels: Record<UserRole, string> = {
 const roleOptions: UserRole[] = [
   'admin',
   'maintenance_engineer',
+  'maintenance_technician',
+  'maintenance_supervisor',
   'reliability_engineer',
   'planner',
   'operator',
@@ -66,6 +70,8 @@ const roleOptions: UserRole[] = [
 ]
 
 const decisionRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer', 'planner']
+const technicianAssistantRoles: UserRole[] = ['maintenance_technician']
+const supervisorAssistantRoles: UserRole[] = ['maintenance_supervisor']
 const feedbackRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer']
 const ingestionRoles: UserRole[] = ['admin', 'reliability_engineer']
 const streamingRoles: UserRole[] = ['admin', 'reliability_engineer']
@@ -191,6 +197,8 @@ export function App() {
 
   const currentUser = session?.user
   const canDecision = hasRole(currentUser, decisionRoles)
+  const canTechnicianAssistant = hasRole(currentUser, technicianAssistantRoles)
+  const canSupervisorAssistant = hasRole(currentUser, supervisorAssistantRoles)
   const canFeedback = hasRole(currentUser, feedbackRoles)
   const canIngest = hasRole(currentUser, ingestionRoles)
   const canStreaming = hasRole(currentUser, streamingRoles)
@@ -854,50 +862,71 @@ export function App() {
                 <dd>{formatDate(selectedWorkOrder.due_date)}</dd>
               </dl>
             </div>
-            <div className="assistantSplit">
-              <section className="assistantBox technician">
-                <div className="sectionHeader">
-                  <Bot size={18} />
-                  <h2>Technician AI Assistant</h2>
-                </div>
-                <p>{technicianAssistant?.next_prompt ?? 'Let’s start the work order. Do you observe any problems?'}</p>
-                <textarea
-                  aria-label="Technician observation"
-                  value={technicianObservation}
-                  onChange={(event) => setTechnicianObservation(event.target.value)}
-                />
-                <div className="buttonRow">
-                  <button className="textButton" onClick={runTechnicianAssistant}>Get live directions</button>
-                  <button className="textButton" onClick={completeSelectedWorkOrder}>Submit completed work</button>
-                </div>
-                {technicianAssistant && (
-                  <div className="assistantTranscript">
-                    <strong>Live directions</strong>
-                    <ul>{technicianAssistant.live_directions.map((item) => <li key={item}>{item}</li>)}</ul>
-                    <strong>Summary</strong>
-                    <p>{technicianAssistant.completion_summary}</p>
+            <div className={canTechnicianAssistant && canSupervisorAssistant ? 'assistantSplit' : 'assistantSplit singleAssistant'}>
+              {canTechnicianAssistant && (
+                <section className="assistantBox technician">
+                  <div className="sectionHeader">
+                    <Bot size={18} />
+                    <div>
+                      <h2>Technician AI Assistant</h2>
+                      <small>LLM work-order guidance for assigned technicians</small>
+                    </div>
                   </div>
-                )}
-              </section>
-              <section className="assistantBox supervisor">
-                <div className="sectionHeader">
-                  <Bot size={18} />
-                  <h2>Supervisor AI Assistant</h2>
-                </div>
-                <textarea
-                  aria-label="Supervisor question"
-                  value={supervisorQuestion}
-                  onChange={(event) => setSupervisorQuestion(event.target.value)}
-                />
-                <button className="textButton" onClick={() => runSupervisorAssistant(selectedWorkOrder.id)}>Review status</button>
-                {supervisorAssistant && (
-                  <div className="assistantTranscript">
-                    <p>{supervisorAssistant.summary}</p>
-                    <ul>{supervisorAssistant.follow_up_actions.map((item) => <li key={item}>{item}</li>)}</ul>
-                    {supervisorAssistant.draft_work_order && <p>Draft: {supervisorAssistant.draft_work_order.title}</p>}
+                  <p>{technicianAssistant?.next_prompt ?? 'Let’s start the work order. Do you observe any problems?'}</p>
+                  <textarea
+                    aria-label="Technician observation"
+                    value={technicianObservation}
+                    onChange={(event) => setTechnicianObservation(event.target.value)}
+                  />
+                  <div className="buttonRow">
+                    <button className="textButton" onClick={runTechnicianAssistant}>Get live directions</button>
+                    <button className="textButton" onClick={completeSelectedWorkOrder}>Submit completed work</button>
                   </div>
-                )}
-              </section>
+                  {technicianAssistant && (
+                    <div className="assistantTranscript">
+                      <span className="rolePill">
+                        {technicianAssistant.used_live_provider ? 'Live LLM' : 'LLM fallback'} · {technicianAssistant.provider}
+                      </span>
+                      <strong>Live directions</strong>
+                      <ul>{technicianAssistant.live_directions.map((item) => <li key={item}>{item}</li>)}</ul>
+                      <strong>Summary</strong>
+                      <p>{technicianAssistant.completion_summary}</p>
+                    </div>
+                  )}
+                </section>
+              )}
+              {canSupervisorAssistant && (
+                <section className="assistantBox supervisor">
+                  <div className="sectionHeader">
+                    <Bot size={18} />
+                    <div>
+                      <h2>Supervisor AI Assistant</h2>
+                      <small>LLM follow-up review for maintenance supervisors</small>
+                    </div>
+                  </div>
+                  <textarea
+                    aria-label="Supervisor question"
+                    value={supervisorQuestion}
+                    onChange={(event) => setSupervisorQuestion(event.target.value)}
+                  />
+                  <button className="textButton" onClick={() => runSupervisorAssistant(selectedWorkOrder.id)}>Review status</button>
+                  {supervisorAssistant && (
+                    <div className="assistantTranscript">
+                      <span className="rolePill">
+                        {supervisorAssistant.used_live_provider ? 'Live LLM' : 'LLM fallback'} · {supervisorAssistant.provider}
+                      </span>
+                      <p>{supervisorAssistant.summary}</p>
+                      <ul>{supervisorAssistant.follow_up_actions.map((item) => <li key={item}>{item}</li>)}</ul>
+                      {supervisorAssistant.draft_work_order && <p>Draft: {supervisorAssistant.draft_work_order.title}</p>}
+                    </div>
+                  )}
+                </section>
+              )}
+              {!canTechnicianAssistant && !canSupervisorAssistant && (
+                <section className="assistantBox">
+                  <p className="emptyState">Role-specific AI assistants are available to technician and supervisor accounts.</p>
+                </section>
+              )}
             </div>
           </>
         ) : (

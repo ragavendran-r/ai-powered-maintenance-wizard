@@ -74,7 +74,7 @@ flowchart LR
 ## Components
 
 - React frontend: operational dashboard, dedicated asset detail views, work-order queue/detail/execution/review screens, left-nav ingestion view, maintenance chat, recommendation, report, and detailed feedback views.
-- Auth/RBAC layer: local login, JWT validation, current-user context, role guards, and role-aware navigation for admin, maintenance engineer, reliability engineer, planner, operator, and API-only IoT service users.
+- Auth/RBAC layer: local login, JWT validation, current-user context, role guards, and role-aware navigation for admin, maintenance engineer, maintenance technician, maintenance supervisor, reliability engineer, planner, operator, and API-only IoT service users.
 - FastAPI backend: HTTP API layer for dashboard data, work orders, role-specific assistants, ingestion, diagnosis, prediction, chat, reports, and feedback.
 - Async IoT streaming ingestion: optional NATS JetStream durable consumer for plant applications, PLC gateways, and historians that publish alerts, sensor readings, equipment, spares, and maintenance events.
 - Data services: seed SQLite from five sample steel-plant assets and expose repository functions for equipment, alerts, sensor readings, spares, maintenance history, documents, document chunks, and feedback.
@@ -85,7 +85,7 @@ flowchart LR
 - Anomaly service: rolling-baseline and z-score analysis over persisted sensor readings, plus optional LLM/SLM context classification and inspection steps.
 - Maintenance labeling service: optional LLM/SLM normalization of maintenance history and feedback into failure-mode, component, root-cause, action-class, outcome, and signal-hint labels.
 - Recommendation service: combines retrieved evidence, risk scoring, prediction, normalized labels, prior engineer feedback, reasoning explanations, and optional LLM-adapter context.
-- Work-order assistant service: combines persisted work-order state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM structured output to suggest live directions, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work.
+- Work-order assistant service: combines persisted work-order state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM structured output to suggest live directions, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work. Technician assistance is restricted to `maintenance_technician`; supervisor assistance is restricted to `maintenance_supervisor`.
 - Report service: formats recommendations as structured Markdown for supervisor handoff or demo export, including learning notes.
 - LLM adapter: common structured interface for mock, OpenAI-compatible chat completions, and Ollama chat providers.
 
@@ -118,8 +118,8 @@ flowchart LR
   - `GET /api/work-orders/{work_order_id}` returns detail and work logs.
   - `PATCH /api/work-orders/{work_order_id}` updates lifecycle status, assignment, problem code, follow-up, and completion summary.
   - `POST /api/work-orders/{work_order_id}/logs` appends technician, supervisor, or assistant log entries.
-  - `POST /api/work-orders/technician-assist` returns live directions, safety reminders, recommended actions, problem-code suggestions, and completion summary.
-  - `POST /api/work-orders/supervisor-assist` summarizes queue/follow-up risk and can draft a follow-up work order.
+  - `POST /api/work-orders/technician-assist` returns LLM-backed live directions, safety reminders, recommended actions, problem-code suggestions, and completion summary for technician users only.
+  - `POST /api/work-orders/supervisor-assist` summarizes queue/follow-up risk and can draft a follow-up work order for supervisor users only.
 - Reporting and learning:
   - `GET /api/reports/{equipment_id}/markdown` exports a structured maintenance decision report.
   - `POST /api/recommendations/{recommendation_id}/feedback` stores engineer feedback with equipment id, status, corrected diagnosis, actual root cause, action taken, outcome, and notes.

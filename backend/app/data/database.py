@@ -24,6 +24,18 @@ DEMO_USERS = [
         "role": "maintenance_engineer",
     },
     {
+        "id": "USER-TECHNICIAN",
+        "email": "technician@plant.local",
+        "display_name": "Maintenance Technician",
+        "role": "maintenance_technician",
+    },
+    {
+        "id": "USER-SUPERVISOR",
+        "email": "supervisor@plant.local",
+        "display_name": "Maintenance Supervisor",
+        "role": "maintenance_supervisor",
+    },
+    {
         "id": "USER-RELIABILITY",
         "email": "reliability@plant.local",
         "display_name": "Reliability Engineer",

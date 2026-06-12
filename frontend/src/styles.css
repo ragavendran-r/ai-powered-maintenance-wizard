@@ -1100,6 +1100,10 @@ h3 {
   grid-template-columns: 1fr 1fr;
 }
 
+.assistantSplit.singleAssistant {
+  grid-template-columns: 1fr;
+}
+
 .assistantBox {
   background: #f7f9fa;
   border: 1px solid #dce5ea;
