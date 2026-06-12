@@ -8,6 +8,7 @@ Use this file for durable product and engineering rules. Use `docs/hooks.md` for
 - Do not push directly to `main`.
 - Work intended for `main` must be committed on a feature branch and raised as a pull request targeting `main`.
 - Generated SQLite databases are runtime artifacts, not source artifacts.
+- Pull request descriptions must not include verification steps, test commands, screenshots, logs, local file paths, or local image paths.
 
 ## Verification
 

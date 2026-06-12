@@ -66,10 +66,10 @@ Git history is not available in this workspace, so no existing convention can be
 Pull requests should include:
 
 - A short summary of the change.
-- Tests run, with exact commands.
 - Linked issues or task IDs when available.
-- Screenshots or logs for UI or workflow changes.
 - Notes about configuration, migrations, or follow-up work.
+
+Do not include verification steps, test commands, screenshots, logs, local file paths, or local image paths in pull request descriptions. Keep verification details in the final Codex response, `docs/progress.md`, or local notes instead.
 
 ## Security & Configuration Tips
 
