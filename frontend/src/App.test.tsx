@@ -55,6 +55,8 @@ const sampleFiles = [
   },
 ]
 
+let neoResponseDelayMs = 0
+
 const dashboard = {
   equipment_count: 5,
   active_alert_count: 5,
@@ -296,6 +298,7 @@ async function signIn(email = 'admin@plant.local') {
 }
 
 beforeEach(() => {
+  neoResponseDelayMs = 0
   window.sessionStorage.clear()
   api.setSession(null)
   api.onUnauthorized(null)
@@ -351,24 +354,28 @@ beforeEach(() => {
         return Promise.resolve(new Response(JSON.stringify(dashboard), { status: 200 }))
       }
       if (url.endsWith('/api/neo/chat')) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              answer: 'Neo found work orders that need attention.',
-              table: {
-                title: 'Work Orders',
-                columns: ['Work order', 'Asset', 'Status', 'Priority'],
-                rows: [
-                  { 'Work order': 'WO-8304', Asset: 'RM-DRIVE-01', Status: 'INPRG', Priority: 1 },
-                  { 'Work order': 'WO-8297', Asset: 'OH-CRANE-05', Status: 'COMP', Priority: 1 },
-                ],
-              },
-              used_live_provider: false,
-              provider: 'mock',
-            }),
-            { status: 200 },
-          ),
+        const response = new Response(
+          JSON.stringify({
+            answer: 'Neo found work orders that need attention. WO-8304 and WO-8297 require follow-up.',
+            table: {
+              title: 'Work Orders',
+              columns: ['Work order', 'Asset', 'Status', 'Priority'],
+              rows: [
+                { 'Work order': 'WO-8304', Asset: 'RM-DRIVE-01', Status: 'INPRG', Priority: 1 },
+                { 'Work order': 'WO-8297', Asset: 'OH-CRANE-05', Status: 'COMP', Priority: 1 },
+              ],
+            },
+            used_live_provider: false,
+            provider: 'mock',
+          }),
+          { status: 200 },
         )
+        if (neoResponseDelayMs > 0) {
+          return new Promise((resolve) => {
+            window.setTimeout(() => resolve(response), neoResponseDelayMs)
+          })
+        }
+        return Promise.resolve(response)
       }
       if (url.includes('/api/work-orders/technician-assist')) {
         return Promise.resolve(
@@ -502,6 +509,7 @@ describe('Maintenance Wizard dashboard', () => {
   })
 
   it('lets Neo update the dashboard center table for read-only users', async () => {
+    neoResponseDelayMs = 500
     render(<App />)
     await signIn('operator@plant.local')
 
@@ -509,11 +517,14 @@ describe('Maintenance Wizard dashboard', () => {
     fireEvent.change(screen.getByLabelText('Ask Neo'), { target: { value: 'Show work orders needing follow-up' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-    expect(await screen.findByText('Neo found work orders that need attention.')).toBeInTheDocument()
+    expect(await screen.findByText(/Thinking/)).toBeInTheDocument()
+    expect(await screen.findByText('I found 2 rows for Work Orders. The table is updated in the dashboard.')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Work Orders' })).toBeInTheDocument()
     const neoResultTable = screen.getByLabelText('Work Orders results table')
     expect(within(neoResultTable).getByText('WO-8304')).toBeInTheDocument()
     expect(within(neoResultTable).getByText('OH-CRANE-05')).toBeInTheDocument()
+    const transcript = screen.getByLabelText('Neo chat transcript')
+    expect(within(transcript).queryByText('Neo found work orders that need attention. WO-8304 and WO-8297 require follow-up.')).not.toBeInTheDocument()
   })
 
   it('runs diagnosis and exposes report export action', async () => {
