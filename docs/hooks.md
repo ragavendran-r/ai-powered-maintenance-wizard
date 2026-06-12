@@ -19,6 +19,8 @@ Required behavior:
 - If on `main` or `master`, create or switch to a feature branch before committing.
 - Do not push directly to `main` or `master`.
 - Push the feature branch and open a pull request targeting `main`.
+- Keep pull request descriptions concise: include summary, linked task or issue IDs if any, and configuration/migration/follow-up notes if relevant.
+- Do not add verification steps, test commands, screenshots, logs, local file paths, or local image paths to pull request descriptions.
 
 Suggested local pre-commit hook:
 
