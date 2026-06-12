@@ -167,6 +167,12 @@ function assistantTurnId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+function assistantProviderLabel(turn: AssistantTurn) {
+  if (!turn.provider) return ''
+  if (turn.provider === 'deterministic') return 'Dashboard data'
+  return `${turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · ${turn.provider}`
+}
+
 export function App() {
   const [session, setSession] = useState<AuthSession | null>(() => api.restoreSession())
   const [authReady, setAuthReady] = useState(false)
@@ -853,114 +859,115 @@ export function App() {
 
   const operationalDashboardView = (
     <section className="dashboardWithNeo">
-      <div className="dashboardGrid">
+      <div className="dashboardKpiBand" aria-label="Dashboard KPI summary">
         <KpiCard
+          className="kpiRisk"
           title="Assets at risk"
           value={`${dashboardMetrics.assetsAtRisk}`}
           unit="assets"
           detail="Key contributors: sensor trends, incomplete maintenance, and health score."
           ai="AI explained: asset risk uses current health, alert severity, work status, and anomaly context."
         />
-        <KpiCard title="Overdue emergency work" value={`${dashboardMetrics.overdueEmergency}`} unit="work orders" detail="Priority 1 open work requiring supervisor attention." />
-        <KpiCard title="PM Work orders overdue" value={`${dashboardMetrics.pmOverdue}`} unit="work orders" detail="Preventive maintenance items waiting on material or approval." />
-        <KpiCard title="Equipment performance" value={`${dashboardMetrics.equipmentPerformance}`} unit="%" detail="Average health across tracked steel-plant assets." />
-        <section className="detailPanel queuePanel">
-          <div className="sectionHeader">
-            <Search size={18} />
-            <h2>Work queues</h2>
-          </div>
-          <WorkOrderTable
-            workOrders={workOrders}
-            onOpen={(id) => {
-              setSelectedWorkOrderId(id)
-              setActiveView('workOrders')
-            }}
-          />
-        </section>
-        <section className="detailPanel">
-          <h2>SLA compliance by incident priority</h2>
-          <MiniBars values={[92, 78, 64, 88]} />
-        </section>
-        <section className="detailPanel">
-          <h2>Favorites</h2>
-          <button className="linkButton" onClick={() => setActiveView('workOrders')}>Work Orders</button>
-          <button className="linkButton" onClick={() => openAsset(selectedEquipment)}>Selected Asset</button>
-        </section>
-        <section className="detailPanel">
-          <h2>Quick actions</h2>
-          <button className="textButton" onClick={() => createWorkOrderFromContext()}>
-            <Briefcase size={16} />
-            Create work order
-          </button>
-          {canSupervisorAssistant && (
-            <button className="textButton" onClick={() => runSupervisorAssistant()}>
-              <Bot size={16} />
-              Review follow-ups
-            </button>
-          )}
-        </section>
+        <KpiCard className="kpiEmergency" title="Overdue emergency work" value={`${dashboardMetrics.overdueEmergency}`} unit="work orders" detail="Priority 1 open work requiring supervisor attention." />
+        <KpiCard className="kpiPm" title="PM Work orders overdue" value={`${dashboardMetrics.pmOverdue}`} unit="work orders" detail="Preventive maintenance items waiting on material or approval." />
+        <KpiCard className="kpiPerformance" title="Equipment performance" value={`${dashboardMetrics.equipmentPerformance}`} unit="%" detail="Average health across tracked steel-plant assets." />
       </div>
-      <div className="neoCenterColumn">
-        <section className="neoPanel" aria-label="Neo dashboard assistant" aria-busy={neoLoading}>
-          <div className="neoHeader">
-            <span className="neoAvatar">N</span>
-            <div>
-              <h2>Neo</h2>
-              <small>Dashboard AI assistant</small>
+      <div className="dashboardMainGrid">
+        <div className="dashboardCenterColumn">
+          <section className="neoPanel" aria-label="Neo dashboard assistant" aria-busy={neoLoading}>
+            <div className="neoHeader">
+              <span className="neoAvatar">N</span>
+              <div>
+                <h2>Neo</h2>
+                <small>Dashboard AI assistant</small>
+              </div>
             </div>
-          </div>
-          <div className="neoTranscript" aria-label="Neo chat transcript">
-            {neoMessages.map((turn) => (
-              <div className={`chatBubble ${turn.role}`} key={turn.id}>
-                <span>{turn.role === 'assistant' ? 'Neo' : 'You'}</span>
-                {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
-                <p>{turn.content}</p>
-                {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
-              </div>
-            ))}
-            {neoLoading && (
-              <div className="chatBubble assistant neoThinking" aria-live="polite">
-                <span>Neo</span>
-                <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
-              </div>
-            )}
-          </div>
-          <div className="neoPromptChips" aria-label="Neo prompt shortcuts">
-            <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show assets at risk')}>Assets</button>
-            <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show work orders needing follow-up')}>Work orders</button>
-            <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show users and roles')}>User table</button>
-          </div>
-          <form className="neoComposer" onSubmit={(event) => {
-            event.preventDefault()
-            sendNeoQuestion()
-          }}>
-            <textarea
-              aria-label="Ask Neo"
-              value={neoQuestion}
-              disabled={neoLoading}
-              onChange={(event) => setNeoQuestion(event.target.value)}
+            <div className="neoTranscript" aria-label="Neo chat transcript">
+              {neoMessages.map((turn) => (
+                <div className={`chatBubble ${turn.role}`} key={turn.id}>
+                  <span>{turn.role === 'assistant' ? 'Neo' : 'You'}</span>
+                  {assistantProviderLabel(turn) && <small>{assistantProviderLabel(turn)}</small>}
+                  <p>{turn.content}</p>
+                  {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+                </div>
+              ))}
+              {neoLoading && (
+                <div className="chatBubble assistant neoThinking" aria-live="polite">
+                  <span>Neo</span>
+                  <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
+                </div>
+              )}
+            </div>
+            <div className="neoPromptChips" aria-label="Neo prompt shortcuts">
+              <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show assets at risk')}>Assets</button>
+              <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show work orders needing follow-up')}>Work orders</button>
+              <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show users and roles')}>User table</button>
+            </div>
+            <form className="neoComposer" onSubmit={(event) => {
+              event.preventDefault()
+              sendNeoQuestion()
+            }}>
+              <textarea
+                aria-label="Ask Neo"
+                value={neoQuestion}
+                disabled={neoLoading}
+                onChange={(event) => setNeoQuestion(event.target.value)}
+              />
+              <button className="textButton" type="submit" disabled={neoLoading}>
+                {neoLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
+                Send
+              </button>
+            </form>
+          </section>
+          <section className="detailPanel neoResultPanel">
+            <div className="sectionHeader">
+              <Sparkles size={18} />
+              <h2>{neoTable?.title ?? 'Neo Results'}</h2>
+            </div>
+            {neoTable ? <NeoResultTable table={neoTable} /> : <p className="emptyState">Ask Neo to show assets, work orders, or users. Results appear here.</p>}
+          </section>
+          <section className="detailPanel queuePanel">
+            <div className="sectionHeader">
+              <Search size={18} />
+              <h2>Work queues</h2>
+            </div>
+            <WorkOrderTable
+              compact
+              workOrders={workOrders}
+              onOpen={(id) => {
+                setSelectedWorkOrderId(id)
+                setActiveView('workOrders')
+              }}
             />
-            <button className="textButton" type="submit" disabled={neoLoading}>
-              {neoLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
-              Send
-            </button>
-          </form>
-        </section>
-        <section className="detailPanel neoResultPanel">
-          <div className="sectionHeader">
-            <Sparkles size={18} />
-            <h2>{neoTable?.title ?? 'Neo Results'}</h2>
-          </div>
-          {neoTable ? <NeoResultTable table={neoTable} /> : <p className="emptyState">Ask Neo to show assets, work orders, or users. Results appear here.</p>}
-        </section>
-      </div>
-      <section className="detailPanel chartPanel dashboardEfficiency">
-        <div className="sectionHeader">
-          <BarChart3 size={18} />
-          <h2>Equipment efficiency</h2>
+          </section>
         </div>
-        <BarChart assets={dashboard.highest_risk_equipment} />
-      </section>
+        <div className="dashboardRightColumn">
+          <section className="detailPanel chartPanel dashboardEfficiency">
+            <div className="sectionHeader">
+              <BarChart3 size={18} />
+              <h2>Equipment efficiency</h2>
+            </div>
+            <BarChart assets={dashboard.highest_risk_equipment} />
+          </section>
+          <section className="detailPanel slaPanel">
+            <h2>SLA compliance by incident priority</h2>
+            <MiniBars values={[92, 78, 64, 88]} />
+          </section>
+          <section className="detailPanel quickActionsPanel">
+            <h2>Quick actions</h2>
+            <button className="textButton" onClick={() => createWorkOrderFromContext()}>
+              <Briefcase size={16} />
+              Create work order
+            </button>
+            {canSupervisorAssistant && (
+              <button className="textButton" onClick={() => runSupervisorAssistant()}>
+                <Bot size={16} />
+                Review follow-ups
+              </button>
+            )}
+          </section>
+        </div>
+      </div>
     </section>
   )
 
@@ -1470,6 +1477,11 @@ export function App() {
               </button>
             )}
           </nav>
+          <section className="navFavorites" aria-label="Favorite shortcuts">
+            <h2>Favorites</h2>
+            <button className="linkButton" onClick={() => setActiveView('workOrders')}>Work Orders</button>
+            <button className="linkButton" onClick={() => openAsset(selectedEquipment)}>Selected Asset</button>
+          </section>
           <div className="sectionHeader compactHeader">
             <Wrench size={18} />
             <h2>Priority Assets ({dashboard.highest_risk_equipment.length})</h2>
@@ -1517,10 +1529,10 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
   )
 }
 
-function KpiCard({ title, value, unit, detail, ai }: { title: string; value: string; unit: string; detail: string; ai?: string }) {
+function KpiCard({ title, value, unit, detail, ai, className = '' }: { title: string; value: string; unit: string; detail: string; ai?: string; className?: string }) {
   const [open, setOpen] = useState(false)
   return (
-    <section className="kpiCard">
+    <section className={`kpiCard ${className}`}>
       <div className="kpiHeader">
         <h2>{title}</h2>
         {ai && (
