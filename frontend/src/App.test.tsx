@@ -630,9 +630,9 @@ describe('Maintenance Wizard dashboard', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
     expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
     expect(screen.getByText('Work Order 8304')).toBeInTheDocument()
-    expect(screen.queryByText('Technician AI Assistant')).not.toBeInTheDocument()
-    expect(screen.queryByText('Supervisor AI Assistant')).not.toBeInTheDocument()
-    expect(screen.getByText('Role-specific AI assistants are available to technician and supervisor accounts.')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Smith' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
+    expect(screen.getByText('Smith and Trinity are available to technician and supervisor accounts.')).toBeInTheDocument()
   })
 
   it('shows only the technician LLM assistant to technician users', async () => {
@@ -641,15 +641,15 @@ describe('Maintenance Wizard dashboard', () => {
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
     expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
-    expect(screen.getByText('Technician AI Assistant')).toBeInTheDocument()
-    expect(screen.getByText('LLM work-order guidance for assigned technicians')).toBeInTheDocument()
-    expect(screen.queryByText('Supervisor AI Assistant')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Smith' })).toBeInTheDocument()
+    expect(screen.getByText('Technician AI assistant with shared LLM configuration')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Technician observation'), {
       target: { value: 'Connections 3 and 5 were loose.' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    expect(within(screen.getByLabelText('Technician assistant chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Smith technician chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
     expect(await screen.findByText('Verify torque on bolted connections.')).toBeInTheDocument()
     expect(screen.getByText(/Connections were tightened to spec./)).toBeInTheDocument()
     expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
@@ -661,12 +661,12 @@ describe('Maintenance Wizard dashboard', () => {
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
     expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
-    expect(screen.queryByText('Technician AI Assistant')).not.toBeInTheDocument()
-    expect(screen.getByText('Supervisor AI Assistant')).toBeInTheDocument()
-    expect(screen.getByText('LLM follow-up review for maintenance supervisors')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Smith' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Trinity' })).toBeInTheDocument()
+    expect(screen.getByText('Supervisor AI assistant with shared LLM configuration')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    expect(within(screen.getByLabelText('Supervisor assistant chat')).getByText('Summarize follow-up actions for completed work orders.')).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Trinity supervisor chat')).getByText('Summarize follow-up actions for completed work orders.')).toBeInTheDocument()
     expect(await screen.findByText('2 work order(s) reviewed; 2 require follow-up action.')).toBeInTheDocument()
     expect(screen.getByText('Review WO-8297 brake shoe replacement planning.')).toBeInTheDocument()
     expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()

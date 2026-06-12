@@ -17,7 +17,7 @@ flowchart LR
   auth --> diagnosis["Diagnosis, Chat, And Recommendation APIs"]
   auth --> prediction["Prediction API"]
   auth --> workOrders["Work Order APIs<br/>Queue, detail, logs, lifecycle"]
-  auth --> assistants["Work Order AI Assistants<br/>Technician and supervisor"]
+  auth --> assistants["Work Order AI Assistants<br/>Smith and Trinity"]
   auth --> report["Markdown Report API"]
   auth --> feedback["Feedback API<br/>Root cause, action, outcome"]
   auth --> userAdmin["User Management API"]
@@ -85,7 +85,7 @@ flowchart LR
 - Anomaly service: rolling-baseline and z-score analysis over persisted sensor readings, plus optional LLM/SLM context classification and inspection steps.
 - Maintenance labeling service: optional LLM/SLM normalization of maintenance history and feedback into failure-mode, component, root-cause, action-class, outcome, and signal-hint labels.
 - Recommendation service: combines retrieved evidence, risk scoring, prediction, normalized labels, prior engineer feedback, reasoning explanations, and optional LLM-adapter context.
-- Work-order assistant service: combines persisted work-order state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM structured output to suggest live directions, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work. Technician assistance is restricted to `maintenance_technician`; supervisor assistance is restricted to `maintenance_supervisor`.
+- Work-order assistant service: combines persisted work-order state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM structured output to suggest live directions, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work. Smith is restricted to `maintenance_technician`; Trinity is restricted to `maintenance_supervisor`; both use the shared LLM provider, timeout, and token-limit configuration.
 - Report service: formats recommendations as structured Markdown for supervisor handoff or demo export, including learning notes.
 - LLM adapter: common structured interface for mock, OpenAI-compatible chat completions, and Ollama chat providers.
 

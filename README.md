@@ -218,8 +218,8 @@ Demo users are seeded when `AUTH_SEED_DEMO_USERS=true`; all use password `DemoPa
 | --- | --- |
 | `admin@plant.local` | Full access and user management |
 | `maintenance@plant.local` | Diagnosis, reports, predictions, feedback |
-| `technician@plant.local` | Work-order execution and technician AI assistant |
-| `supervisor@plant.local` | Work-order review and supervisor AI assistant |
+| `technician@plant.local` | Work-order execution and Smith technician AI assistant |
+| `supervisor@plant.local` | Work-order review and Trinity supervisor AI assistant |
 | `reliability@plant.local` | Diagnosis, reports, feedback, ingestion, streaming status |
 | `planner@plant.local` | Dashboard, predictions, recommendations, reports |
 | `operator@plant.local` | Read-only dashboard, alerts, health, anomalies |
@@ -229,7 +229,7 @@ Set `JWT_SECRET_KEY` to a strong secret outside local demos. External OIDC/SAML 
 
 ## LLM And Learning Behavior
 
-LLMs/SLMs are invoked only after deterministic ingestion and validation. They can enrich document ingestion with structured intelligence, normalize maintenance events and feedback into labels, rerank retrieved evidence, classify anomaly context, explain predictions/recommendations, guide technicians through work-order execution, and help supervisors review follow-ups. The technician assistant is visible and callable only for `maintenance_technician`; the supervisor assistant is visible and callable only for `maintenance_supervisor`. They are not the source of truth for raw IoT ingestion, anomaly scores, risk scoring, RUL calculation, work-order persistence, or status changes.
+LLMs/SLMs are invoked only after deterministic ingestion and validation. They can enrich document ingestion with structured intelligence, normalize maintenance events and feedback into labels, rerank retrieved evidence, classify anomaly context, explain predictions/recommendations, guide technicians through work-order execution, and help supervisors review follow-ups. Smith, the technician assistant, is visible and callable only for `maintenance_technician`; Trinity, the supervisor assistant, is visible and callable only for `maintenance_supervisor`. Both use the same shared LLM provider, timeout, and token-limit configuration. They are not the source of truth for raw IoT ingestion, anomaly scores, risk scoring, RUL calculation, work-order persistence, or status changes.
 
 LLMs are not involved in NATS IoT streaming ingestion. Streaming payloads are validated deterministically and persisted before later diagnosis, chat, report, and recommendation flows use the updated data.
 
