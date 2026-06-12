@@ -15,6 +15,8 @@ AnomalyContextClass = Literal[
 UserRole = Literal[
     "admin",
     "maintenance_engineer",
+    "maintenance_technician",
+    "maintenance_supervisor",
     "reliability_engineer",
     "planner",
     "operator",

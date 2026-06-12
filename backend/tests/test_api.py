@@ -73,7 +73,7 @@ def test_database_status_reports_seeded_tables():
     assert "streaming_messages" in status["counts"]
     assert "work_orders" in status["counts"]
     assert "work_order_logs" in status["counts"]
-    assert status["counts"]["users"] == 6
+    assert status["counts"]["users"] == 8
 
 
 def test_repository_initializes_once_under_concurrent_access(monkeypatch):
@@ -259,7 +259,7 @@ def test_create_update_and_log_work_order():
 
 
 def test_technician_assistant_suggests_problem_code_from_observation():
-    headers = auth_headers("maintenance@plant.local")
+    headers = auth_headers("technician@plant.local")
 
     response = client.post(
         "/api/work-orders/technician-assist",
@@ -275,9 +275,16 @@ def test_technician_assistant_suggests_problem_code_from_observation():
     assert payload["completion_summary"]
     assert payload["evidence"]
 
+    forbidden_response = client.post(
+        "/api/work-orders/technician-assist",
+        json={"work_order_id": "WO-8304", "observation": "Connections are loose."},
+        headers=auth_headers("supervisor@plant.local"),
+    )
+    assert forbidden_response.status_code == 403
+
 
 def test_supervisor_assistant_reviews_follow_up_queue_and_drafts_order():
-    headers = auth_headers("planner@plant.local")
+    headers = auth_headers("supervisor@plant.local")
 
     response = client.post(
         "/api/work-orders/supervisor-assist",
@@ -291,6 +298,13 @@ def test_supervisor_assistant_reviews_follow_up_queue_and_drafts_order():
     assert payload["follow_up_actions"]
     assert "WO-8297" in payload["referenced_work_orders"]
     assert payload["draft_work_order"]["equipment_id"] == "OH-CRANE-05"
+
+    forbidden_response = client.post(
+        "/api/work-orders/supervisor-assist",
+        json={"work_order_id": "WO-8297", "queue_name": "follow_up"},
+        headers=auth_headers("technician@plant.local"),
+    )
+    assert forbidden_response.status_code == 403
 
 
 def test_streaming_status_is_disabled_by_default():

@@ -258,16 +258,28 @@ function userFor(email = 'admin@plant.local') {
   const roles: Record<string, UserRole> = {
     'admin@plant.local': 'admin',
     'maintenance@plant.local': 'maintenance_engineer',
+    'technician@plant.local': 'maintenance_technician',
+    'supervisor@plant.local': 'maintenance_supervisor',
     'reliability@plant.local': 'reliability_engineer',
     'planner@plant.local': 'planner',
     'operator@plant.local': 'operator',
     'iot-service@plant.local': 'iot_service',
   }
   const role = roles[email] ?? 'admin'
+  const displayNames: Record<UserRole, string> = {
+    admin: 'Plant Admin',
+    maintenance_engineer: 'Maintenance Engineer',
+    maintenance_technician: 'Maintenance Technician',
+    maintenance_supervisor: 'Maintenance Supervisor',
+    reliability_engineer: 'Reliability Engineer',
+    planner: 'Maintenance Planner',
+    operator: 'Shift Operator',
+    iot_service: 'IoT Service Account',
+  }
   return {
     id: `USER-${role}`,
     email,
-    display_name: role === 'operator' ? 'Shift Operator' : 'Plant Admin',
+    display_name: displayNames[role],
     role,
     is_active: true,
   }
@@ -517,15 +529,27 @@ describe('Maintenance Wizard dashboard', () => {
     })
   })
 
-  it('opens work orders and uses technician and supervisor AI assistants', async () => {
+  it('hides role-specific work order assistants from admin users', async () => {
     render(<App />)
     await signIn()
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
     expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
     expect(screen.getByText('Work Order 8304')).toBeInTheDocument()
+    expect(screen.queryByText('Technician AI Assistant')).not.toBeInTheDocument()
+    expect(screen.queryByText('Supervisor AI Assistant')).not.toBeInTheDocument()
+    expect(screen.getByText('Role-specific AI assistants are available to technician and supervisor accounts.')).toBeInTheDocument()
+  })
+
+  it('shows only the technician LLM assistant to technician users', async () => {
+    render(<App />)
+    await signIn('technician@plant.local')
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
+    expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
     expect(screen.getByText('Technician AI Assistant')).toBeInTheDocument()
-    expect(screen.getByText('Supervisor AI Assistant')).toBeInTheDocument()
+    expect(screen.getByText('LLM work-order guidance for assigned technicians')).toBeInTheDocument()
+    expect(screen.queryByText('Supervisor AI Assistant')).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Technician observation'), {
       target: { value: 'Connections 3 and 5 were loose.' },
@@ -533,10 +557,23 @@ describe('Maintenance Wizard dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Get live directions' }))
     expect(await screen.findByText('Verify torque on bolted connections.')).toBeInTheDocument()
     expect(screen.getByText('Connections were tightened to spec.')).toBeInTheDocument()
+    expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
+  })
+
+  it('shows only the supervisor LLM assistant to supervisor users', async () => {
+    render(<App />)
+    await signIn('supervisor@plant.local')
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
+    expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
+    expect(screen.queryByText('Technician AI Assistant')).not.toBeInTheDocument()
+    expect(screen.getByText('Supervisor AI Assistant')).toBeInTheDocument()
+    expect(screen.getByText('LLM follow-up review for maintenance supervisors')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Review status' }))
     expect(await screen.findByText('2 work order(s) reviewed; 2 require follow-up action.')).toBeInTheDocument()
     expect(screen.getByText('Review WO-8297 brake shoe replacement planning.')).toBeInTheDocument()
+    expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
   })
 
   it('uploads document files from the ingestion panel', async () => {

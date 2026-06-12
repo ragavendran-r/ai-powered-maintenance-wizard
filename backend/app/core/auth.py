@@ -10,8 +10,26 @@ from app.data import repository
 from app.models.schemas import UserPublic
 
 
-READ_ROLES = {"admin", "maintenance_engineer", "reliability_engineer", "planner", "operator"}
+READ_ROLES = {
+    "admin",
+    "maintenance_engineer",
+    "maintenance_technician",
+    "maintenance_supervisor",
+    "reliability_engineer",
+    "planner",
+    "operator",
+}
 DECISION_ROLES = {"admin", "maintenance_engineer", "reliability_engineer", "planner"}
+WORK_ORDER_ACTION_ROLES = {
+    "admin",
+    "maintenance_engineer",
+    "maintenance_technician",
+    "maintenance_supervisor",
+    "reliability_engineer",
+    "planner",
+}
+TECHNICIAN_ASSISTANT_ROLES = {"maintenance_technician"}
+SUPERVISOR_ASSISTANT_ROLES = {"maintenance_supervisor"}
 FEEDBACK_ROLES = {"admin", "maintenance_engineer", "reliability_engineer"}
 INGESTION_ROLES = {"admin", "reliability_engineer", "iot_service"}
 STREAMING_STATUS_ROLES = {"admin", "reliability_engineer"}

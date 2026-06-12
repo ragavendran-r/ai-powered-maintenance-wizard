@@ -11,7 +11,10 @@ from app.core.auth import (
     FEEDBACK_ROLES,
     INGESTION_ROLES,
     READ_ROLES,
+    SUPERVISOR_ASSISTANT_ROLES,
+    TECHNICIAN_ASSISTANT_ROLES,
     STREAMING_STATUS_ROLES,
+    WORK_ORDER_ACTION_ROLES,
     get_current_user,
     require_roles,
 )
@@ -288,7 +291,7 @@ def list_work_orders(equipment_id: Optional[str] = None, follow_up_only: bool = 
     "/api/work-orders",
     response_model=WorkOrder,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_roles(*DECISION_ROLES))],
+    dependencies=[Depends(require_roles(*WORK_ORDER_ACTION_ROLES))],
 )
 def create_work_order(request: WorkOrderCreateRequest):
     if not repository.get_equipment(request.equipment_id):
@@ -307,7 +310,7 @@ def get_work_order(work_order_id: str):
 @app.patch(
     "/api/work-orders/{work_order_id}",
     response_model=WorkOrder,
-    dependencies=[Depends(require_roles(*DECISION_ROLES))],
+    dependencies=[Depends(require_roles(*WORK_ORDER_ACTION_ROLES))],
 )
 def update_work_order(work_order_id: str, request: WorkOrderUpdateRequest):
     work_order = repository.update_work_order(work_order_id, request.model_dump(exclude_unset=True))
@@ -319,7 +322,7 @@ def update_work_order(work_order_id: str, request: WorkOrderUpdateRequest):
 @app.post(
     "/api/work-orders/{work_order_id}/logs",
     response_model=WorkOrder,
-    dependencies=[Depends(require_roles(*DECISION_ROLES))],
+    dependencies=[Depends(require_roles(*WORK_ORDER_ACTION_ROLES))],
 )
 def add_work_order_log(work_order_id: str, request: WorkOrderLogRequest):
     work_order = repository.add_work_order_log(work_order_id, request.model_dump())
@@ -331,7 +334,7 @@ def add_work_order_log(work_order_id: str, request: WorkOrderLogRequest):
 @app.post(
     "/api/work-orders/technician-assist",
     response_model=TechnicianAssistantResponse,
-    dependencies=[Depends(require_roles(*DECISION_ROLES))],
+    dependencies=[Depends(require_roles(*TECHNICIAN_ASSISTANT_ROLES))],
 )
 def technician_assist(request: TechnicianAssistantRequest):
     return technician_assistance(request)
@@ -340,7 +343,7 @@ def technician_assist(request: TechnicianAssistantRequest):
 @app.post(
     "/api/work-orders/supervisor-assist",
     response_model=SupervisorAssistantResponse,
-    dependencies=[Depends(require_roles(*DECISION_ROLES))],
+    dependencies=[Depends(require_roles(*SUPERVISOR_ASSISTANT_ROLES))],
 )
 def supervisor_assist(request: SupervisorAssistantRequest):
     return supervisor_assistance(request)
