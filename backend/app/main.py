@@ -33,6 +33,8 @@ from app.models.schemas import (
     HealthSummary,
     MaintenanceLabelsResponse,
     LoginRequest,
+    NeoChatRequest,
+    NeoChatResponse,
     PasswordResetRequest,
     PredictionRequest,
     Recommendation,
@@ -53,6 +55,7 @@ from app.models.schemas import (
 from app.services.document_intelligence import analyze_documents, document_intelligence
 from app.services.iot_streaming import StreamingIngestionService
 from app.services.maintenance_labeling import label_feedback, label_maintenance_event, label_maintenance_history, stored_labels
+from app.services.neo_assistant import neo_assistance
 from app.services.recommendations import generate_recommendation
 from app.services.document_parser import parse_upload_to_document
 from app.services.reports import recommendation_to_markdown
@@ -347,6 +350,14 @@ def technician_assist(request: TechnicianAssistantRequest):
 )
 def supervisor_assist(request: SupervisorAssistantRequest):
     return supervisor_assistance(request)
+
+
+@app.post("/api/neo/chat", response_model=NeoChatResponse)
+def neo_chat(
+    request: NeoChatRequest,
+    current_user: UserPublic = Depends(require_roles(*READ_ROLES)),
+):
+    return neo_assistance(request, current_user)
 
 
 @app.post("/api/chat", response_model=ChatResponse, dependencies=[Depends(require_roles(*DECISION_ROLES))])

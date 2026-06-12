@@ -528,6 +528,38 @@ def test_chat_returns_recommendation():
     assert payload["recommendation"]["equipment_id"] == "RM-DRIVE-01"
 
 
+def test_neo_chat_returns_dashboard_table_for_read_roles():
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "Show work orders needing follow-up"},
+        headers=auth_headers("operator@plant.local"),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "Neo" in payload["answer"] or payload["answer"]
+    assert payload["table"]["title"] == "Work Orders"
+    assert "Work order" in payload["table"]["columns"]
+    assert payload["table"]["rows"]
+
+
+def test_neo_user_table_is_role_limited():
+    operator_response = client.post(
+        "/api/neo/chat",
+        json={"message": "Show users and roles"},
+        headers=auth_headers("operator@plant.local"),
+    )
+    assert operator_response.status_code == 200
+    assert operator_response.json()["table"]["title"] == "Current User"
+
+    admin_response = client.post(
+        "/api/neo/chat",
+        json={"message": "Show users and roles"},
+        headers=auth_headers(),
+    )
+    assert admin_response.status_code == 200
+    assert admin_response.json()["table"]["title"] == "Users"
+
+
 def test_feedback_is_accepted():
     response = client.post(
         "/api/recommendations/rec-test/feedback",

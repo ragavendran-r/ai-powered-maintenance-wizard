@@ -230,6 +230,24 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = []
 
 
+class NeoTable(BaseModel):
+    title: str
+    columns: list[str]
+    rows: list[dict[str, Any]]
+
+
+class NeoChatRequest(BaseModel):
+    message: str
+    history: list[ChatMessage] = []
+
+
+class NeoChatResponse(BaseModel):
+    answer: str
+    table: Optional[NeoTable] = None
+    used_live_provider: bool = False
+    provider: str = "mock"
+
+
 class DiagnosisRequest(BaseModel):
     equipment_id: str
     alert_id: Optional[str] = None
