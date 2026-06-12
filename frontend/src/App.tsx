@@ -3,18 +3,25 @@ import type { FormEvent, ReactNode } from 'react'
 import {
   Activity,
   AlertTriangle,
+  BarChart3,
+  Bot,
+  Briefcase,
   CheckCircle2,
+  ChevronRight,
   ClipboardList,
   Database,
   Download,
   FileJson,
+  FileText,
   Gauge,
   KeyRound,
   LogIn,
   LogOut,
   MessageSquare,
+  Search,
   Send,
   ShieldAlert,
+  Sparkles,
   Upload,
   UserPlus,
   Users,
@@ -26,13 +33,19 @@ import {
   type AuthSession,
   type AuthUser,
   type DashboardSummary,
+  type HealthSummary,
   type Recommendation,
+  type SupervisorAssistantResponse,
+  type TechnicianAssistantResponse,
   type StreamingStatus,
   type UserRole,
+  type WorkOrder,
+  type WorkOrderCreateRequest,
 } from './services/api'
 
 const riskRank = { low: 1, medium: 2, high: 3, critical: 4 }
-type AppView = 'dashboard' | 'ingestion' | 'users'
+type AppView = 'dashboard' | 'asset' | 'workOrders' | 'ingestion' | 'users'
+type AssetTab = 'summary' | 'maintenance' | 'performance' | 'reliability' | 'documents' | 'workOrders'
 
 const roleLabels: Record<UserRole, string> = {
   admin: 'Admin',
@@ -57,6 +70,78 @@ const feedbackRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability
 const ingestionRoles: UserRole[] = ['admin', 'reliability_engineer']
 const streamingRoles: UserRole[] = ['admin', 'reliability_engineer']
 
+const fallbackWorkOrders: WorkOrder[] = [
+  {
+    id: 'WO-8304',
+    equipment_id: 'RM-DRIVE-01',
+    title: 'Inspect main drive bearing vibration',
+    description: 'Inspect bearing housing, coupling alignment, lubrication condition, and foundation bolts.',
+    status: 'INPRG',
+    priority: 1,
+    work_type: 'CM',
+    failure_class: 'MECH',
+    problem_code: 'BRGVIB',
+    classification: 'Bearing vibration',
+    assigned_to: 'Maintenance Engineer',
+    supervisor: 'Maintenance Supervisor',
+    due_date: '2026-06-12T18:00:00+05:30',
+    recommended_action: 'Reduce load if vibration persists and verify coupling alignment.',
+    follow_up_required: true,
+    ai_summary: 'High-risk drive vibration needs mechanical inspection before restart.',
+    completion_summary: null,
+    created_at: '2026-06-11T08:00:00+05:30',
+    updated_at: '2026-06-11T11:00:00+05:30',
+    completed_at: null,
+    logs: [],
+  },
+  {
+    id: 'WO-8311',
+    equipment_id: 'BF-BLOWER-02',
+    title: 'Verify inlet guide vane actuator response',
+    description: 'Check actuator travel, linkage looseness, and position feedback drift.',
+    status: 'APPR',
+    priority: 2,
+    work_type: 'CM',
+    failure_class: 'CTRL',
+    problem_code: 'IGVACT',
+    classification: 'Control actuator',
+    assigned_to: 'Reliability Engineer',
+    supervisor: 'Blast Furnace Supervisor',
+    due_date: '2026-06-13T12:00:00+05:30',
+    recommended_action: 'Stroke-test the guide vane actuator and compare response to pressure variance.',
+    follow_up_required: false,
+    ai_summary: 'Pressure variance points to actuator or linkage response drift.',
+    completion_summary: null,
+    created_at: '2026-06-11T09:00:00+05:30',
+    updated_at: '2026-06-11T09:30:00+05:30',
+    completed_at: null,
+    logs: [],
+  },
+  {
+    id: 'WO-8297',
+    equipment_id: 'OH-CRANE-05',
+    title: 'Inspect hoist brake temperature and current',
+    description: 'Review hoist current and brake temperature after heavy-lift restriction.',
+    status: 'COMP',
+    priority: 1,
+    work_type: 'EM',
+    failure_class: 'ELEC',
+    problem_code: 'HOISTBRK',
+    classification: 'Hoist braking',
+    assigned_to: 'Crane Technician',
+    supervisor: 'Melt Shop Supervisor',
+    due_date: '2026-06-11T17:00:00+05:30',
+    recommended_action: 'Plan brake shoe replacement follow-up.',
+    follow_up_required: true,
+    ai_summary: 'Completed inspection still needs supervisor follow-up.',
+    completion_summary: 'Brake temperature normalized after lift restriction.',
+    created_at: '2026-06-10T09:00:00+05:30',
+    updated_at: '2026-06-11T16:35:00+05:30',
+    completed_at: '2026-06-11T16:35:00+05:30',
+    logs: [],
+  },
+]
+
 function hasRole(user: AuthUser | undefined, roles: UserRole[]) {
   return Boolean(user && roles.includes(user.role))
 }
@@ -70,7 +155,15 @@ export function App() {
   const [dashboard, setDashboard] = useState<DashboardSummary>(fallbackDashboard)
   const [activeView, setActiveView] = useState<AppView>('dashboard')
   const [selectedEquipment, setSelectedEquipment] = useState('RM-DRIVE-01')
+  const [assetTab, setAssetTab] = useState<AssetTab>('summary')
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null)
+  const [workOrders, setWorkOrders] = useState<WorkOrder[]>(fallbackWorkOrders)
+  const [selectedWorkOrderId, setSelectedWorkOrderId] = useState('WO-8304')
+  const [workOrderMessage, setWorkOrderMessage] = useState('')
+  const [technicianObservation, setTechnicianObservation] = useState('There are hotspots and looseness around the checked connections.')
+  const [technicianAssistant, setTechnicianAssistant] = useState<TechnicianAssistantResponse | null>(null)
+  const [supervisorQuestion, setSupervisorQuestion] = useState('Summarize follow-up actions for completed work orders.')
+  const [supervisorAssistant, setSupervisorAssistant] = useState<SupervisorAssistantResponse | null>(null)
   const [question, setQuestion] = useState('Why is the hot strip mill main drive vibrating?')
   const [answer, setAnswer] = useState('')
   const [apiState, setApiState] = useState<'connected' | 'fallback'>('fallback')
@@ -157,6 +250,22 @@ export function App() {
       .catch(() => setUserMessage('Users could not be loaded'))
   }
 
+  function loadWorkOrders() {
+    return api
+      .workOrders()
+      .then((items) => {
+        if (!Array.isArray(items)) {
+          setWorkOrders(fallbackWorkOrders)
+          return
+        }
+        setWorkOrders(items)
+        if (items.length && !items.some((item) => item.id === selectedWorkOrderId)) {
+          setSelectedWorkOrderId(items[0].id)
+        }
+      })
+      .catch(() => setWorkOrders(fallbackWorkOrders))
+  }
+
   useEffect(() => {
     api.onUnauthorized(() => clearSession('Session expired. Sign in again.'))
     const restored = api.restoreSession()
@@ -179,6 +288,7 @@ export function App() {
   useEffect(() => {
     if (!authReady || !session || session.user.role === 'iot_service') return
     loadDashboard()
+    loadWorkOrders()
     if (canStreaming) loadStreamingStatus()
   }, [authReady, session?.user.id])
 
@@ -196,6 +306,30 @@ export function App() {
     () => dashboard.highest_risk_equipment.find((item) => item.equipment.id === selectedEquipment) ?? dashboard.highest_risk_equipment[0],
     [dashboard, selectedEquipment],
   )
+  const selectedWorkOrder = useMemo(
+    () => workOrders.find((item) => item.id === selectedWorkOrderId) ?? workOrders[0],
+    [selectedWorkOrderId, workOrders],
+  )
+  const assetWorkOrders = useMemo(
+    () => workOrders.filter((item) => item.equipment_id === selectedEquipment),
+    [selectedEquipment, workOrders],
+  )
+  const dashboardMetrics = useMemo(() => {
+    const openOrders = workOrders.filter((item) => !['COMP', 'CLOSE'].includes(item.status))
+    return {
+      assetsAtRisk: dashboard.highest_risk_equipment.filter((item) => item.health_score < 50).length,
+      overdueEmergency: openOrders.filter((item) => item.priority === 1).length,
+      pmOverdue: openOrders.filter((item) => item.work_type === 'PM').length,
+      equipmentPerformance: dashboard.average_health_score,
+      followUps: workOrders.filter((item) => item.follow_up_required).length,
+    }
+  }, [dashboard, workOrders])
+
+  function openAsset(equipmentId: string) {
+    setSelectedEquipment(equipmentId)
+    setAssetTab('summary')
+    setActiveView('asset')
+  }
 
   function runDiagnosis() {
     api
@@ -252,6 +386,102 @@ export function App() {
       setReportMessage('Report downloaded')
     } catch {
       setReportMessage('Report could not be downloaded')
+    }
+  }
+
+  function draftWorkOrderPayload(source?: Recommendation): WorkOrderCreateRequest {
+    const title = source
+      ? `Follow up: ${source.probable_root_causes[0] ?? selectedHealth?.equipment.name}`
+      : `Inspect ${selectedHealth?.equipment.name}`
+    return {
+      equipment_id: selectedEquipment,
+      title,
+      description: source?.diagnosis ?? selectedHealth?.notes[0] ?? 'Inspect asset condition and document findings.',
+      priority: selectedHealth?.risk_level === 'critical' ? 1 : 2,
+      work_type: 'CM',
+      failure_class: source?.probable_root_causes.join(' ').toLowerCase().includes('thermal') ? 'ELEC' : 'MECH',
+      problem_code: source?.probable_root_causes.join(' ').toLowerCase().includes('connection') ? 'LWTQCONNECT' : 'INVESTIGATE',
+      classification: source?.probable_root_causes[0] ?? 'Corrective inspection',
+      assigned_to: currentUser?.display_name ?? 'Maintenance Engineer',
+      supervisor: 'Maintenance Supervisor',
+      due_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      recommended_action: source?.immediate_actions[0] ?? selectedHealth?.notes[0] ?? 'Inspect and update work log.',
+      follow_up_required: selectedHealth?.risk_level === 'critical',
+      ai_summary: source?.report_summary ?? selectedHealth?.notes.join(' '),
+    }
+  }
+
+  async function createWorkOrderFromContext(source?: Recommendation) {
+    try {
+      const created = await api.createWorkOrder(draftWorkOrderPayload(source))
+      setWorkOrders((items) => [created, ...items.filter((item) => item.id !== created.id)])
+      setSelectedWorkOrderId(created.id)
+      setActiveView('workOrders')
+      setWorkOrderMessage(`Created ${created.id}`)
+    } catch {
+      setWorkOrderMessage('Work order could not be created')
+    }
+  }
+
+  async function runTechnicianAssistant() {
+    if (!selectedWorkOrder) return
+    try {
+      const response = await api.technicianAssist(selectedWorkOrder.id, technicianObservation)
+      setTechnicianAssistant(response)
+      setWorkOrderMessage('Technician assistant updated the recommended problem code and summary')
+    } catch {
+      setTechnicianAssistant({
+        work_order_id: selectedWorkOrder.id,
+        next_prompt: 'What abnormal condition do you observe?',
+        live_directions: [selectedWorkOrder.recommended_action],
+        recommendations: ['Record the observed condition and before/after readings.'],
+        safety_reminders: ['Apply lockout/tagout before intrusive inspection.'],
+        suggested_problem_code: selectedWorkOrder.problem_code,
+        suggested_failure_class: selectedWorkOrder.failure_class,
+        completion_summary: technicianObservation,
+        evidence: [],
+        used_live_provider: false,
+        provider: 'fallback',
+      })
+    }
+  }
+
+  async function completeSelectedWorkOrder() {
+    if (!selectedWorkOrder || !technicianAssistant) return
+    try {
+      const updated = await api.updateWorkOrder(selectedWorkOrder.id, {
+        status: 'COMP',
+        problem_code: technicianAssistant.suggested_problem_code,
+        failure_class: technicianAssistant.suggested_failure_class,
+        completion_summary: technicianAssistant.completion_summary,
+      })
+      setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+      setSelectedWorkOrderId(updated.id)
+      setWorkOrderMessage(`${updated.id} completed`)
+    } catch {
+      setWorkOrderMessage('Work order completion could not be saved')
+    }
+  }
+
+  async function runSupervisorAssistant(workOrderId?: string) {
+    try {
+      const response = await api.supervisorAssist({
+        work_order_id: workOrderId,
+        queue_name: 'follow_up',
+        question: supervisorQuestion,
+      })
+      setSupervisorAssistant(response)
+      setWorkOrderMessage('Supervisor assistant reviewed follow-ups')
+    } catch {
+      setSupervisorAssistant({
+        summary: `${workOrders.length} work order(s) reviewed locally.`,
+        follow_up_actions: workOrders.filter((item) => item.follow_up_required).map((item) => `${item.id}: ${item.recommended_action}`),
+        risks: workOrders.filter((item) => item.priority === 1 && !['COMP', 'CLOSE'].includes(item.status)).map((item) => `${item.id} remains ${item.status}`),
+        draft_work_order: null,
+        referenced_work_orders: workOrders.map((item) => item.id),
+        used_live_provider: false,
+        provider: 'fallback',
+      })
     }
   }
 
@@ -365,6 +595,317 @@ export function App() {
       setUserMessage('Password could not be reset')
     }
   }
+
+  const recommendationPanel = (
+    <div className="recommendationSection">
+      <div className="sectionHeader">
+        <CheckCircle2 size={18} />
+        <h2>Recommendation</h2>
+      </div>
+      {recommendation ? (
+        <>
+          <p className="diagnosis">{recommendation.diagnosis}</p>
+          <span className={`riskBadge ${recommendation.risk_level}`}>{recommendation.risk_level}</span>
+          <div className="recommendationFacts">
+            <span>
+              <small>Urgency</small>
+              <strong>{recommendation.urgency}</strong>
+            </span>
+            <span>
+              <small>RUL</small>
+              <strong>{recommendation.remaining_useful_life_days ?? 'n/a'} days</strong>
+            </span>
+            <span>
+              <small>Confidence</small>
+              <strong>{Math.round(recommendation.confidence * 100)}%</strong>
+            </span>
+          </div>
+          <h3>Immediate Actions</h3>
+          <ul>{recommendation.immediate_actions.map((action) => <li key={action}>{action}</li>)}</ul>
+          <h3>Planned Actions</h3>
+          <ul>{recommendation.planned_actions.map((action) => <li key={action}>{action}</li>)}</ul>
+          <h3>Evidence</h3>
+          {recommendation.evidence.slice(0, 3).map((evidence) => (
+            <p className="evidence" key={evidence.source_id}>
+              <strong>{evidence.title}</strong>
+              {evidence.excerpt}
+              {evidence.relevance_reason && <small>{evidence.relevance_reason}</small>}
+            </p>
+          ))}
+          {canFeedback && (
+            <>
+              <div className="feedbackDetails">
+                <label className="field">
+                  <span>Actual Root Cause</span>
+                  <input value={feedbackRootCause} onChange={(event) => setFeedbackRootCause(event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>Action Taken</span>
+                  <input value={feedbackActionTaken} onChange={(event) => setFeedbackActionTaken(event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>Outcome</span>
+                  <input value={feedbackOutcome} onChange={(event) => setFeedbackOutcome(event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>Notes</span>
+                  <input value={feedbackNotes} onChange={(event) => setFeedbackNotes(event.target.value)} />
+                </label>
+              </div>
+              <div className="feedbackRow">
+                <button onClick={() => sendFeedback('accepted')}>Accept</button>
+                <button onClick={() => sendFeedback('corrected')}>Correct</button>
+                <button onClick={() => sendFeedback('rejected')}>Reject</button>
+              </div>
+              {feedbackMessage && <p className="inlineStatus">{feedbackMessage}</p>}
+            </>
+          )}
+          <div className="buttonRow">
+            <button className="downloadReport" onClick={downloadReport}>
+              <Download size={16} />
+              Export Report
+            </button>
+            <button className="textButton" onClick={() => createWorkOrderFromContext(recommendation)}>
+              <Briefcase size={16} />
+              Create Work Order
+            </button>
+          </div>
+          {reportMessage && <p className="inlineStatus">{reportMessage}</p>}
+        </>
+      ) : (
+        <p className="emptyState">Run diagnosis or ask a question to generate cited maintenance actions.</p>
+      )}
+    </div>
+  )
+
+  const operationalDashboardView = (
+    <section className="dashboardGrid">
+      <KpiCard
+        title="Assets at risk"
+        value={`${dashboardMetrics.assetsAtRisk}`}
+        unit="assets"
+        detail="Key contributors: sensor trends, incomplete maintenance, and health score."
+        ai="AI explained: asset risk uses current health, alert severity, work status, and anomaly context."
+      />
+      <KpiCard title="Overdue emergency work" value={`${dashboardMetrics.overdueEmergency}`} unit="work orders" detail="Priority 1 open work requiring supervisor attention." />
+      <KpiCard title="PM Work orders overdue" value={`${dashboardMetrics.pmOverdue}`} unit="work orders" detail="Preventive maintenance items waiting on material or approval." />
+      <KpiCard title="Equipment performance" value={`${dashboardMetrics.equipmentPerformance}`} unit="%" detail="Average health across tracked steel-plant assets." />
+      <section className="detailPanel queuePanel">
+        <div className="sectionHeader">
+          <Search size={18} />
+          <h2>Work queues</h2>
+        </div>
+        <WorkOrderTable
+          workOrders={workOrders}
+          onOpen={(id) => {
+            setSelectedWorkOrderId(id)
+            setActiveView('workOrders')
+          }}
+        />
+      </section>
+      <section className="detailPanel chartPanel">
+        <div className="sectionHeader">
+          <BarChart3 size={18} />
+          <h2>Equipment efficiency</h2>
+        </div>
+        <BarChart assets={dashboard.highest_risk_equipment} />
+      </section>
+      <section className="detailPanel">
+        <h2>SLA compliance by incident priority</h2>
+        <MiniBars values={[92, 78, 64, 88]} />
+      </section>
+      <section className="detailPanel">
+        <h2>Favorites</h2>
+        <button className="linkButton" onClick={() => setActiveView('workOrders')}>Work Orders</button>
+        <button className="linkButton" onClick={() => openAsset(selectedEquipment)}>Selected Asset</button>
+      </section>
+      <section className="detailPanel">
+        <h2>Quick actions</h2>
+        <button className="textButton" onClick={() => createWorkOrderFromContext()}>
+          <Briefcase size={16} />
+          Create work order
+        </button>
+        <button className="textButton" onClick={() => runSupervisorAssistant()}>
+          <Bot size={16} />
+          Review follow-ups
+        </button>
+      </section>
+    </section>
+  )
+
+  const assetDetailView = (
+    <section className="assetDetailGrid">
+      <div className="pageHeader">
+        <p className="breadcrumb">Operational dashboard / Assets /</p>
+        <h1>{selectedHealth?.equipment.name}</h1>
+        <span>Last updated from live maintenance data</span>
+      </div>
+      <div className="tabRow">
+        {(['summary', 'maintenance', 'performance', 'reliability', 'documents', 'workOrders'] as AssetTab[]).map((tab) => (
+          <button className={assetTab === tab ? 'selected' : ''} onClick={() => setAssetTab(tab)} key={tab}>
+            {tab === 'workOrders' ? 'Work Orders' : tab[0].toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
+      </div>
+      <section className="detailPanel performanceInsights">
+        <div className="sectionHeader">
+          <Sparkles size={18} />
+          <h2>Performance insights</h2>
+        </div>
+        <div className="insightHero">
+          <span>Risk</span>
+          <strong>{100 - (selectedHealth?.health_score ?? 0)}%</strong>
+          <small>Probable cause</small>
+          <h2>{selectedHealth?.active_alerts[0]?.message ?? selectedHealth?.notes[0]}</h2>
+        </div>
+        <button className="outlineButton" onClick={runDiagnosis}>View data</button>
+      </section>
+      <section className="detailPanel">
+        <h2>Recommended actions</h2>
+        <ol className="actionList">
+          {(recommendation?.immediate_actions ?? selectedHealth?.notes ?? []).slice(0, 3).map((action) => (
+            <li key={action}>{action}</li>
+          ))}
+        </ol>
+        <button className="outlineButton" onClick={() => createWorkOrderFromContext(recommendation ?? undefined)}>
+          Create work order
+        </button>
+      </section>
+      <section className="healthStack">
+        <HealthTile label="Health" value={selectedHealth?.health_score ?? 0} />
+        <HealthTile label="Efficiency" value={Math.max(0, (selectedHealth?.health_score ?? 0) - 4)} />
+      </section>
+      <section className="detailPanel">
+        <h2>Maintenance history</h2>
+        <WorkOrderTable workOrders={assetWorkOrders} compact onOpen={(id) => { setSelectedWorkOrderId(id); setActiveView('workOrders') }} />
+      </section>
+      <LineChartCard title="Primary signal trend" health={selectedHealth} />
+      <LineChartCard title="Secondary signal trend" health={selectedHealth} />
+      <section className="detailPanel assetVisual">
+        <h2>Sub-systems</h2>
+        <ol>
+          <li>Drive train and coupling</li>
+          <li>Bearing housing and lubrication</li>
+          <li>Control and protection signals</li>
+        </ol>
+      </section>
+      <section className="detailPanel">
+        <h2>{assetTab === 'documents' ? 'Knowledge Retrieval' : 'Asset Context'}</h2>
+        <p>{selectedHealth?.notes.join(' ')}</p>
+        <ul>{selectedHealth?.top_spares_constraints.map((spare) => <li key={spare.id}>{spare.name}: {spare.available_qty} stock</li>)}</ul>
+      </section>
+      {canDecision && (
+        <section className="detailPanel assistantPanelWide">
+          <div className="diagnoseActionRow">
+            <button className="textButton" onClick={runDiagnosis}>
+              <CheckCircle2 size={16} />
+              Diagnose
+            </button>
+          </div>
+          <div className="chatPanel">
+            <div className="sectionHeader">
+              <MessageSquare size={18} />
+              <h2>Engineer Query</h2>
+            </div>
+            <div className="queryRow">
+              <textarea aria-label="Engineer question" rows={3} value={question} onChange={(event) => setQuestion(event.target.value)} />
+              <button onClick={sendQuestion} title="Ask maintenance wizard">
+                <Send size={18} />
+              </button>
+            </div>
+            {answer && <p className="answer">{answer}</p>}
+          </div>
+          {recommendationPanel}
+        </section>
+      )}
+    </section>
+  )
+
+  const workOrdersView = (
+    <section className="workOrderLayout">
+      <section className="detailPanel">
+        <div className="sectionHeader">
+          <Briefcase size={18} />
+          <h2>WOs with follow up actions</h2>
+        </div>
+        <WorkOrderTable workOrders={workOrders} onOpen={(id) => setSelectedWorkOrderId(id)} />
+        {workOrderMessage && <p className="inlineStatus">{workOrderMessage}</p>}
+      </section>
+      <section className="detailPanel workOrderDetail">
+        {selectedWorkOrder ? (
+          <>
+            <div className="sectionHeader">
+              <FileText size={18} />
+              <h2>Work Order {selectedWorkOrder.id.replace('WO-', '')}</h2>
+            </div>
+            <StatusTimeline status={selectedWorkOrder.status} />
+            <div className="workOrderSummary">
+              <span className="statusPill connected">Priority {selectedWorkOrder.priority}</span>
+              <span className="statusPill fallback">{selectedWorkOrder.status}</span>
+              <p>{selectedWorkOrder.description}</p>
+              <dl>
+                <dt>Assigned to</dt>
+                <dd>{selectedWorkOrder.assigned_to}</dd>
+                <dt>Problem code</dt>
+                <dd>{technicianAssistant?.suggested_problem_code ?? selectedWorkOrder.problem_code}</dd>
+                <dt>Failure class</dt>
+                <dd>{technicianAssistant?.suggested_failure_class ?? selectedWorkOrder.failure_class}</dd>
+                <dt>Due date</dt>
+                <dd>{formatDate(selectedWorkOrder.due_date)}</dd>
+              </dl>
+            </div>
+            <div className="assistantSplit">
+              <section className="assistantBox technician">
+                <div className="sectionHeader">
+                  <Bot size={18} />
+                  <h2>Technician AI Assistant</h2>
+                </div>
+                <p>{technicianAssistant?.next_prompt ?? 'Let’s start the work order. Do you observe any problems?'}</p>
+                <textarea
+                  aria-label="Technician observation"
+                  value={technicianObservation}
+                  onChange={(event) => setTechnicianObservation(event.target.value)}
+                />
+                <div className="buttonRow">
+                  <button className="textButton" onClick={runTechnicianAssistant}>Get live directions</button>
+                  <button className="textButton" onClick={completeSelectedWorkOrder}>Submit completed work</button>
+                </div>
+                {technicianAssistant && (
+                  <div className="assistantTranscript">
+                    <strong>Live directions</strong>
+                    <ul>{technicianAssistant.live_directions.map((item) => <li key={item}>{item}</li>)}</ul>
+                    <strong>Summary</strong>
+                    <p>{technicianAssistant.completion_summary}</p>
+                  </div>
+                )}
+              </section>
+              <section className="assistantBox supervisor">
+                <div className="sectionHeader">
+                  <Bot size={18} />
+                  <h2>Supervisor AI Assistant</h2>
+                </div>
+                <textarea
+                  aria-label="Supervisor question"
+                  value={supervisorQuestion}
+                  onChange={(event) => setSupervisorQuestion(event.target.value)}
+                />
+                <button className="textButton" onClick={() => runSupervisorAssistant(selectedWorkOrder.id)}>Review status</button>
+                {supervisorAssistant && (
+                  <div className="assistantTranscript">
+                    <p>{supervisorAssistant.summary}</p>
+                    <ul>{supervisorAssistant.follow_up_actions.map((item) => <li key={item}>{item}</li>)}</ul>
+                    {supervisorAssistant.draft_work_order && <p>Draft: {supervisorAssistant.draft_work_order.title}</p>}
+                  </div>
+                )}
+              </section>
+            </div>
+          </>
+        ) : (
+          <p className="emptyState">Select a work order to review.</p>
+        )}
+      </section>
+    </section>
+  )
 
   const ingestionView = (
     <section className="detailPanel ingestionView">
@@ -647,6 +1188,10 @@ export function App() {
               <ClipboardList size={17} />
               Dashboard
             </button>
+            <button className={`navButton ${activeView === 'workOrders' ? 'selected' : ''}`} onClick={() => setActiveView('workOrders')}>
+              <Briefcase size={17} />
+              Work Orders
+            </button>
             {canIngest && (
               <button className={`navButton ${activeView === 'ingestion' ? 'selected' : ''}`} onClick={() => setActiveView('ingestion')}>
                 <Upload size={17} />
@@ -669,10 +1214,7 @@ export function App() {
               <button
                 className={`assetRow ${item.equipment.id === selectedEquipment ? 'selected' : ''}`}
                 key={item.equipment.id}
-                onClick={() => {
-                  setSelectedEquipment(item.equipment.id)
-                  setActiveView('dashboard')
-                }}
+                onClick={() => openAsset(item.equipment.id)}
               >
                 <span>
                   <strong>{item.equipment.name}</strong>
@@ -685,205 +1227,11 @@ export function App() {
         </aside>
 
         {activeView === 'dashboard' ? (
-          <>
-            <section className="detailPanel">
-              <div className="sectionHeader">
-                <ClipboardList size={18} />
-                <h2>{selectedHealth?.equipment.name}</h2>
-              </div>
-              <div className="assetFacts">
-                <span>Process: {selectedHealth?.equipment.process}</span>
-                <span>Health: {selectedHealth?.health_score}%</span>
-                <span>Criticality: {selectedHealth?.equipment.criticality}/5</span>
-              </div>
-
-              <div className="split">
-                <div>
-                  <h3>Active Alerts</h3>
-                  {selectedHealth?.active_alerts.map((alert) => (
-                    <div className="alertLine" key={alert.id}>
-                      <span className={`riskDot ${alert.severity}`} />
-                      <span>{alert.message}</span>
-                      <strong>
-                        {alert.value} {alert.unit}
-                      </strong>
-                    </div>
-                  ))}
-                </div>
-                <div>
-                  <h3>Sensor Anomalies</h3>
-                  {selectedHealth?.anomalies.map((anomaly) => (
-                    <div className="anomalyLine" key={`${anomaly.signal}-${anomaly.timestamp}`}>
-                      <span className={`riskDot ${anomaly.risk_level}`} />
-                      <span>
-                        <strong>{anomaly.signal.replace(/_/g, ' ')}</strong>
-                        <small>
-                          z {anomaly.z_score} · baseline {anomaly.baseline_mean} {anomaly.unit}
-                        </small>
-                        {anomaly.context_class && <small>{anomaly.context_class.replace(/_/g, ' ')}</small>}
-                      </span>
-                      <strong>
-                        {anomaly.value} {anomaly.unit}
-                      </strong>
-                    </div>
-                  ))}
-                </div>
-                <div>
-                  <h3>Spares Constraints</h3>
-                  {selectedHealth?.top_spares_constraints.map((spare) => (
-                    <div className="spareLine" key={spare.id}>
-                      <span>{spare.name}</span>
-                      <strong>{spare.available_qty} stock</strong>
-                      <small>{spare.lead_time_days}d lead</small>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {canDecision && (
-                <>
-                  <div className="diagnoseActionRow">
-                    <button className="textButton" onClick={runDiagnosis}>
-                      <CheckCircle2 size={16} />
-                      Diagnose
-                    </button>
-                  </div>
-                  <div className="chatPanel">
-                    <div className="sectionHeader">
-                      <MessageSquare size={18} />
-                      <h2>Engineer Query</h2>
-                    </div>
-                    <div className="queryRow">
-                      <textarea
-                        aria-label="Engineer question"
-                        rows={3}
-                        value={question}
-                        onChange={(event) => setQuestion(event.target.value)}
-                      />
-                      <button onClick={sendQuestion} title="Ask maintenance wizard">
-                        <Send size={18} />
-                      </button>
-                    </div>
-                    {answer && <p className="answer">{answer}</p>}
-                  </div>
-                  <div className="recommendationSection">
-                    <div className="sectionHeader">
-                      <CheckCircle2 size={18} />
-                      <h2>Recommendation</h2>
-                    </div>
-                    {recommendation ? (
-                      <>
-                        <p className="diagnosis">{recommendation.diagnosis}</p>
-                        <span className={`riskBadge ${recommendation.risk_level}`}>{recommendation.risk_level}</span>
-                        <div className="recommendationFacts">
-                          <span>
-                            <small>Urgency</small>
-                            <strong>{recommendation.urgency}</strong>
-                          </span>
-                          <span>
-                            <small>RUL</small>
-                            <strong>{recommendation.remaining_useful_life_days ?? 'n/a'} days</strong>
-                          </span>
-                          <span>
-                            <small>Confidence</small>
-                            <strong>{Math.round(recommendation.confidence * 100)}%</strong>
-                          </span>
-                        </div>
-                        <h3>Probable Root Causes</h3>
-                        <ul>
-                          {recommendation.probable_root_causes.map((cause) => (
-                            <li key={cause}>{cause}</li>
-                          ))}
-                        </ul>
-                        <h3>Immediate Actions</h3>
-                        <ul>
-                          {recommendation.immediate_actions.map((action) => (
-                            <li key={action}>{action}</li>
-                          ))}
-                        </ul>
-                        <h3>Planned Actions</h3>
-                        <ul>
-                          {recommendation.planned_actions.map((action) => (
-                            <li key={action}>{action}</li>
-                          ))}
-                        </ul>
-                        <h3>Spares Strategy</h3>
-                        <ul>
-                          {recommendation.spares_strategy.map((action) => (
-                            <li key={action}>{action}</li>
-                          ))}
-                        </ul>
-                        {(recommendation.learning_notes ?? []).length > 0 && (
-                          <>
-                            <h3>Learning Notes</h3>
-                            {recommendation.learning_notes.map((note) => (
-                              <p className="learningNote" key={note}>
-                                {note}
-                              </p>
-                            ))}
-                          </>
-                        )}
-                        {recommendation.reasoning_explanation && (
-                          <>
-                            <h3>Reasoning Explanation</h3>
-                            <p className="learningNote">{recommendation.reasoning_explanation.summary}</p>
-                            <ul>
-                              {recommendation.reasoning_explanation.driver_explanations.slice(0, 3).map((driver) => (
-                                <li key={driver}>{driver}</li>
-                              ))}
-                            </ul>
-                          </>
-                        )}
-                        <h3>Evidence</h3>
-                        {recommendation.evidence.slice(0, 3).map((evidence) => (
-                          <p className="evidence" key={evidence.source_id}>
-                            <strong>{evidence.title}</strong>
-                            {evidence.excerpt}
-                            {evidence.relevance_reason && <small>{evidence.relevance_reason}</small>}
-                          </p>
-                        ))}
-                        {canFeedback && (
-                          <>
-                            <div className="feedbackDetails">
-                              <label className="field">
-                                <span>Actual Root Cause</span>
-                                <input value={feedbackRootCause} onChange={(event) => setFeedbackRootCause(event.target.value)} />
-                              </label>
-                              <label className="field">
-                                <span>Action Taken</span>
-                                <input value={feedbackActionTaken} onChange={(event) => setFeedbackActionTaken(event.target.value)} />
-                              </label>
-                              <label className="field">
-                                <span>Outcome</span>
-                                <input value={feedbackOutcome} onChange={(event) => setFeedbackOutcome(event.target.value)} />
-                              </label>
-                              <label className="field">
-                                <span>Notes</span>
-                                <input value={feedbackNotes} onChange={(event) => setFeedbackNotes(event.target.value)} />
-                              </label>
-                            </div>
-                            <div className="feedbackRow">
-                              <button onClick={() => sendFeedback('accepted')}>Accept</button>
-                              <button onClick={() => sendFeedback('corrected')}>Correct</button>
-                              <button onClick={() => sendFeedback('rejected')}>Reject</button>
-                            </div>
-                            {feedbackMessage && <p className="inlineStatus">{feedbackMessage}</p>}
-                          </>
-                        )}
-                        <button className="downloadReport" onClick={downloadReport}>
-                          <Download size={16} />
-                          Export Report
-                        </button>
-                        {reportMessage && <p className="inlineStatus">{reportMessage}</p>}
-                      </>
-                    ) : (
-                      <p className="emptyState">Run diagnosis or ask a question to generate cited maintenance actions.</p>
-                    )}
-                  </div>
-                </>
-              )}
-            </section>
-          </>
+          operationalDashboardView
+        ) : activeView === 'asset' ? (
+          assetDetailView
+        ) : activeView === 'workOrders' ? (
+          workOrdersView
         ) : activeView === 'ingestion' ? (
           ingestionView
         ) : (
@@ -902,4 +1250,130 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
       <strong>{value}</strong>
     </div>
   )
+}
+
+function KpiCard({ title, value, unit, detail, ai }: { title: string; value: string; unit: string; detail: string; ai?: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <section className="kpiCard">
+      <div className="kpiHeader">
+        <h2>{title}</h2>
+        {ai && (
+          <button className="aiBadge" onClick={() => setOpen(!open)} title="Explain with AI">
+            AI
+          </button>
+        )}
+      </div>
+      <p>
+        <strong>{value}</strong> {unit}
+      </p>
+      <small>{detail}</small>
+      {open && <div className="aiPopover">{ai}</div>}
+    </section>
+  )
+}
+
+function WorkOrderTable({
+  workOrders,
+  onOpen,
+  compact = false,
+}: {
+  workOrders: WorkOrder[]
+  onOpen: (id: string) => void
+  compact?: boolean
+}) {
+  return (
+    <div className={`workOrderTable ${compact ? 'compact' : ''}`}>
+      <div className="workOrderHead">
+        <span>Work order</span>
+        <span>Description</span>
+        {!compact && <span>Recommended action</span>}
+        <span>Status</span>
+        <span>Asset</span>
+      </div>
+      {workOrders.map((order) => (
+        <button className="workOrderRow" onClick={() => onOpen(order.id)} key={order.id}>
+          <strong>{order.id}</strong>
+          <span>{order.title}</span>
+          {!compact && <span>{order.recommended_action}</span>}
+          <span>{order.status}</span>
+          <span>{order.equipment_id}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function BarChart({ assets }: { assets: HealthSummary[] }) {
+  return (
+    <div className="barChart" aria-label="Equipment efficiency bar chart">
+      {assets.map((item) => (
+        <div className="barGroup" key={item.equipment.id}>
+          <span style={{ height: `${Math.max(8, item.health_score)}%` }} />
+          <small>{item.equipment.id.split('-')[0]}</small>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MiniBars({ values }: { values: number[] }) {
+  return (
+    <div className="miniBars">
+      {values.map((value, index) => (
+        <span style={{ height: `${value}%` }} key={`${value}-${index}`} />
+      ))}
+    </div>
+  )
+}
+
+function HealthTile({ label, value }: { label: string; value: number }) {
+  return (
+    <section className="healthTile">
+      <h2>{label}</h2>
+      <strong>{value}%</strong>
+      <small>{value < 70 ? 'Under target' : 'On target'}</small>
+    </section>
+  )
+}
+
+function LineChartCard({ title, health }: { title: string; health?: HealthSummary }) {
+  const points = (health?.anomalies.length ? health.anomalies : []).slice(0, 8)
+  const values = points.length ? points.map((item) => Math.min(100, Math.max(5, item.value))) : [42, 48, 45, 55, 52, 60, 58, 70]
+  const path = values
+    .map((value, index) => `${index === 0 ? 'M' : 'L'} ${20 + index * 42} ${120 - value}`)
+    .join(' ')
+  return (
+    <section className="detailPanel chartCard">
+      <h2>{title}</h2>
+      <svg viewBox="0 0 340 140" role="img" aria-label={`${title} line chart`}>
+        <path d="M20 120 H320" className="axis" />
+        <path d="M20 20 V120" className="axis" />
+        <path d={path} className="linePath" />
+      </svg>
+    </section>
+  )
+}
+
+function StatusTimeline({ status }: { status: string }) {
+  const statuses = ['WAPPR', 'WMATL', 'APPR', 'INPRG', 'COMP', 'CLOSE']
+  const activeIndex = Math.max(0, statuses.indexOf(status))
+  return (
+    <div className="statusTimeline" aria-label="Work order status">
+      {statuses.map((item, index) => (
+        <span className={index <= activeIndex ? 'active' : ''} key={item}>
+          <i />
+          {item}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function formatDate(value: string) {
+  try {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+  } catch {
+    return value
+  }
 }

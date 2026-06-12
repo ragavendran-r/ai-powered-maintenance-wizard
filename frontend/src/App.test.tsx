@@ -205,6 +205,55 @@ const recommendation = {
   report_summary: 'Critical risk with estimated RUL of 23 days.',
 }
 
+const workOrders = [
+  {
+    id: 'WO-8304',
+    equipment_id: 'RM-DRIVE-01',
+    title: 'Inspect main drive bearing vibration',
+    description: 'Inspect bearing housing, coupling alignment, lubrication condition, and foundation bolts.',
+    status: 'INPRG',
+    priority: 1,
+    work_type: 'CM',
+    failure_class: 'MECH',
+    problem_code: 'BRGVIB',
+    classification: 'Bearing vibration',
+    assigned_to: 'Maintenance Engineer',
+    supervisor: 'Maintenance Supervisor',
+    due_date: '2026-06-12T18:00:00+05:30',
+    recommended_action: 'Reduce load if vibration persists and verify coupling alignment.',
+    follow_up_required: true,
+    ai_summary: 'High-risk drive vibration needs mechanical inspection before restart.',
+    completion_summary: null,
+    created_at: '2026-06-11T08:00:00+05:30',
+    updated_at: '2026-06-11T11:00:00+05:30',
+    completed_at: null,
+    logs: [],
+  },
+  {
+    id: 'WO-8297',
+    equipment_id: 'OH-CRANE-05',
+    title: 'Inspect hoist brake temperature and current',
+    description: 'Review hoist current and brake temperature after heavy-lift restriction.',
+    status: 'COMP',
+    priority: 1,
+    work_type: 'EM',
+    failure_class: 'ELEC',
+    problem_code: 'HOISTBRK',
+    classification: 'Hoist braking',
+    assigned_to: 'Crane Technician',
+    supervisor: 'Melt Shop Supervisor',
+    due_date: '2026-06-11T17:00:00+05:30',
+    recommended_action: 'Plan brake shoe replacement follow-up.',
+    follow_up_required: true,
+    ai_summary: 'Completed inspection still needs supervisor follow-up.',
+    completion_summary: 'Brake temperature normalized after lift restriction.',
+    created_at: '2026-06-10T09:00:00+05:30',
+    updated_at: '2026-06-11T16:35:00+05:30',
+    completed_at: '2026-06-11T16:35:00+05:30',
+    logs: [],
+  },
+]
+
 function userFor(email = 'admin@plant.local') {
   const roles: Record<string, UserRole> = {
     'admin@plant.local': 'admin',
@@ -287,6 +336,55 @@ beforeEach(() => {
       if (url.endsWith('/api/dashboard/summary')) {
         return Promise.resolve(new Response(JSON.stringify(dashboard), { status: 200 }))
       }
+      if (url.includes('/api/work-orders/technician-assist')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              work_order_id: 'WO-8304',
+              next_prompt: 'Do you observe looseness or damaged insulation?',
+              live_directions: ['Verify torque on bolted connections.', 'Record before and after vibration readings.'],
+              recommendations: ['Set problem code LWTQCONNECT.'],
+              safety_reminders: ['Apply lockout/tagout.'],
+              suggested_problem_code: 'LWTQCONNECT',
+              suggested_failure_class: 'MECH',
+              completion_summary: 'Connections were tightened to spec.',
+              evidence: recommendation.evidence,
+              used_live_provider: false,
+              provider: 'mock',
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.includes('/api/work-orders/supervisor-assist')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              summary: '2 work order(s) reviewed; 2 require follow-up action.',
+              follow_up_actions: ['Review WO-8297 brake shoe replacement planning.'],
+              risks: ['WO-8304 remains priority 1 and INPRG.'],
+              draft_work_order: null,
+              referenced_work_orders: ['WO-8304', 'WO-8297'],
+              used_live_provider: false,
+              provider: 'mock',
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.includes('/api/work-orders')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse((init.body as string) ?? '{}')
+          return Promise.resolve(
+            new Response(JSON.stringify({ ...workOrders[0], ...body, id: 'WO-9001', status: 'WAPPR' }), { status: 201 }),
+          )
+        }
+        if (init?.method === 'PATCH') {
+          const body = JSON.parse((init.body as string) ?? '{}')
+          return Promise.resolve(new Response(JSON.stringify({ ...workOrders[0], ...body }), { status: 200 }))
+        }
+        return Promise.resolve(new Response(JSON.stringify(workOrders), { status: 200 }))
+      }
       if (url.endsWith('/api/streaming/status')) {
         return Promise.resolve(
           new Response(
@@ -344,13 +442,19 @@ describe('Maintenance Wizard dashboard', () => {
     await signIn()
 
     expect(await screen.findByText('API connected')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Hot Strip Mill Main Drive Motor' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Assets at risk' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Work queues' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Equipment efficiency' })).toBeInTheDocument()
     expect(screen.getByText('Priority Assets (5)')).toBeInTheDocument()
     expect(screen.getByText('Melt Shop Overhead Crane')).toBeInTheDocument()
     expect(screen.getByText('Hot Rolling Hydraulic System')).toBeInTheDocument()
-    expect(screen.getByText('Sensor Anomalies')).toBeInTheDocument()
-    expect(screen.getByText('drive end vibration')).toBeInTheDocument()
-    expect(screen.getByText('z 8.35 · baseline 5.24 mm/s')).toBeInTheDocument()
+    const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText('Hot Strip Mill Main Drive Motor').closest('button')
+    if (!assetButton) throw new Error('Missing asset button')
+    fireEvent.click(assetButton)
+    expect(screen.getByRole('heading', { name: 'Hot Strip Mill Main Drive Motor' })).toBeInTheDocument()
+    expect(screen.getByText('Performance insights')).toBeInTheDocument()
+    expect(screen.getByText('Maintenance history')).toBeInTheDocument()
+    expect(screen.getByText('Primary signal trend')).toBeInTheDocument()
     const diagnoseButton = screen.getByRole('button', { name: 'Diagnose' })
     const engineerQueryHeading = screen.getByRole('heading', { name: 'Engineer Query' })
     const engineerQuestion = screen.getByRole('textbox', { name: 'Engineer question' })
@@ -365,30 +469,32 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn()
 
+    const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText('Hot Strip Mill Main Drive Motor').closest('button')
+    if (!assetButton) throw new Error('Missing asset button')
+    fireEvent.click(assetButton)
     fireEvent.click(await screen.findByText('Diagnose'))
 
     await waitFor(() => {
-      expect(screen.getByText('Reduce load or schedule controlled shutdown.')).toBeInTheDocument()
+      expect(screen.getAllByText('Reduce load or schedule controlled shutdown.').length).toBeGreaterThan(0)
     })
-    expect(screen.getByText('Bearing wear')).toBeInTheDocument()
     expect(screen.getByText('Trend the abnormal signal.')).toBeInTheDocument()
-    expect(screen.getByText('Review Drive end spherical roller bearing: 0 on hand, 21 day lead time.')).toBeInTheDocument()
     expect(screen.getByText('23 days')).toBeInTheDocument()
     expect(screen.getByText('77%')).toBeInTheDocument()
-    expect(screen.getByText('corrected recommendation feedback; actual root cause: Loose foundation bolt resonance')).toBeInTheDocument()
     expect(screen.getByText('Hot Strip Mill Main Drive Vibration SOP')).toBeInTheDocument()
-    const assetDetailPanel = screen.getByRole('heading', { name: 'Hot Strip Mill Main Drive Motor' }).closest('.detailPanel')
     const recommendationHeading = screen.getByRole('heading', { name: 'Recommendation' })
     const engineerQueryHeading = screen.getByRole('heading', { name: 'Engineer Query' })
-    expect(recommendationHeading.closest('.detailPanel')).toBe(assetDetailPanel)
     expect(Boolean(engineerQueryHeading.compareDocumentPosition(recommendationHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(screen.getByRole('button', { name: /export report/i })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /create work order/i }).length).toBeGreaterThan(0)
   })
 
   it('stores detailed engineer feedback for learning', async () => {
     render(<App />)
     await signIn()
 
+    const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText('Hot Strip Mill Main Drive Motor').closest('button')
+    if (!assetButton) throw new Error('Missing asset button')
+    fireEvent.click(assetButton)
     fireEvent.click(await screen.findByText('Diagnose'))
     await screen.findByText('Actual Root Cause')
     fireEvent.change(screen.getByLabelText('Actual Root Cause'), { target: { value: 'Loose foundation bolt resonance' } })
@@ -409,6 +515,28 @@ describe('Maintenance Wizard dashboard', () => {
       action_taken: 'Retorqued foundation bolts',
       outcome: 'Vibration normalized',
     })
+  })
+
+  it('opens work orders and uses technician and supervisor AI assistants', async () => {
+    render(<App />)
+    await signIn()
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
+    expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
+    expect(screen.getByText('Work Order 8304')).toBeInTheDocument()
+    expect(screen.getByText('Technician AI Assistant')).toBeInTheDocument()
+    expect(screen.getByText('Supervisor AI Assistant')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Technician observation'), {
+      target: { value: 'Connections 3 and 5 were loose.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Get live directions' }))
+    expect(await screen.findByText('Verify torque on bolted connections.')).toBeInTheDocument()
+    expect(screen.getByText('Connections were tightened to spec.')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review status' }))
+    expect(await screen.findByText('2 work order(s) reviewed; 2 require follow-up action.')).toBeInTheDocument()
+    expect(screen.getByText('Review WO-8297 brake shoe replacement planning.')).toBeInTheDocument()
   })
 
   it('uploads document files from the ingestion panel', async () => {

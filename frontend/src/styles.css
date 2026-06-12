@@ -794,15 +794,383 @@ h3 {
   max-width: 680px;
 }
 
+.dashboardGrid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.kpiCard {
+  background: #ffffff;
+  border: 1px solid #d8e0e5;
+  border-radius: 6px;
+  min-height: 150px;
+  padding: 16px;
+  position: relative;
+}
+
+.kpiHeader {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.kpiCard p {
+  color: #60717c;
+  margin: 18px 0 10px;
+}
+
+.kpiCard p strong {
+  color: #d4a91f;
+  font-size: 40px;
+  font-weight: 400;
+}
+
+.aiBadge {
+  background: #ffffff;
+  border: 1px solid #25323b;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 800;
+  height: 24px;
+  width: 24px;
+}
+
+.aiPopover {
+  background: #ffffff;
+  border: 1px solid #c9d9e1;
+  border-radius: 6px;
+  box-shadow: 0 16px 42px rgb(24 32 41 / 18%);
+  color: #394956;
+  left: 42%;
+  padding: 14px;
+  position: absolute;
+  top: 44px;
+  width: min(320px, 80vw);
+  z-index: 5;
+}
+
+.queuePanel,
+.chartPanel {
+  grid-column: span 2;
+}
+
+.workOrderTable {
+  border: 1px solid #e1e7eb;
+  overflow-x: auto;
+}
+
+.workOrderHead,
+.workOrderRow {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 130px minmax(180px, 1fr) minmax(220px, 1.3fr) 90px 120px;
+  min-width: 760px;
+  padding: 11px 14px;
+}
+
+.workOrderTable.compact .workOrderHead,
+.workOrderTable.compact .workOrderRow {
+  grid-template-columns: 110px minmax(180px, 1fr) 90px 110px;
+  min-width: 520px;
+}
+
+.workOrderHead {
+  background: #d7d9db;
+  color: #25323b;
+  font-weight: 800;
+}
+
+.workOrderRow {
+  background: #ffffff;
+  border: 0;
+  border-top: 1px solid #edf1f3;
+  color: #394956;
+  text-align: left;
+  width: 100%;
+}
+
+.workOrderRow strong,
+.linkButton {
+  color: #3974a6;
+}
+
+.barChart {
+  align-items: end;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(5, 1fr);
+  height: 260px;
+  padding: 20px 24px 0;
+}
+
+.barGroup {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  height: 100%;
+  justify-items: center;
+}
+
+.barGroup span {
+  align-self: end;
+  background: linear-gradient(180deg, #7d3fc7, #17828a);
+  border-radius: 3px 3px 0 0;
+  width: 30px;
+}
+
+.miniBars {
+  align-items: end;
+  display: flex;
+  gap: 16px;
+  height: 160px;
+  padding-top: 20px;
+}
+
+.miniBars span {
+  background: #3c7fb1;
+  border-radius: 3px 3px 0 0;
+  width: 34px;
+}
+
+.linkButton {
+  background: transparent;
+  border: 0;
+  display: block;
+  font-weight: 700;
+  margin-top: 10px;
+  padding: 0;
+  text-align: left;
+}
+
+.assetDetailGrid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1.2fr 0.9fr 0.6fr 1.2fr;
+}
+
+.pageHeader {
+  grid-column: 1 / -1;
+}
+
+.pageHeader h1 {
+  font-size: 30px;
+}
+
+.breadcrumb {
+  color: #3974a6;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.tabRow {
+  border-bottom: 1px solid #d8e0e5;
+  display: flex;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.tabRow button {
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  color: #60717c;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.tabRow button.selected {
+  border-bottom-color: #3974a6;
+  color: #25323b;
+  font-weight: 800;
+}
+
+.performanceInsights {
+  border-color: #a8cbe5;
+}
+
+.insightHero strong {
+  display: block;
+  font-size: 44px;
+  font-weight: 400;
+}
+
+.insightHero h2 {
+  font-size: 26px;
+  margin: 8px 0 18px;
+}
+
+.actionList {
+  display: grid;
+  gap: 10px;
+  padding-left: 20px;
+}
+
+.healthStack {
+  display: grid;
+  gap: 16px;
+}
+
+.healthTile {
+  background: #ffffff;
+  border: 1px solid #d8e0e5;
+  border-radius: 6px;
+  padding: 16px;
+}
+
+.healthTile strong {
+  display: block;
+  font-size: 42px;
+  font-weight: 400;
+}
+
+.chartCard svg {
+  height: 180px;
+  width: 100%;
+}
+
+.axis {
+  stroke: #ccd7dd;
+  stroke-width: 2;
+}
+
+.linePath {
+  fill: none;
+  stroke: #6fb0d0;
+  stroke-width: 3;
+}
+
+.assetVisual,
+.assistantPanelWide {
+  grid-column: span 2;
+}
+
+.workOrderLayout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(420px, 1fr) minmax(480px, 1.2fr);
+}
+
+.statusTimeline {
+  background: #f7f9fa;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(6, 1fr);
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.statusTimeline span {
+  color: #60717c;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.statusTimeline i {
+  border: 2px solid #6f7f89;
+  border-radius: 999px;
+  height: 22px;
+  width: 22px;
+}
+
+.statusTimeline span.active i {
+  background: #356ff0;
+  border-color: #356ff0;
+}
+
+.workOrderSummary dl {
+  display: grid;
+  gap: 8px 16px;
+  grid-template-columns: 120px 1fr;
+}
+
+.workOrderSummary dt {
+  color: #60717c;
+  font-weight: 700;
+}
+
+.workOrderSummary dd {
+  margin: 0;
+}
+
+.assistantSplit {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.assistantBox {
+  background: #f7f9fa;
+  border: 1px solid #dce5ea;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.assistantBox textarea {
+  min-height: 110px;
+}
+
+.buttonRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.assistantTranscript {
+  background: #ffffff;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
 @media (max-width: 1100px) {
   .metricsGrid,
   .workArea,
+  .dashboardGrid,
+  .assetDetailGrid,
+  .workOrderLayout,
+  .assistantSplit,
   .split,
   .ingestionGrid,
   .jsonIngest,
   .userCreateGrid,
   .userRow {
     grid-template-columns: 1fr;
+  }
+
+  .queuePanel,
+  .chartPanel,
+  .assetVisual,
+  .assistantPanelWide {
+    grid-column: auto;
+  }
+
+  .workOrderHead,
+  .workOrderRow,
+  .workOrderTable.compact .workOrderHead,
+  .workOrderTable.compact .workOrderRow {
+    grid-template-columns: 92px minmax(0, 1fr) 74px;
+    min-width: 0;
+  }
+
+  .workOrderHead span:nth-child(3),
+  .workOrderHead span:nth-child(5),
+  .workOrderRow span:nth-child(3),
+  .workOrderRow span:nth-child(5) {
+    display: none;
+  }
+
+  .statusTimeline {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .barChart {
+    overflow-x: hidden;
+    padding-inline: 6px;
   }
 
   .appShell {

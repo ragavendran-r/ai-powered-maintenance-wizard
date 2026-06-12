@@ -3,6 +3,8 @@ from pydantic import BaseModel, Field
 
 
 RiskLevel = Literal["low", "medium", "high", "critical"]
+WorkOrderStatus = Literal["WAPPR", "WMATL", "APPR", "INPRG", "COMP", "CLOSE"]
+WorkOrderAssistantAudience = Literal["technician", "supervisor"]
 AnomalyContextClass = Literal[
     "requires_investigation",
     "startup_transient",
@@ -68,6 +70,113 @@ class MaintenanceEvent(BaseModel):
     root_cause: str
     action: str
     downtime_hours: float
+
+
+class WorkOrderLog(BaseModel):
+    id: int
+    work_order_id: str
+    author: str
+    entry_type: str
+    content: str
+    created_at: str
+
+
+class WorkOrder(BaseModel):
+    id: str
+    equipment_id: str
+    title: str
+    description: str
+    status: WorkOrderStatus = "WAPPR"
+    priority: int = Field(ge=1, le=5)
+    work_type: str = "CM"
+    failure_class: str = "MECH"
+    problem_code: str = "INVESTIGATE"
+    classification: str = "Corrective"
+    assigned_to: str
+    supervisor: str
+    due_date: str
+    recommended_action: str
+    follow_up_required: bool = False
+    ai_summary: Optional[str] = None
+    completion_summary: Optional[str] = None
+    created_at: str
+    updated_at: str
+    completed_at: Optional[str] = None
+    logs: list[WorkOrderLog] = []
+
+
+class WorkOrderCreateRequest(BaseModel):
+    equipment_id: str
+    title: str
+    description: str
+    priority: int = Field(default=2, ge=1, le=5)
+    work_type: str = "CM"
+    failure_class: str = "MECH"
+    problem_code: str = "INVESTIGATE"
+    classification: str = "Corrective"
+    assigned_to: str = "Maintenance Engineer"
+    supervisor: str = "Maintenance Supervisor"
+    due_date: str
+    recommended_action: str = "Inspect asset and update work log with findings."
+    follow_up_required: bool = False
+    ai_summary: Optional[str] = None
+
+
+class WorkOrderUpdateRequest(BaseModel):
+    status: Optional[WorkOrderStatus] = None
+    priority: Optional[int] = Field(default=None, ge=1, le=5)
+    assigned_to: Optional[str] = None
+    supervisor: Optional[str] = None
+    due_date: Optional[str] = None
+    recommended_action: Optional[str] = None
+    problem_code: Optional[str] = None
+    failure_class: Optional[str] = None
+    classification: Optional[str] = None
+    follow_up_required: Optional[bool] = None
+    ai_summary: Optional[str] = None
+    completion_summary: Optional[str] = None
+
+
+class WorkOrderLogRequest(BaseModel):
+    author: str
+    entry_type: str = "note"
+    content: str
+
+
+class TechnicianAssistantRequest(BaseModel):
+    work_order_id: str
+    observation: Optional[str] = None
+    requested_step: Optional[str] = None
+
+
+class TechnicianAssistantResponse(BaseModel):
+    work_order_id: str
+    next_prompt: str
+    live_directions: list[str]
+    recommendations: list[str]
+    safety_reminders: list[str]
+    suggested_problem_code: str
+    suggested_failure_class: str
+    completion_summary: str
+    evidence: list[Evidence] = []
+    used_live_provider: bool = False
+    provider: str = "mock"
+
+
+class SupervisorAssistantRequest(BaseModel):
+    work_order_id: Optional[str] = None
+    queue_name: Optional[str] = None
+    question: Optional[str] = None
+
+
+class SupervisorAssistantResponse(BaseModel):
+    summary: str
+    follow_up_actions: list[str]
+    risks: list[str]
+    draft_work_order: Optional[WorkOrderCreateRequest] = None
+    referenced_work_orders: list[str] = []
+    used_live_provider: bool = False
+    provider: str = "mock"
 
 
 class SensorReading(BaseModel):

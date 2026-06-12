@@ -117,6 +117,42 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS work_orders (
+        id TEXT PRIMARY KEY,
+        equipment_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL,
+        priority INTEGER NOT NULL,
+        work_type TEXT NOT NULL,
+        failure_class TEXT NOT NULL,
+        problem_code TEXT NOT NULL,
+        classification TEXT NOT NULL,
+        assigned_to TEXT NOT NULL,
+        supervisor TEXT NOT NULL,
+        due_date TEXT NOT NULL,
+        recommended_action TEXT NOT NULL,
+        follow_up_required INTEGER NOT NULL DEFAULT 0,
+        ai_summary TEXT,
+        completion_summary TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        completed_at TEXT,
+        FOREIGN KEY (equipment_id) REFERENCES equipment(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS work_order_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        work_order_id TEXT NOT NULL,
+        author TEXT NOT NULL,
+        entry_type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (work_order_id) REFERENCES work_orders(id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS documents (
         id TEXT PRIMARY KEY,
         source_type TEXT NOT NULL,
@@ -227,7 +263,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 
 
 def get_database_path() -> Path:
@@ -304,9 +340,128 @@ def seed_from_sample_data(connection: sqlite3.Connection) -> None:
         ["id", "source_type", "equipment_id", "title", "content"],
         data["documents"],
     )
+    seed_demo_work_orders(connection)
     from app.data.repository import rebuild_document_chunks
 
     rebuild_document_chunks(connection)
+
+
+def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
+    work_orders = [
+        {
+            "id": "WO-8304",
+            "equipment_id": "RM-DRIVE-01",
+            "title": "Inspect main drive bearing vibration",
+            "description": "Inspect drive-end bearing housing, coupling alignment, lubrication condition, and foundation bolts after critical vibration alert.",
+            "status": "INPRG",
+            "priority": 1,
+            "work_type": "CM",
+            "failure_class": "MECH",
+            "problem_code": "BRGVIB",
+            "classification": "Bearing vibration",
+            "assigned_to": "Maintenance Engineer",
+            "supervisor": "Maintenance Supervisor",
+            "due_date": "2026-06-12T18:00:00+05:30",
+            "recommended_action": "Reduce load if vibration persists, inspect bearing housing temperature, verify coupling alignment, and document final root cause.",
+            "follow_up_required": True,
+            "ai_summary": "High-risk drive vibration with unavailable bearing spare; technician should verify mechanical looseness and bearing condition before restart.",
+            "completion_summary": None,
+            "completed_at": None,
+        },
+        {
+            "id": "WO-8311",
+            "equipment_id": "BF-BLOWER-02",
+            "title": "Verify inlet guide vane actuator response",
+            "description": "Check actuator travel, linkage looseness, position feedback drift, and pressure variance on combustion air blower.",
+            "status": "APPR",
+            "priority": 2,
+            "work_type": "CM",
+            "failure_class": "CTRL",
+            "problem_code": "IGVACT",
+            "classification": "Control actuator",
+            "assigned_to": "Reliability Engineer",
+            "supervisor": "Blast Furnace Supervisor",
+            "due_date": "2026-06-13T12:00:00+05:30",
+            "recommended_action": "Stroke-test the guide vane actuator and compare position feedback with outlet pressure variance trend.",
+            "follow_up_required": False,
+            "ai_summary": "Pressure variance suggests guide vane actuator or linkage response drift.",
+            "completion_summary": None,
+            "completed_at": None,
+        },
+        {
+            "id": "WO-8297",
+            "equipment_id": "OH-CRANE-05",
+            "title": "Inspect hoist brake temperature and current",
+            "description": "Restrict heavy lifts until hoist brake shoes, motor current, and brake temperature are inspected.",
+            "status": "COMP",
+            "priority": 1,
+            "work_type": "EM",
+            "failure_class": "ELEC",
+            "problem_code": "HOISTBRK",
+            "classification": "Hoist braking",
+            "assigned_to": "Crane Technician",
+            "supervisor": "Melt Shop Supervisor",
+            "due_date": "2026-06-11T17:00:00+05:30",
+            "recommended_action": "Confirm brake shoe wear and motor current after lift restriction.",
+            "follow_up_required": True,
+            "ai_summary": "Completed crane inspection still requires supervisor follow-up because brake spares are unavailable.",
+            "completion_summary": "Brake temperature was verified after load restriction; follow-up is required for brake shoe replacement planning.",
+            "completed_at": "2026-06-11T16:35:00+05:30",
+        },
+        {
+            "id": "WO-8275",
+            "equipment_id": "HYD-SYS-04",
+            "title": "Investigate hydraulic oil temperature rise",
+            "description": "Inspect cooler fouling, pump cartridge condition, and pressure pulsation during roll gap correction.",
+            "status": "WMATL",
+            "priority": 2,
+            "work_type": "PM",
+            "failure_class": "HYD",
+            "problem_code": "OILTEMP",
+            "classification": "Hydraulic temperature",
+            "assigned_to": "Hydraulic Technician",
+            "supervisor": "Rolling Mill Supervisor",
+            "due_date": "2026-06-14T10:00:00+05:30",
+            "recommended_action": "Reserve pump cartridge assembly, inspect cooler differential temperature, and trend pressure pulsation.",
+            "follow_up_required": False,
+            "ai_summary": "Hydraulic oil temperature and pressure pulsation require material coordination before intrusive work.",
+            "completion_summary": None,
+            "completed_at": None,
+        },
+    ]
+    columns = [
+        "id",
+        "equipment_id",
+        "title",
+        "description",
+        "status",
+        "priority",
+        "work_type",
+        "failure_class",
+        "problem_code",
+        "classification",
+        "assigned_to",
+        "supervisor",
+        "due_date",
+        "recommended_action",
+        "follow_up_required",
+        "ai_summary",
+        "completion_summary",
+        "completed_at",
+    ]
+    _insert_many(connection, "work_orders", columns, work_orders)
+    connection.execute("DELETE FROM work_order_logs WHERE work_order_id IN ('WO-8304', 'WO-8297')")
+    connection.executemany(
+        """
+        INSERT INTO work_order_logs (work_order_id, author, entry_type, content)
+        VALUES (?, ?, ?, ?)
+        """,
+        [
+            ("WO-8304", "Maintenance Wizard", "assistant", "Start with lockout, bearing temperature, coupling alignment, and foundation bolt checks."),
+            ("WO-8304", "Maintenance Engineer", "observation", "Drive-end vibration confirmed at reduced finishing stand load."),
+            ("WO-8297", "Crane Technician", "completion", "Brake temperature normalized after restriction; shoe set needs follow-up replacement planning."),
+        ],
+    )
 
 
 def seed_demo_users(connection: sqlite3.Connection) -> None:
@@ -352,6 +507,8 @@ def database_status() -> dict[str, Any]:
         "sensor_readings",
         "spares",
         "maintenance_events",
+        "work_orders",
+        "work_order_logs",
         "documents",
         "document_chunks",
         "document_intelligence",
