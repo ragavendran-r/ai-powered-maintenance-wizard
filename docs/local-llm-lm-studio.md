@@ -165,8 +165,8 @@ Then verify:
 - Frontend responds at `http://127.0.0.1:5173`.
 - Login works with `admin@plant.local` and `DemoPass123!`.
 - Engineer Query for `RM-DRIVE-01` returns a recommendation badge such as `Live LLM · openai`.
-- Login as `technician@plant.local`, open Work Orders, and use the Technician AI Assistant chat `Send` button. The response should show `Live LLM · openai`.
-- Login as `supervisor@plant.local`, open Work Orders, and use the Supervisor AI Assistant chat `Send` button. The response should show `Live LLM · openai`.
+- Login as `technician@plant.local`, open Work Orders, and use Smith's chat `Send` button. The response should show `Live LLM · openai`.
+- Login as `supervisor@plant.local`, open Work Orders, and use Trinity's chat `Send` button. The response should show `Live LLM · openai`.
 
 The backend validates every model response with Pydantic. If LM Studio is stopped, times out, or returns malformed JSON, the app falls back to deterministic local reasoning. The full Engineer Query path can invoke several optional enrichment calls, so it is slower than the focused technician and supervisor assistant routes on a local 7B model.
 

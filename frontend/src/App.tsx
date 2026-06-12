@@ -74,6 +74,8 @@ const roleOptions: UserRole[] = [
 const decisionRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer', 'planner']
 const technicianAssistantRoles: UserRole[] = ['maintenance_technician']
 const supervisorAssistantRoles: UserRole[] = ['maintenance_supervisor']
+const technicianAssistantName = 'Smith'
+const supervisorAssistantName = 'Trinity'
 const feedbackRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer']
 const ingestionRoles: UserRole[] = ['admin', 'reliability_engineer']
 const streamingRoles: UserRole[] = ['admin', 'reliability_engineer']
@@ -200,7 +202,7 @@ export function App() {
     {
       id: 'technician-welcome',
       role: 'assistant',
-      content: 'Let’s start the work order. Do you observe any problems?',
+      content: `I’m ${technicianAssistantName}. Let’s start the work order. Do you observe any problems?`,
     },
   ])
   const [supervisorQuestion, setSupervisorQuestion] = useState('Summarize follow-up actions for completed work orders.')
@@ -209,7 +211,7 @@ export function App() {
     {
       id: 'supervisor-welcome',
       role: 'assistant',
-      content: 'Ask me to summarize follow-ups, risks, or draft a follow-up work order.',
+      content: `I’m ${supervisorAssistantName}. Ask me to summarize follow-ups, risks, or draft a follow-up work order.`,
     },
   ])
   const [question, setQuestion] = useState('Why is the hot strip mill main drive vibrating?')
@@ -618,7 +620,7 @@ export function App() {
         },
       ])
       setTechnicianObservation('')
-      setWorkOrderMessage('Technician assistant updated the recommended problem code and summary')
+      setWorkOrderMessage(`${technicianAssistantName} updated the recommended problem code and summary`)
     } catch {
       const fallbackResponse = {
         work_order_id: selectedWorkOrder.id,
@@ -700,7 +702,7 @@ export function App() {
         },
       ])
       setSupervisorQuestion('')
-      setWorkOrderMessage('Supervisor assistant reviewed follow-ups')
+      setWorkOrderMessage(`${supervisorAssistantName} reviewed follow-ups`)
     } catch {
       const fallbackResponse = {
         summary: `${workOrders.length} work order(s) reviewed locally.`,
@@ -1169,14 +1171,14 @@ export function App() {
                   <div className="sectionHeader">
                     <Bot size={18} />
                     <div>
-                      <h2>Technician AI Assistant</h2>
-                      <small>LLM work-order guidance for assigned technicians</small>
+                      <h2>{technicianAssistantName}</h2>
+                      <small>Technician AI assistant with shared LLM configuration</small>
                     </div>
                   </div>
-                  <div className="assistantTranscript" aria-label="Technician assistant chat">
+                  <div className="assistantTranscript" aria-label={`${technicianAssistantName} technician chat`}>
                     {technicianChat.map((turn) => (
                       <div className={`chatBubble ${turn.role}`} key={turn.id}>
-                        <span>{turn.role === 'assistant' ? 'Assistant' : 'You'}</span>
+                        <span>{turn.role === 'assistant' ? technicianAssistantName : 'You'}</span>
                         {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
                         <AssistantMessageContent turn={turn} />
                         {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
@@ -1205,14 +1207,14 @@ export function App() {
                   <div className="sectionHeader">
                     <Bot size={18} />
                     <div>
-                      <h2>Supervisor AI Assistant</h2>
-                      <small>LLM follow-up review for maintenance supervisors</small>
+                      <h2>{supervisorAssistantName}</h2>
+                      <small>Supervisor AI assistant with shared LLM configuration</small>
                     </div>
                   </div>
-                  <div className="assistantTranscript" aria-label="Supervisor assistant chat">
+                  <div className="assistantTranscript" aria-label={`${supervisorAssistantName} supervisor chat`}>
                     {supervisorChat.map((turn) => (
                       <div className={`chatBubble ${turn.role}`} key={turn.id}>
-                        <span>{turn.role === 'assistant' ? 'Assistant' : 'You'}</span>
+                        <span>{turn.role === 'assistant' ? supervisorAssistantName : 'You'}</span>
                         {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
                         <AssistantMessageContent turn={turn} />
                         {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
@@ -1237,7 +1239,7 @@ export function App() {
               )}
               {!canTechnicianAssistant && !canSupervisorAssistant && (
                 <section className="assistantBox">
-                  <p className="emptyState">Role-specific AI assistants are available to technician and supervisor accounts.</p>
+                  <p className="emptyState">Smith and Trinity are available to technician and supervisor accounts.</p>
                 </section>
               )}
             </div>

@@ -16,6 +16,10 @@ from app.services.retrieval import retrieve_evidence
 from app.services.risk import health_summary
 
 
+TECHNICIAN_ASSISTANT_NAME = "Smith"
+SUPERVISOR_ASSISTANT_NAME = "Trinity"
+
+
 class TechnicianAssistantLLMOutput(BaseModel):
     next_prompt: str
     live_directions: list[str] = Field(default_factory=list)
@@ -132,7 +136,7 @@ def supervisor_assistance(request: SupervisorAssistantRequest) -> SupervisorAssi
 
 def _technician_system_prompt() -> str:
     return (
-        "You are a steel-plant maintenance technician assistant. Return only valid JSON "
+        f"You are {TECHNICIAN_ASSISTANT_NAME}, a steel-plant maintenance technician assistant. Return only valid JSON "
         "matching TechnicianAssistantLLMOutput. Give safe live directions, practical "
         "recommendations, problem code, failure class, and a concise completion summary. "
         "Ground every suggestion in the supplied work order, asset state, alerts, and evidence."
@@ -141,7 +145,7 @@ def _technician_system_prompt() -> str:
 
 def _supervisor_system_prompt() -> str:
     return (
-        "You are a maintenance supervisor assistant. Return only valid JSON matching "
+        f"You are {SUPERVISOR_ASSISTANT_NAME}, a maintenance supervisor assistant. Return only valid JSON matching "
         "SupervisorAssistantLLMOutput. Summarize queue state, identify follow-ups, list risks, "
         "and set draft fields only when the supplied work order needs one."
     )
