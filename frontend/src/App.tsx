@@ -198,6 +198,8 @@ export function App() {
   const [workOrderMessage, setWorkOrderMessage] = useState('')
   const [technicianObservation, setTechnicianObservation] = useState('There are hotspots and looseness around the checked connections.')
   const [technicianAssistant, setTechnicianAssistant] = useState<TechnicianAssistantResponse | null>(null)
+  const [technicianLoading, setTechnicianLoading] = useState(false)
+  const [technicianStreaming, setTechnicianStreaming] = useState(false)
   const [technicianChat, setTechnicianChat] = useState<AssistantTurn[]>([
     {
       id: 'technician-welcome',
@@ -207,6 +209,8 @@ export function App() {
   ])
   const [supervisorQuestion, setSupervisorQuestion] = useState('Summarize follow-up actions for completed work orders.')
   const [supervisorAssistant, setSupervisorAssistant] = useState<SupervisorAssistantResponse | null>(null)
+  const [supervisorLoading, setSupervisorLoading] = useState(false)
+  const [supervisorStreaming, setSupervisorStreaming] = useState(false)
   const [supervisorChat, setSupervisorChat] = useState<AssistantTurn[]>([
     {
       id: 'supervisor-welcome',
@@ -592,37 +596,107 @@ export function App() {
     }
   }
 
+  function technicianAssistantDetails(response: TechnicianAssistantResponse) {
+    return [
+      ...response.live_directions,
+      ...response.recommendations,
+      ...response.safety_reminders.map((item) => `Safety: ${item}`),
+      `Problem code: ${response.suggested_problem_code}`,
+      `Summary: ${response.completion_summary}`,
+    ]
+  }
+
+  function supervisorAssistantDetails(response: SupervisorAssistantResponse) {
+    return [
+      ...response.follow_up_actions,
+      ...response.risks.map((item) => `Risk: ${item}`),
+      ...(response.draft_work_order ? [`Draft work order: ${response.draft_work_order.title}`] : []),
+    ]
+  }
+
   async function runTechnicianAssistant() {
+    if (technicianLoading) return
     if (!selectedWorkOrder) return
     const prompt = technicianObservation.trim() || 'Give me live directions for this work order.'
     setTechnicianChat((turns) => [
       ...turns,
       { id: assistantTurnId('technician-user'), role: 'user', content: prompt },
     ])
+    setTechnicianLoading(true)
+    setTechnicianStreaming(false)
     try {
-      const response = await api.technicianAssist(selectedWorkOrder.id, prompt)
-      setTechnicianAssistant(response)
-      setTechnicianChat((turns) => [
-        ...turns,
-        {
-          id: assistantTurnId('technician-assistant'),
-          role: 'assistant',
-          content: response.next_prompt,
-          details: [
-            ...response.live_directions,
-            ...response.recommendations,
-            ...response.safety_reminders.map((item) => `Safety: ${item}`),
-            `Problem code: ${response.suggested_problem_code}`,
-            `Summary: ${response.completion_summary}`,
-          ],
-          provider: response.provider,
-          usedLiveProvider: response.used_live_provider,
-        },
-      ])
+      let assistantMessageId: string | null = null
+      let streamedContent = ''
+      let streamProvider = 'openai'
+      let streamUsedLiveProvider = true
+
+      const ensureAssistantMessage = () => {
+        if (assistantMessageId) return assistantMessageId
+        assistantMessageId = assistantTurnId('technician-assistant')
+        setTechnicianStreaming(true)
+        setTechnicianChat((turns) => [
+          ...turns,
+          {
+            id: assistantMessageId ?? assistantTurnId('technician-assistant'),
+            role: 'assistant',
+            content: '',
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+          },
+        ])
+        return assistantMessageId
+      }
+
+      const updateAssistantMessage = (updates: Partial<AssistantTurn>) => {
+        if (!assistantMessageId) return
+        setTechnicianChat((turns) => turns.map((turn) => (turn.id === assistantMessageId ? { ...turn, ...updates } : turn)))
+      }
+
+      await api.technicianAssistStream(selectedWorkOrder.id, prompt, (event) => {
+        if (event.type === 'meta') {
+          streamProvider = event.provider
+          streamUsedLiveProvider = event.used_live_provider
+          updateAssistantMessage({ provider: streamProvider, usedLiveProvider: streamUsedLiveProvider })
+          return
+        }
+        if (event.type === 'token') {
+          ensureAssistantMessage()
+          streamedContent += event.content
+          updateAssistantMessage({
+            content: streamedContent,
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+          })
+          return
+        }
+        if (event.type === 'done') {
+          setTechnicianAssistant(event.response)
+          if (assistantMessageId) {
+            updateAssistantMessage({
+              content: streamedContent || event.response.next_prompt,
+              details: technicianAssistantDetails(event.response),
+              provider: event.response.provider,
+              usedLiveProvider: event.response.used_live_provider,
+            })
+          } else {
+            setTechnicianChat((turns) => [
+              ...turns,
+              {
+                id: assistantTurnId('technician-assistant'),
+                role: 'assistant',
+                content: event.response.next_prompt,
+                details: technicianAssistantDetails(event.response),
+                provider: event.response.provider,
+                usedLiveProvider: event.response.used_live_provider,
+              },
+            ])
+          }
+        }
+      })
       setTechnicianObservation('')
       setWorkOrderMessage(`${technicianAssistantName} updated the recommended problem code and summary`)
     } catch {
-      const fallbackResponse = {
+      const fallbackResponse: TechnicianAssistantResponse = {
         work_order_id: selectedWorkOrder.id,
         next_prompt: 'What abnormal condition do you observe?',
         live_directions: [selectedWorkOrder.recommended_action],
@@ -642,17 +716,14 @@ export function App() {
           id: assistantTurnId('technician-fallback'),
           role: 'assistant',
           content: fallbackResponse.next_prompt,
-          details: [
-            ...fallbackResponse.live_directions,
-            ...fallbackResponse.recommendations,
-            ...fallbackResponse.safety_reminders.map((item) => `Safety: ${item}`),
-            `Problem code: ${fallbackResponse.suggested_problem_code}`,
-            `Summary: ${fallbackResponse.completion_summary}`,
-          ],
+          details: technicianAssistantDetails(fallbackResponse),
           provider: fallbackResponse.provider,
           usedLiveProvider: fallbackResponse.used_live_provider,
         },
       ])
+    } finally {
+      setTechnicianLoading(false)
+      setTechnicianStreaming(false)
     }
   }
 
@@ -674,37 +745,92 @@ export function App() {
   }
 
   async function runSupervisorAssistant(workOrderId?: string) {
+    if (supervisorLoading) return
     const prompt = supervisorQuestion.trim() || 'Review follow-up status.'
     setSupervisorChat((turns) => [
       ...turns,
       { id: assistantTurnId('supervisor-user'), role: 'user', content: prompt },
     ])
+    setSupervisorLoading(true)
+    setSupervisorStreaming(false)
     try {
-      const response = await api.supervisorAssist({
+      let assistantMessageId: string | null = null
+      let streamedContent = ''
+      let streamProvider = 'openai'
+      let streamUsedLiveProvider = true
+      const payload = {
         work_order_id: workOrderId,
         queue_name: 'follow_up',
         question: prompt,
+      }
+
+      const ensureAssistantMessage = () => {
+        if (assistantMessageId) return assistantMessageId
+        assistantMessageId = assistantTurnId('supervisor-assistant')
+        setSupervisorStreaming(true)
+        setSupervisorChat((turns) => [
+          ...turns,
+          {
+            id: assistantMessageId ?? assistantTurnId('supervisor-assistant'),
+            role: 'assistant',
+            content: '',
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+          },
+        ])
+        return assistantMessageId
+      }
+
+      const updateAssistantMessage = (updates: Partial<AssistantTurn>) => {
+        if (!assistantMessageId) return
+        setSupervisorChat((turns) => turns.map((turn) => (turn.id === assistantMessageId ? { ...turn, ...updates } : turn)))
+      }
+
+      await api.supervisorAssistStream(payload, (event) => {
+        if (event.type === 'meta') {
+          streamProvider = event.provider
+          streamUsedLiveProvider = event.used_live_provider
+          updateAssistantMessage({ provider: streamProvider, usedLiveProvider: streamUsedLiveProvider })
+          return
+        }
+        if (event.type === 'token') {
+          ensureAssistantMessage()
+          streamedContent += event.content
+          updateAssistantMessage({
+            content: streamedContent,
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+          })
+          return
+        }
+        if (event.type === 'done') {
+          setSupervisorAssistant(event.response)
+          if (assistantMessageId) {
+            updateAssistantMessage({
+              content: streamedContent || event.response.summary,
+              details: supervisorAssistantDetails(event.response),
+              provider: event.response.provider,
+              usedLiveProvider: event.response.used_live_provider,
+            })
+          } else {
+            setSupervisorChat((turns) => [
+              ...turns,
+              {
+                id: assistantTurnId('supervisor-assistant'),
+                role: 'assistant',
+                content: event.response.summary,
+                details: supervisorAssistantDetails(event.response),
+                provider: event.response.provider,
+                usedLiveProvider: event.response.used_live_provider,
+              },
+            ])
+          }
+        }
       })
-      setSupervisorAssistant(response)
-      setSupervisorChat((turns) => [
-        ...turns,
-        {
-          id: assistantTurnId('supervisor-assistant'),
-          role: 'assistant',
-          content: response.summary,
-          details: [
-            ...response.follow_up_actions,
-            ...response.risks.map((item) => `Risk: ${item}`),
-            ...(response.draft_work_order ? [`Draft work order: ${response.draft_work_order.title}`] : []),
-          ],
-          provider: response.provider,
-          usedLiveProvider: response.used_live_provider,
-        },
-      ])
       setSupervisorQuestion('')
       setWorkOrderMessage(`${supervisorAssistantName} reviewed follow-ups`)
     } catch {
-      const fallbackResponse = {
+      const fallbackResponse: SupervisorAssistantResponse = {
         summary: `${workOrders.length} work order(s) reviewed locally.`,
         follow_up_actions: workOrders.filter((item) => item.follow_up_required).map((item) => `${item.id}: ${item.recommended_action}`),
         risks: workOrders.filter((item) => item.priority === 1 && !['COMP', 'CLOSE'].includes(item.status)).map((item) => `${item.id} remains ${item.status}`),
@@ -720,14 +846,14 @@ export function App() {
           id: assistantTurnId('supervisor-fallback'),
           role: 'assistant',
           content: fallbackResponse.summary,
-          details: [
-            ...fallbackResponse.follow_up_actions,
-            ...fallbackResponse.risks.map((item) => `Risk: ${item}`),
-          ],
+          details: supervisorAssistantDetails(fallbackResponse),
           provider: fallbackResponse.provider,
           usedLiveProvider: fallbackResponse.used_live_provider,
         },
       ])
+    } finally {
+      setSupervisorLoading(false)
+      setSupervisorStreaming(false)
     }
   }
 
@@ -1167,7 +1293,7 @@ export function App() {
             </div>
             <div className={canTechnicianAssistant && canSupervisorAssistant ? 'assistantSplit' : 'assistantSplit singleAssistant'}>
               {canTechnicianAssistant && (
-                <section className="assistantBox technician">
+                <section className="assistantBox technician" aria-busy={technicianLoading}>
                   <div className="sectionHeader">
                     <Bot size={18} />
                     <div>
@@ -1184,6 +1310,12 @@ export function App() {
                         {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
                       </div>
                     ))}
+                    {technicianLoading && !technicianStreaming && (
+                      <div className="chatBubble assistant" aria-live="polite">
+                        <span>{technicianAssistantName}</span>
+                        <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
+                      </div>
+                    )}
                   </div>
                   <form className="assistantComposer" onSubmit={(event) => {
                     event.preventDefault()
@@ -1192,18 +1324,19 @@ export function App() {
                     <textarea
                       aria-label="Technician observation"
                       value={technicianObservation}
+                      disabled={technicianLoading}
                       onChange={(event) => setTechnicianObservation(event.target.value)}
                     />
-                    <button className="textButton" type="submit">
-                      <Send size={16} />
+                    <button className="textButton" type="submit" disabled={technicianLoading}>
+                      {technicianLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
                       Send
                     </button>
-                    <button className="textButton" type="button" onClick={completeSelectedWorkOrder}>Submit completed work</button>
+                    <button className="textButton" type="button" disabled={technicianLoading} onClick={completeSelectedWorkOrder}>Submit completed work</button>
                   </form>
                 </section>
               )}
               {canSupervisorAssistant && (
-                <section className="assistantBox supervisor">
+                <section className="assistantBox supervisor" aria-busy={supervisorLoading}>
                   <div className="sectionHeader">
                     <Bot size={18} />
                     <div>
@@ -1220,6 +1353,12 @@ export function App() {
                         {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
                       </div>
                     ))}
+                    {supervisorLoading && !supervisorStreaming && (
+                      <div className="chatBubble assistant" aria-live="polite">
+                        <span>{supervisorAssistantName}</span>
+                        <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
+                      </div>
+                    )}
                   </div>
                   <form className="assistantComposer" onSubmit={(event) => {
                     event.preventDefault()
@@ -1228,10 +1367,11 @@ export function App() {
                     <textarea
                       aria-label="Supervisor question"
                       value={supervisorQuestion}
+                      disabled={supervisorLoading}
                       onChange={(event) => setSupervisorQuestion(event.target.value)}
                     />
-                    <button className="textButton" type="submit">
-                      <Send size={16} />
+                    <button className="textButton" type="submit" disabled={supervisorLoading}>
+                      {supervisorLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
                       Send
                     </button>
                   </form>

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import { api, type NeoChatResponse, type NeoStreamEvent, type UserRole } from './services/api'
+import { api, type AssistantStreamEvent, type NeoChatResponse, type NeoStreamEvent, type UserRole } from './services/api'
 
 const sampleFiles = [
   {
@@ -56,9 +56,27 @@ const sampleFiles = [
 ]
 
 let neoResponseDelayMs = 0
+let assistantResponseDelayMs = 0
 
 function neoStreamResponse(response: NeoChatResponse, tokenChunks: string[] = []) {
   const events: NeoStreamEvent[] = tokenChunks.length
+    ? [
+        { type: 'meta', provider: response.provider, used_live_provider: response.used_live_provider },
+        ...tokenChunks.map((content) => ({ type: 'token' as const, content })),
+        { type: 'done', response },
+      ]
+    : [{ type: 'done', response }]
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
+
+function assistantStreamResponse<TResponse extends { provider: string; used_live_provider: boolean }>(
+  response: TResponse,
+  tokenChunks: string[] = [],
+) {
+  const events: AssistantStreamEvent<TResponse>[] = tokenChunks.length
     ? [
         { type: 'meta', provider: response.provider, used_live_provider: response.used_live_provider },
         ...tokenChunks.map((content) => ({ type: 'token' as const, content })),
@@ -313,6 +331,7 @@ async function signIn(email = 'admin@plant.local') {
 
 beforeEach(() => {
   neoResponseDelayMs = 0
+  assistantResponseDelayMs = 0
   window.sessionStorage.clear()
   api.setSession(null)
   api.onUnauthorized(null)
@@ -404,6 +423,30 @@ beforeEach(() => {
         }
         return Promise.resolve(response)
       }
+      if (url.includes('/api/work-orders/technician-assist/stream')) {
+        const response = assistantStreamResponse(
+          {
+            work_order_id: 'WO-8304',
+            next_prompt: 'Smith recommends verifying torque and documenting completion.',
+            live_directions: ['Verify torque on bolted connections.', 'Record before and after vibration readings.'],
+            recommendations: ['Set problem code LWTQCONNECT.'],
+            safety_reminders: ['Apply lockout/tagout.'],
+            suggested_problem_code: 'LWTQCONNECT',
+            suggested_failure_class: 'MECH',
+            completion_summary: 'Connections were tightened to spec.',
+            evidence: recommendation.evidence,
+            used_live_provider: false,
+            provider: 'mock',
+          },
+          ['Smith recommends verifying torque ', 'and documenting completion.'],
+        )
+        if (assistantResponseDelayMs > 0) {
+          return new Promise((resolve) => {
+            window.setTimeout(() => resolve(response), assistantResponseDelayMs)
+          })
+        }
+        return Promise.resolve(response)
+      }
       if (url.includes('/api/work-orders/technician-assist')) {
         return Promise.resolve(
           new Response(
@@ -423,6 +466,26 @@ beforeEach(() => {
             { status: 200 },
           ),
         )
+      }
+      if (url.includes('/api/work-orders/supervisor-assist/stream')) {
+        const response = assistantStreamResponse(
+          {
+            summary: 'Trinity reviewed 2 work orders and found 2 follow-ups.',
+            follow_up_actions: ['Review WO-8297 brake shoe replacement planning.'],
+            risks: ['WO-8304 remains priority 1 and INPRG.'],
+            draft_work_order: null,
+            referenced_work_orders: ['WO-8304', 'WO-8297'],
+            used_live_provider: false,
+            provider: 'mock',
+          },
+          ['Trinity reviewed 2 work orders ', 'and found 2 follow-ups.'],
+        )
+        if (assistantResponseDelayMs > 0) {
+          return new Promise((resolve) => {
+            window.setTimeout(() => resolve(response), assistantResponseDelayMs)
+          })
+        }
+        return Promise.resolve(response)
       }
       if (url.includes('/api/work-orders/supervisor-assist')) {
         return Promise.resolve(
@@ -636,6 +699,7 @@ describe('Maintenance Wizard dashboard', () => {
   })
 
   it('shows only the technician LLM assistant to technician users', async () => {
+    assistantResponseDelayMs = 300
     render(<App />)
     await signIn('technician@plant.local')
 
@@ -650,12 +714,15 @@ describe('Maintenance Wizard dashboard', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(within(screen.getByLabelText('Smith technician chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Smith technician chat')).findByText(/Thinking/)).toBeInTheDocument()
+    expect(await screen.findByText(/Smith recommends verifying torque/)).toBeInTheDocument()
     expect(await screen.findByText('Verify torque on bolted connections.')).toBeInTheDocument()
     expect(screen.getByText(/Connections were tightened to spec./)).toBeInTheDocument()
     expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
   })
 
   it('shows only the supervisor LLM assistant to supervisor users', async () => {
+    assistantResponseDelayMs = 300
     render(<App />)
     await signIn('supervisor@plant.local')
 
@@ -667,7 +734,8 @@ describe('Maintenance Wizard dashboard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(within(screen.getByLabelText('Trinity supervisor chat')).getByText('Summarize follow-up actions for completed work orders.')).toBeInTheDocument()
-    expect(await screen.findByText('2 work order(s) reviewed; 2 require follow-up action.')).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Trinity supervisor chat')).findByText(/Thinking/)).toBeInTheDocument()
+    expect(await screen.findByText(/Trinity reviewed 2 work orders/)).toBeInTheDocument()
     expect(screen.getByText('Review WO-8297 brake shoe replacement planning.')).toBeInTheDocument()
     expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
   })

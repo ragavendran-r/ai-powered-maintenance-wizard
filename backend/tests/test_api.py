@@ -286,6 +286,33 @@ def test_technician_assistant_suggests_problem_code_from_observation():
     assert forbidden_response.status_code == 403
 
 
+def test_technician_assistant_streams_sse_response():
+    headers = auth_headers("technician@plant.local")
+
+    with client.stream(
+        "POST",
+        "/api/work-orders/technician-assist/stream",
+        json={"work_order_id": "WO-8304", "observation": "Connections 3 and 5 were loose."},
+        headers=headers,
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        body = "".join(response.iter_text())
+
+    assert '"type": "meta"' in body
+    assert '"type": "token"' in body
+    assert '"type": "done"' in body
+    assert "Smith" in body
+    assert "LWTQCONNECT" in body
+
+    forbidden_response = client.post(
+        "/api/work-orders/technician-assist/stream",
+        json={"work_order_id": "WO-8304", "observation": "Connections are loose."},
+        headers=auth_headers("supervisor@plant.local"),
+    )
+    assert forbidden_response.status_code == 403
+
+
 def test_supervisor_assistant_reviews_follow_up_queue_and_drafts_order():
     headers = auth_headers("supervisor@plant.local")
 
@@ -304,6 +331,33 @@ def test_supervisor_assistant_reviews_follow_up_queue_and_drafts_order():
 
     forbidden_response = client.post(
         "/api/work-orders/supervisor-assist",
+        json={"work_order_id": "WO-8297", "queue_name": "follow_up"},
+        headers=auth_headers("technician@plant.local"),
+    )
+    assert forbidden_response.status_code == 403
+
+
+def test_supervisor_assistant_streams_sse_response():
+    headers = auth_headers("supervisor@plant.local")
+
+    with client.stream(
+        "POST",
+        "/api/work-orders/supervisor-assist/stream",
+        json={"work_order_id": "WO-8297", "queue_name": "follow_up", "question": "What needs follow-up?"},
+        headers=headers,
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        body = "".join(response.iter_text())
+
+    assert '"type": "meta"' in body
+    assert '"type": "token"' in body
+    assert '"type": "done"' in body
+    assert "Trinity" in body
+    assert "WO-8297" in body
+
+    forbidden_response = client.post(
+        "/api/work-orders/supervisor-assist/stream",
         json={"work_order_id": "WO-8297", "queue_name": "follow_up"},
         headers=auth_headers("technician@plant.local"),
     )
