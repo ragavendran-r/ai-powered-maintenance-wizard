@@ -67,6 +67,7 @@ import {
   type WorkOrder,
   type WorkOrderCreateRequest,
 } from './services/api'
+import { getUserPermissions } from './permissions'
 
 const riskRank = { low: 1, medium: 2, high: 3, critical: 4 }
 type AppView = 'dashboard' | 'assets' | 'asset' | 'workOrders' | 'ingestion' | 'learning' | 'users'
@@ -141,26 +142,10 @@ const roleOptions: UserRole[] = [
   'iot_service',
 ]
 
-const decisionRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer', 'planner']
-const technicianAssistantRoles: UserRole[] = ['maintenance_technician']
-const supervisorAssistantRoles: UserRole[] = ['maintenance_supervisor']
-const workOrderCreationRoles: UserRole[] = [
-  'admin',
-  'maintenance_engineer',
-  'maintenance_technician',
-  'maintenance_supervisor',
-  'reliability_engineer',
-  'planner',
-]
-const workOrderAssignmentRoles: UserRole[] = ['admin', 'maintenance_supervisor']
 const diagnosisAssistantName = 'Morpheus'
 const reliabilityAssistantName = 'Smith'
 const technicianAssistantName = 'Neo'
 const supervisorAssistantName = 'Neo'
-const feedbackRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer']
-const ingestionRoles: UserRole[] = ['admin', 'reliability_engineer']
-const streamingRoles: UserRole[] = ['admin', 'reliability_engineer']
-const learningRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer']
 
 const fallbackWorkOrders: WorkOrder[] = [
   {
@@ -256,10 +241,6 @@ const fallbackWorkOrders: WorkOrder[] = [
     logs: [],
   },
 ]
-
-function hasRole(user: AuthUser | undefined, roles: UserRole[]) {
-  return Boolean(user && roles.includes(user.role))
-}
 
 function fallbackWorkOrdersForUser(user?: AuthUser | null) {
   if (user?.role === 'maintenance_technician') {
@@ -454,17 +435,19 @@ export function App() {
   const reliabilityStreamRef = useRef<HTMLDivElement | null>(null)
 
   const currentUser = session?.user
-  const canDecision = hasRole(currentUser, decisionRoles)
-  const canTechnicianAssistant = hasRole(currentUser, technicianAssistantRoles)
-  const canSupervisorAssistant = hasRole(currentUser, supervisorAssistantRoles)
-  const canFeedback = hasRole(currentUser, feedbackRoles)
-  const canIngest = hasRole(currentUser, ingestionRoles)
-  const canStreaming = hasRole(currentUser, streamingRoles)
-  const canReviewLearning = hasRole(currentUser, learningRoles)
-  const canAdminUsers = currentUser?.role === 'admin'
-  const canCreateWorkOrders = hasRole(currentUser, workOrderCreationRoles)
-  const canAssignWorkOrders = hasRole(currentUser, workOrderAssignmentRoles)
-  const canApproveWorkOrders = canAssignWorkOrders
+  const {
+    canAdminUsers,
+    canApproveWorkOrders,
+    canAssignWorkOrders,
+    canCreateWorkOrders,
+    canDecisionSupport: canDecision,
+    canFeedback,
+    canIngestion: canIngest,
+    canLearningReview: canReviewLearning,
+    canStreaming,
+    canSupervisorAssistant,
+    canTechnicianAssistant,
+  } = useMemo(() => getUserPermissions(currentUser), [currentUser])
 
   function clearSession(message = '') {
     api.setSession(null)
