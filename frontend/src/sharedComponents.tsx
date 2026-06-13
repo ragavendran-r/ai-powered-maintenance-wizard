@@ -507,7 +507,7 @@ export function BarChart({ assets }: { assets: HealthSummary[] }) {
     <div className="barChart" aria-label="Equipment efficiency bar chart">
       {assets.map((item) => (
         <div className="barGroup" key={item.equipment.id}>
-          <span style={{ height: `${Math.max(8, item.health_score)}%` }} />
+          <span className={`risk-${item.risk_level}`} style={{ height: `${Math.max(8, item.health_score)}%` }} />
           <small>{item.equipment.id.split('-')[0]}</small>
         </div>
       ))}
@@ -518,9 +518,10 @@ export function BarChart({ assets }: { assets: HealthSummary[] }) {
 export function MiniBars({ values }: { values: number[] }) {
   return (
     <div className="miniBars">
-      {values.map((value, index) => (
-        <span style={{ height: `${value}%` }} key={`${value}-${index}`} />
-      ))}
+      {values.map((value, index) => {
+        const statusClass = value >= 85 ? 'status-success' : value >= 75 ? 'status-warning' : 'status-critical'
+        return <span className={statusClass} style={{ height: `${value}%` }} key={`${value}-${index}`} />
+      })}
     </div>
   )
 }
