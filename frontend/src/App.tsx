@@ -1,29 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent } from 'react'
 import {
   Activity,
   AlertTriangle,
-  BarChart3,
   Bot,
   Briefcase,
-  CheckCircle2,
-  ChevronRight,
   ClipboardList,
-  Database,
-  Download,
-  FileJson,
-  FileText,
   Gauge,
-  KeyRound,
-  LogIn,
   LogOut,
-  Search,
-  Send,
   ShieldAlert,
   Sparkles,
-  Trash2,
   Upload,
-  UserPlus,
   Users,
   Wrench,
 } from 'lucide-react'
@@ -32,29 +19,18 @@ import {
   fallbackDashboard,
   type AssetDetail,
   type AssetDetailSection,
-  type AssetDocument,
   type AssetListItem,
-  type AssetMetricSnapshot,
-  type AssetPerformanceChart,
-  type AssetReliabilityMetric,
-  type AssetSubsystem,
   type AuthSession,
   type AuthUser,
   type DashboardSummary,
-  type HealthSummary,
   type LearningDatasetSnapshot,
-  type LearningEvaluationRun,
   type LearningExample,
-  type LearningArtifact,
   type LearningArtifactCleanupResult,
   type LearningEmbeddingProfile,
   type LearningRagMigrationPlan,
-  type LearningJob,
   type LearningModelDeployment,
-  type LearningModelPromotion,
   type LearningModelVersion,
   type LearningSummary,
-  type MaintenanceEvent,
   type NeoAction,
   type NeoChatResponse,
   type NeoTable,
@@ -66,315 +42,38 @@ import {
   type UserRole,
   type WorkOrder,
   type WorkOrderCreateRequest,
-  type WorkOrderStatus,
 } from './services/api'
 import { getUserPermissions } from './permissions'
-
-const riskRank = { low: 1, medium: 2, high: 3, critical: 4 }
-type AppView = 'dashboard' | 'assets' | 'asset' | 'workOrders' | 'ingestion' | 'learning' | 'users'
-type AssetTab = 'summary' | 'maintenance' | 'performance' | 'reliability' | 'documents' | 'workOrders'
-
-const assetSectionsByTab: Record<AssetTab, AssetDetailSection[]> = {
-  summary: ['summary'],
-  maintenance: ['maintenance'],
-  performance: ['performance'],
-  reliability: ['reliability'],
-  documents: ['documents'],
-  workOrders: ['work_orders'],
-}
-
-function mergeAssetDetail(
-  current: AssetDetail | null,
-  next: AssetDetail,
-  sections: AssetDetailSection[],
-): AssetDetail {
-  const merged: AssetDetail = current
-    ? { ...current, profile: next.profile, health: next.health }
-    : { ...next }
-  const requested = new Set(sections)
-
-  if (requested.has('summary')) {
-    merged.metrics = next.metrics
-    merged.recommendations = next.recommendations
-    merged.subsystems = next.subsystems
-  }
-  if (requested.has('maintenance')) {
-    merged.maintenance_events = next.maintenance_events
-    merged.work_orders = next.work_orders
-  }
-  if (requested.has('performance')) {
-    merged.metrics = next.metrics
-    merged.performance_charts = next.performance_charts
-  }
-  if (requested.has('reliability')) {
-    merged.reliability_metrics = next.reliability_metrics
-    merged.prediction = next.prediction
-  }
-  if (requested.has('documents')) {
-    merged.documents = next.documents
-    merged.knowledge = next.knowledge
-  }
-  if (requested.has('work_orders')) {
-    merged.work_orders = next.work_orders
-  }
-
-  return merged
-}
-
-const roleLabels: Record<UserRole, string> = {
-  admin: 'Admin',
-  maintenance_engineer: 'Maintenance Engineer',
-  maintenance_technician: 'Maintenance Technician',
-  maintenance_supervisor: 'Maintenance Supervisor',
-  reliability_engineer: 'Reliability Engineer',
-  planner: 'Planner',
-  operator: 'Operator',
-  iot_service: 'IoT Service',
-}
-
-const roleOptions: UserRole[] = [
-  'admin',
-  'maintenance_engineer',
-  'maintenance_technician',
-  'maintenance_supervisor',
-  'reliability_engineer',
-  'planner',
-  'operator',
-  'iot_service',
-]
-
-const diagnosisAssistantName = 'Morpheus'
-const reliabilityAssistantName = 'Smith'
-const technicianAssistantName = 'Neo'
-const supervisorAssistantName = 'Neo'
-
-const workOrderStatusDetails: Record<WorkOrderStatus, { label: string; description: string }> = {
-  WAPPR: {
-    label: 'Waiting for approval',
-    description: 'Supervisor approval is required before field work can start.',
-  },
-  APPR: {
-    label: 'Approved',
-    description: 'The work order is approved and ready for technician execution.',
-  },
-  INPRG: {
-    label: 'In progress',
-    description: 'The assigned technician has started field execution.',
-  },
-  WMATL: {
-    label: 'Waiting for material',
-    description: 'Execution is blocked until required parts or consumables are available.',
-  },
-  COMP: {
-    label: 'Completed',
-    description: 'Technician work is complete and ready for closeout review.',
-  },
-  CLOSE: {
-    label: 'Closed',
-    description: 'The work order has been reviewed and closed.',
-  },
-}
-
-const workOrderStatusFlow: WorkOrderStatus[] = ['WAPPR', 'APPR', 'INPRG', 'WMATL', 'COMP', 'CLOSE']
-
-function workOrderStatusDetail(status: WorkOrderStatus) {
-  return workOrderStatusDetails[status]
-}
-
-const workOrderStatusPattern = new RegExp(`\\b(${workOrderStatusFlow.join('|')})\\b`, 'g')
-
-function isWorkOrderStatus(value: string): value is WorkOrderStatus {
-  return Object.prototype.hasOwnProperty.call(workOrderStatusDetails, value)
-}
-
-function workOrderStatusLabel(status: WorkOrderStatus) {
-  return workOrderStatusDetail(status).label
-}
-
-function formatWorkOrderStatusText(text: string) {
-  return text.replace(workOrderStatusPattern, (status) => workOrderStatusLabel(status as WorkOrderStatus))
-}
-
-function formatTableCell(column: string, value: unknown) {
-  const text = String(value ?? '')
-  if (column.trim().toLowerCase() === 'status' && isWorkOrderStatus(text)) {
-    return workOrderStatusLabel(text)
-  }
-  return text
-}
-
-const fallbackWorkOrders: WorkOrder[] = [
-  {
-    id: 'WO-8304',
-    equipment_id: 'RM-DRIVE-01',
-    title: 'Inspect main drive bearing vibration',
-    description: 'Inspect bearing housing, coupling alignment, lubrication condition, and foundation bolts.',
-    status: 'APPR',
-    priority: 1,
-    work_type: 'CM',
-    failure_class: 'MECH',
-    problem_code: 'BRGVIB',
-    classification: 'Bearing vibration',
-    assigned_to: 'Maintenance Technician',
-    supervisor: 'Maintenance Supervisor',
-    due_date: '2026-06-12T18:00:00+05:30',
-    recommended_action: 'Reduce load if vibration persists and verify coupling alignment.',
-    follow_up_required: true,
-    ai_summary: 'High-risk drive vibration needs mechanical inspection before restart.',
-    completion_summary: null,
-    created_at: '2026-06-11T08:00:00+05:30',
-    updated_at: '2026-06-11T11:00:00+05:30',
-    completed_at: null,
-    logs: [],
-  },
-  {
-    id: 'WO-8311',
-    equipment_id: 'BF-BLOWER-02',
-    title: 'Verify inlet guide vane actuator response',
-    description: 'Check actuator travel, linkage looseness, and position feedback drift.',
-    status: 'WAPPR',
-    priority: 2,
-    work_type: 'CM',
-    failure_class: 'CTRL',
-    problem_code: 'IGVACT',
-    classification: 'Control actuator',
-    assigned_to: 'Reliability Engineer',
-    supervisor: 'Blast Furnace Supervisor',
-    due_date: '2026-06-13T12:00:00+05:30',
-    recommended_action: 'Stroke-test the guide vane actuator and compare response to pressure variance.',
-    follow_up_required: false,
-    ai_summary: 'Pressure variance points to actuator or linkage response drift.',
-    completion_summary: null,
-    created_at: '2026-06-11T09:00:00+05:30',
-    updated_at: '2026-06-11T09:30:00+05:30',
-    completed_at: null,
-    logs: [],
-  },
-  {
-    id: 'WO-8297',
-    equipment_id: 'OH-CRANE-05',
-    title: 'Inspect hoist brake temperature and current',
-    description: 'Review hoist current and brake temperature after heavy-lift restriction.',
-    status: 'COMP',
-    priority: 1,
-    work_type: 'EM',
-    failure_class: 'ELEC',
-    problem_code: 'HOISTBRK',
-    classification: 'Hoist braking',
-    assigned_to: 'Crane Technician',
-    supervisor: 'Melt Shop Supervisor',
-    due_date: '2026-06-11T17:00:00+05:30',
-    recommended_action: 'Plan brake shoe replacement follow-up.',
-    follow_up_required: true,
-    ai_summary: 'Completed inspection still needs supervisor follow-up.',
-    completion_summary: 'Brake temperature normalized after lift restriction.',
-    created_at: '2026-06-10T09:00:00+05:30',
-    updated_at: '2026-06-11T16:35:00+05:30',
-    completed_at: '2026-06-11T16:35:00+05:30',
-    logs: [],
-  },
-  {
-    id: 'WO-8275',
-    equipment_id: 'HYD-SYS-04',
-    title: 'Investigate hydraulic oil temperature rise',
-    description: 'Inspect cooler fouling, pump cartridge condition, and pressure pulsation.',
-    status: 'WMATL',
-    priority: 2,
-    work_type: 'PM',
-    failure_class: 'HYD',
-    problem_code: 'OILTEMP',
-    classification: 'Hydraulic temperature',
-    assigned_to: 'Hydraulic Technician',
-    supervisor: 'Rolling Mill Supervisor',
-    due_date: '2026-06-14T10:00:00+05:30',
-    recommended_action: 'Reserve pump cartridge assembly and inspect cooler differential temperature.',
-    follow_up_required: false,
-    ai_summary: 'Hydraulic temperature work is waiting for material coordination.',
-    completion_summary: null,
-    created_at: '2026-06-11T10:00:00+05:30',
-    updated_at: '2026-06-11T10:30:00+05:30',
-    completed_at: null,
-    logs: [],
-  },
-]
-
-function fallbackWorkOrdersForUser(user?: AuthUser | null) {
-  if (user?.role === 'maintenance_technician') {
-    return fallbackWorkOrders.filter((order) => order.assigned_to === user.display_name)
-  }
-  return fallbackWorkOrders
-}
-
-type AssistantTurn = {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  details?: string[]
-  provider?: string
-  usedLiveProvider?: boolean
-}
-
-function assistantTurnId(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
-function assistantProviderLabel(turn: AssistantTurn) {
-  if (!turn.provider) return ''
-  if (turn.provider === 'deterministic') return 'Dashboard data'
-  return `${turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · ${turn.provider}`
-}
-
-function AssistantMessageContent({ turn }: { turn: AssistantTurn }) {
-  if (turn.role === 'assistant') {
-    return <FormattedAssistantContent content={turn.content} />
-  }
-  return <p>{turn.content}</p>
-}
-
-function scrollStreamToBottom(ref: { current: HTMLElement | null }) {
-  const scroll = () => {
-    const node = ref.current
-    if (!node) return
-    node.scrollTop = node.scrollHeight
-    if (typeof node.scrollIntoView === 'function') {
-      node.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' })
-      node.scrollTop = node.scrollHeight
-    }
-  }
-
-  scroll()
-
-  if (typeof window !== 'undefined' && window.requestAnimationFrame) {
-    window.requestAnimationFrame(scroll)
-    window.setTimeout(scroll, 0)
-    window.setTimeout(scroll, 50)
-    window.setTimeout(scroll, 150)
-    window.setTimeout(scroll, 300)
-    return
-  }
-
-  scroll()
-}
-
-function usePinnedStreamScroll(ref: { current: HTMLElement | null }, trigger: string) {
-  useEffect(() => {
-    const node = ref.current
-    if (!node) return
-
-    scrollStreamToBottom(ref)
-
-    if (typeof MutationObserver === 'undefined') return
-
-    const observer = new MutationObserver(() => scrollStreamToBottom(ref))
-    observer.observe(node, {
-      childList: true,
-      characterData: true,
-      subtree: true,
-    })
-
-    return () => observer.disconnect()
-  }, [ref, trigger])
-}
+import {
+  assetSectionsByTab,
+  diagnosisAssistantName,
+  fallbackWorkOrders,
+  fallbackWorkOrdersForUser,
+  mergeAssetDetail,
+  metricValue,
+  roleLabels,
+  riskRank,
+  supervisorAssistantName,
+  technicianAssistantName,
+  type AppView,
+  type AssetTab,
+} from './appModel'
+import {
+  assistantTurnId,
+  scrollStreamToBottom,
+  usePinnedStreamScroll,
+  type AssistantTurn,
+} from './assistantContent'
+import { formatWorkOrderStatusText, workOrderStatusLabel } from './workOrderStatus'
+import { Metric } from './sharedComponents'
+import { AuthLoadingRoute, ApiOnlyRoute, LoginRoute } from './routes/Auth'
+import { DashboardRoute } from './routes/Dashboard'
+import { AssetsRoute } from './routes/Assets'
+import { AssetDetailRoute } from './routes/AssetDetail'
+import { WorkOrdersRoute } from './routes/WorkOrders'
+import { IngestionRoute } from './routes/Ingestion'
+import { LearningReviewRoute } from './routes/LearningReview'
+import { UsersRoute } from './routes/Users'
 
 export function App() {
   const [session, setSession] = useState<AuthSession | null>(() => api.restoreSession())
@@ -1880,722 +1579,8 @@ export function App() {
     }
   }
 
-  const recommendationPanel = (
-    <div className="recommendationSection morpheusPanel">
-      <div className="assistantHeaderCompact">
-        <span className="assistantAvatar">M</span>
-        <div>
-          <h2>{diagnosisAssistantName}</h2>
-          <small>Diagnosis assistant</small>
-        </div>
-      </div>
-      {(diagnosisProvider || diagnosisLoading) && (
-        <small className="providerLine">
-          {diagnosisLoading && <span className="loadingSpinner" aria-hidden="true" />}
-          {diagnosisProvider
-            ? `${diagnosisUsedLive ? 'Live LLM' : 'LLM fallback'} · ${diagnosisProvider}`
-            : 'Starting diagnosis stream'}
-        </small>
-      )}
-      {diagnosisStreamText && (
-        <div className="morpheusProgress" ref={morpheusProgressRef} aria-live="polite">
-          <FormattedAssistantContent content={diagnosisStreamText} />
-        </div>
-      )}
-      {diagnosisMessage && <p className="inlineStatus errorText">{diagnosisMessage}</p>}
-      {recommendation ? (
-        <>
-          <div className="sectionHeader recommendationTitle">
-            <CheckCircle2 size={18} />
-            <h3>Recommendation</h3>
-          </div>
-          <p className="diagnosis">{recommendation.diagnosis}</p>
-          <div className="recommendationBadges">
-            <span className={`riskBadge ${recommendation.risk_level}`}>{recommendation.risk_level}</span>
-            <span className="rolePill">
-              {recommendation.used_live_provider ? 'Live LLM' : 'LLM fallback'} · {recommendation.provider}
-            </span>
-          </div>
-          <div className="recommendationFacts">
-            <span>
-              <small>Urgency</small>
-              <strong>{recommendation.urgency}</strong>
-            </span>
-            <span>
-              <small>RUL</small>
-              <strong>{recommendation.remaining_useful_life_days ?? 'n/a'} days</strong>
-            </span>
-            <span>
-              <small>Confidence</small>
-              <strong>{Math.round(recommendation.confidence * 100)}%</strong>
-            </span>
-          </div>
-          <h3>Immediate Actions</h3>
-          <ul>{recommendation.immediate_actions.map((action) => <li key={action}>{action}</li>)}</ul>
-          <h3>Planned Actions</h3>
-          <ul>{recommendation.planned_actions.map((action) => <li key={action}>{action}</li>)}</ul>
-          <h3>Evidence</h3>
-          {recommendation.evidence.slice(0, 3).map((evidence) => (
-            <p className="evidence" key={evidence.source_id}>
-              <strong>{evidence.title}</strong>
-              {evidence.excerpt}
-              {evidence.relevance_reason && <small>{evidence.relevance_reason}</small>}
-            </p>
-          ))}
-          {canFeedback && (
-            <>
-              <div className="feedbackDetails">
-                <label className="field">
-                  <span>Actual Root Cause</span>
-                  <input value={feedbackRootCause} onChange={(event) => setFeedbackRootCause(event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>Action Taken</span>
-                  <input value={feedbackActionTaken} onChange={(event) => setFeedbackActionTaken(event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>Outcome</span>
-                  <input value={feedbackOutcome} onChange={(event) => setFeedbackOutcome(event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>Notes</span>
-                  <input value={feedbackNotes} onChange={(event) => setFeedbackNotes(event.target.value)} />
-                </label>
-              </div>
-              <div className="feedbackRow">
-                <button onClick={() => sendFeedback('accepted')}>Accept</button>
-                <button onClick={() => sendFeedback('corrected')}>Correct</button>
-                <button onClick={() => sendFeedback('rejected')}>Reject</button>
-              </div>
-              {feedbackMessage && <p className="inlineStatus">{feedbackMessage}</p>}
-            </>
-          )}
-          <div className="buttonRow">
-            <button className="downloadReport" onClick={downloadReport}>
-              <Download size={16} />
-              Export Report
-            </button>
-            {canCreateWorkOrders && (
-              <button className="textButton" onClick={() => createWorkOrderFromContext(recommendation)}>
-                <Briefcase size={16} />
-                Create Work Order
-              </button>
-            )}
-          </div>
-          {reportMessage && <p className="inlineStatus">{reportMessage}</p>}
-        </>
-      ) : (
-        <p className="emptyState">
-          {diagnosisLoading || diagnosisStreaming
-            ? `${diagnosisAssistantName} is preparing the diagnosis...`
-            : `Run ${diagnosisAssistantName} to generate cited maintenance actions.`}
-        </p>
-      )}
-    </div>
-  )
-
-  const operationalDashboardView = (
-    <section className="dashboardWithNeo">
-      <div className="dashboardKpiBand" aria-label="Dashboard KPI summary">
-        <KpiCard
-          className="kpiRisk"
-          title="Assets at risk"
-          value={`${dashboardMetrics.assetsAtRisk}`}
-          unit="assets"
-          detail="Key contributors: sensor trends, incomplete maintenance, and health score."
-          ai="AI explained: asset risk uses current health, alert severity, work status, and anomaly context."
-        />
-        <KpiCard className="kpiEmergency" title="Overdue emergency work" value={`${dashboardMetrics.overdueEmergency}`} unit="work orders" detail="Priority 1 open work requiring supervisor attention." />
-        <KpiCard className="kpiPm" title="PM Work orders overdue" value={`${dashboardMetrics.pmOverdue}`} unit="work orders" detail="Preventive maintenance items waiting on material or approval." />
-        <KpiCard className="kpiPerformance" title="Equipment performance" value={`${dashboardMetrics.equipmentPerformance}`} unit="%" detail="Average health across tracked steel-plant assets." />
-      </div>
-      <div className="dashboardMainGrid">
-        <div className="dashboardCenterColumn">
-          <section className="neoPanel" aria-label="Neo dashboard assistant" aria-busy={neoLoading}>
-            <div className="neoHeader">
-              <span className="neoAvatar">N</span>
-              <div>
-                <h2>Neo</h2>
-                <small>Dashboard AI assistant</small>
-              </div>
-            </div>
-            <div className="neoTranscript" ref={neoTranscriptRef} aria-label="Neo chat transcript">
-              {neoMessages.map((turn) => (
-                <div className={`chatBubble ${turn.role}`} key={turn.id}>
-                  <span>{turn.role === 'assistant' ? 'Neo' : 'You'}</span>
-                  {assistantProviderLabel(turn) && <small>{assistantProviderLabel(turn)}</small>}
-                  <AssistantMessageContent turn={turn} />
-                  {turn.details && <ul>{turn.details.map((item, index) => <li key={`${turn.id}-${index}`}>{formatWorkOrderStatusText(item)}</li>)}</ul>}
-                </div>
-              ))}
-              {neoLoading && !neoStreaming && (
-                <div className="chatBubble assistant neoThinking" aria-live="polite">
-                  <span>Neo</span>
-                  <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
-                </div>
-              )}
-            </div>
-            <div className="neoPromptChips" aria-label="Neo prompt shortcuts">
-              <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show assets at risk')}>Assets</button>
-              <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show work orders needing follow-up')}>Work orders</button>
-              <button type="button" disabled={neoLoading} onClick={() => setNeoQuestion('Show users and roles')}>User table</button>
-            </div>
-            <form className="neoComposer" onSubmit={(event) => {
-              event.preventDefault()
-              sendNeoQuestion()
-            }}>
-              <textarea
-                aria-label="Ask Neo"
-                value={neoQuestion}
-                disabled={neoLoading}
-                onChange={(event) => setNeoQuestion(event.target.value)}
-              />
-              <button className="textButton" type="submit" disabled={neoLoading}>
-                {neoLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
-                Send
-              </button>
-            </form>
-          </section>
-          <section className="detailPanel neoResultPanel">
-            <div className="sectionHeader">
-              <Sparkles size={18} />
-              <h2>{neoTable?.title ?? 'Neo Results'}</h2>
-            </div>
-            {neoTable ? <NeoResultTable table={neoTable} /> : <p className="emptyState">Ask Neo to show assets, work orders, or users. Results appear here.</p>}
-          </section>
-          <section className="detailPanel queuePanel">
-            <div className="sectionHeader">
-              <Search size={18} />
-              <h2>Work queues</h2>
-            </div>
-            <WorkOrderTable
-              compact
-              workOrders={workOrders}
-              canApprove={canApproveWorkOrders}
-              canStart={canTechnicianAssistant}
-              onApprove={approveWorkOrder}
-              onStart={startWorkOrder}
-              onOpen={(id) => {
-                setSelectedWorkOrderId(id)
-                setActiveView('workOrders')
-              }}
-            />
-          </section>
-        </div>
-        <div className="dashboardRightColumn">
-          <section className="detailPanel chartPanel dashboardEfficiency">
-            <div className="sectionHeader">
-              <BarChart3 size={18} />
-              <h2>Equipment efficiency</h2>
-            </div>
-            <BarChart assets={dashboard.highest_risk_equipment} />
-          </section>
-          <section className="detailPanel slaPanel">
-            <h2>SLA compliance by incident priority</h2>
-            <MiniBars values={[92, 78, 64, 88]} />
-          </section>
-        </div>
-      </div>
-    </section>
-  )
-
-  const assetMetricByKey = new Map((assetDetail?.metrics ?? []).map((metric) => [metric.metric_key, metric]))
-  const assetHealth = assetDetail?.health
-  const assetProfile = assetDetail?.profile
-  const isAssetSectionPending = (section: AssetDetailSection) =>
-    !assetLoadedSections.includes(section) || Boolean(assetSectionLoading[section])
-  const assetLoadingPanel = (label: string) => (
-    <section className="detailPanel widePanel">
-      <p className="emptyState">Loading {label} data...</p>
-    </section>
-  )
-
-  const assetSummaryTab = assetDetail ? (
-    <div className="assetSummaryGrid">
-      <section className="detailPanel summarySubsystems">
-        <h2>Sub-systems</h2>
-        <AssetSubsystemList subsystems={assetDetail.subsystems} />
-      </section>
-      <section className="healthStack summaryHealthStack">
-        <AssetMetricTile metric={assetMetricByKey.get('health')} fallbackValue={assetHealth?.health_score} />
-        <AssetMetricTile metric={assetMetricByKey.get('efficiency')} />
-        <AssetMetricTile metric={assetMetricByKey.get('risk')} />
-      </section>
-      <section className="detailPanel assetFactsPanel summaryProfile">
-        <h2>Asset profile</h2>
-        <AssetProfileFacts detail={assetDetail} />
-      </section>
-      <section className="detailPanel performanceInsights summaryInsight">
-        <div className="sectionHeader">
-          <Sparkles size={18} />
-          <h2>Performance insights</h2>
-        </div>
-        <div className="insightHero">
-          <span>Risk</span>
-          <strong>{100 - (assetHealth?.health_score ?? 0)}%</strong>
-          <small>Probable cause</small>
-          <h2>{assetHealth?.active_alerts[0]?.message ?? assetHealth?.notes[0]}</h2>
-        </div>
-        <button className="outlineButton" disabled={diagnosisLoading} onClick={runDiagnosis}>
-          {diagnosisLoading ? <span className="loadingSpinner" aria-hidden="true" /> : null}
-          View data
-        </button>
-      </section>
-      <section className="detailPanel summaryActions">
-        <h2>Recommended actions</h2>
-        <ol className="actionList">
-          {assetDetail.recommendations.slice(0, 3).map((action) => (
-            <li key={action.id}>
-              <strong>{action.title}</strong>
-              <span>{action.description}</span>
-            </li>
-          ))}
-        </ol>
-        {canCreateWorkOrders && (
-          <button className="outlineButton" onClick={() => createWorkOrderFromContext(recommendation ?? undefined)}>
-            Create work order
-          </button>
-        )}
-      </section>
-      {canDecision && (
-        <section className="detailPanel assetDecisionPanel">
-          <div className="sectionHeader">
-            <CheckCircle2 size={18} />
-            <h2>Diagnosis and recommendation</h2>
-          </div>
-          <div className="diagnoseActionRow">
-            <button className="textButton" disabled={diagnosisLoading} onClick={runDiagnosis}>
-              {diagnosisLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <CheckCircle2 size={16} />}
-              {diagnosisLoading ? `${diagnosisAssistantName} is diagnosing...` : `Run ${diagnosisAssistantName}`}
-            </button>
-          </div>
-          {recommendationPanel}
-        </section>
-      )}
-    </div>
-  ) : null
-
-  const assetTabContent = assetDetail ? (
-    <>
-      {assetTab === 'summary' && assetSummaryTab}
-      {assetTab === 'maintenance' && (isAssetSectionPending('maintenance') ? assetLoadingPanel('maintenance') : (
-        <div className="assetTabGrid">
-          <section className="detailPanel widePanel">
-            <h2>Maintenance history</h2>
-            <MaintenanceEventTable events={assetDetail.maintenance_events} />
-          </section>
-          <section className="detailPanel widePanel">
-            <h2>Related work orders</h2>
-            <WorkOrderTable
-              workOrders={assetWorkOrders}
-              compact
-              canApprove={canApproveWorkOrders}
-              canStart={canTechnicianAssistant}
-              onApprove={approveWorkOrder}
-              onStart={startWorkOrder}
-              onOpen={(id) => { setSelectedWorkOrderId(id); setActiveView('workOrders') }}
-            />
-          </section>
-        </div>
-      ))}
-      {assetTab === 'performance' && (isAssetSectionPending('performance') ? assetLoadingPanel('performance') : (
-        <div className="assetTabGrid">
-          <section className="detailPanel widePanel">
-            <h2>Performance metrics</h2>
-            <AssetMetricGrid metrics={assetDetail.metrics} />
-          </section>
-          {assetDetail.performance_charts.map((chart) => (
-            <SignalLineChartCard chart={chart} key={chart.signal} />
-          ))}
-        </div>
-      ))}
-      {assetTab === 'reliability' && (isAssetSectionPending('reliability') ? assetLoadingPanel('reliability') : (
-        <div className="assetTabGrid">
-          <section className="detailPanel widePanel">
-            <h2>Reliability metrics</h2>
-            <ReliabilityMetricGrid metrics={assetDetail.reliability_metrics} />
-          </section>
-          <section className="detailPanel widePanel smithPredictionPanel">
-            <div className="assistantHeaderCompact">
-              <span className="assistantAvatar">S</span>
-              <div>
-                <h2>{reliabilityAssistantName}</h2>
-                <small>Predictive failure assistant</small>
-              </div>
-            </div>
-            <div
-              className="reliabilityPredictionStream"
-              ref={reliabilityStreamRef}
-              aria-label={`${reliabilityAssistantName} failure prediction stream`}
-              aria-live="polite"
-            >
-              {(assetReliabilityProvider || assetReliabilityLoading) && (
-                <small className="providerLine">
-                  {assetReliabilityLoading && <span className="loadingSpinner" aria-hidden="true" />}
-                  {assetReliabilityProvider
-                    ? `${assetReliabilityUsedLive ? 'Live LLM' : 'LLM unavailable'} · ${assetReliabilityProvider}`
-                    : `${reliabilityAssistantName} is starting the prediction stream`}
-                </small>
-              )}
-              {assetReliabilityText && <FormattedAssistantContent content={assetReliabilityText} />}
-              {assetReliabilityMessage && <p className="inlineStatus errorText">{assetReliabilityMessage}</p>}
-              {assetReliabilityPrediction ? (
-                <>
-                  <div className="predictionSummary">
-                    <span className={`riskBadge ${assetReliabilityPrediction.risk_level}`}>{assetReliabilityPrediction.risk_level}</span>
-                    <strong>{Math.round(assetReliabilityPrediction.failure_probability * 100)}% failure probability</strong>
-                    <small>{assetReliabilityPrediction.remaining_useful_life_days} days estimated RUL</small>
-                  </div>
-                  <ul className="actionList">
-                    {assetReliabilityPrediction.drivers.slice(0, 6).map((driver) => <li key={driver}>{driver}</li>)}
-                  </ul>
-                </>
-              ) : !assetReliabilityText && !assetReliabilityMessage && (
-                <p className="emptyState">{reliabilityAssistantName} is streaming live LLM failure prediction...</p>
-              )}
-            </div>
-          </section>
-        </div>
-      ))}
-      {assetTab === 'documents' && (isAssetSectionPending('documents') ? assetLoadingPanel('document') : (
-        <div className="assetTabGrid">
-          <section className="detailPanel widePanel">
-            <h2>Knowledge Retrieval</h2>
-            <KnowledgeEvidenceList evidence={assetDetail.knowledge} />
-          </section>
-          <section className="detailPanel widePanel">
-            <h2>SOP, manual, log, and history evidence</h2>
-            <AssetDocumentList documents={assetDetail.documents} />
-          </section>
-        </div>
-      ))}
-      {assetTab === 'workOrders' && (isAssetSectionPending('work_orders') ? assetLoadingPanel('work order') : (
-        <section className="detailPanel widePanel">
-          <h2>Related work orders</h2>
-          <WorkOrderTable
-            workOrders={assetWorkOrders}
-            canApprove={canApproveWorkOrders}
-            canStart={canTechnicianAssistant}
-            onApprove={approveWorkOrder}
-            onStart={startWorkOrder}
-            onOpen={(id) => { setSelectedWorkOrderId(id); setActiveView('workOrders') }}
-          />
-        </section>
-      ))}
-    </>
-  ) : null
-
-  const assetDetailView = (
-    <section className="assetDetailGrid">
-      <div className="pageHeader">
-        <p className="breadcrumb">Operational dashboard / Assets /</p>
-        <h1>{assetProfile?.name ?? selectedEquipment}</h1>
-        <span>{assetProfile ? `Last updated ${formatDate(assetProfile.last_updated)}` : 'Loading live asset data'}</span>
-      </div>
-      <div className="tabRow">
-        {(['summary', 'maintenance', 'performance', 'reliability', 'documents', 'workOrders'] as AssetTab[]).map((tab) => (
-          <button className={assetTab === tab ? 'selected' : ''} onClick={() => setAssetTab(tab)} key={tab}>
-            {tab === 'workOrders' ? 'Work Orders' : tab[0].toUpperCase() + tab.slice(1)}
-          </button>
-        ))}
-      </div>
-      {assetDetailLoading && <section className="detailPanel widePanel"><p className="emptyState">Loading asset detail data...</p></section>}
-      {!assetDetailLoading && assetMessage && <section className="detailPanel widePanel"><p className="inlineStatus errorText">{assetMessage}</p></section>}
-      {assetDetail && (
-        <>
-          {assetTabContent}
-        </>
-      )}
-    </section>
-  )
-
-  const workOrdersView = (
-    <section className="workOrderLayout">
-      <section className="workOrderCenterColumn" aria-label="Work order center pane">
-        <section className="detailPanel workOrderAssistantPanel">
-          {selectedWorkOrder ? (
-            <>
-              {canTechnicianAssistant && (
-                <TechnicianExecutionCard
-                  assistant={technicianAssistant}
-                  isLoading={technicianLoading}
-                  onComplete={completeSelectedWorkOrder}
-                  onStart={startWorkOrder}
-                  workOrder={selectedWorkOrder}
-                />
-              )}
-              <div className={canTechnicianAssistant && canSupervisorAssistant ? 'assistantSplit' : 'assistantSplit singleAssistant'}>
-                {canTechnicianAssistant && (
-                  <section className="assistantBox technician" aria-busy={technicianLoading}>
-                    <div className="sectionHeader">
-                      <Bot size={18} />
-                      <div>
-                        <h2>{technicianAssistantName}</h2>
-                        <small>Technician AI assistant with shared LLM configuration</small>
-                      </div>
-                    </div>
-                    <div className="assistantTranscript" aria-label={`${technicianAssistantName} technician chat`}>
-                      {technicianChat.map((turn) => (
-                        <div className={`chatBubble ${turn.role}`} key={turn.id}>
-                          <span>{turn.role === 'assistant' ? technicianAssistantName : 'You'}</span>
-                          {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
-                          <AssistantMessageContent turn={turn} />
-                          {turn.details && <ul>{turn.details.map((item, index) => <li key={`${turn.id}-${index}`}>{formatWorkOrderStatusText(item)}</li>)}</ul>}
-                        </div>
-                      ))}
-                      {technicianLoading && !technicianStreaming && (
-                        <div className="chatBubble assistant" aria-live="polite">
-                          <span>{technicianAssistantName}</span>
-                          <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
-                        </div>
-                      )}
-                    </div>
-                    <form className="assistantComposer" onSubmit={(event) => {
-                      event.preventDefault()
-                      runTechnicianAssistant()
-                    }}>
-                      <textarea
-                        aria-label="Technician observation"
-                        value={technicianObservation}
-                        disabled={technicianLoading}
-                        onChange={(event) => setTechnicianObservation(event.target.value)}
-                      />
-                      <button className="textButton" type="submit" disabled={technicianLoading}>
-                        {technicianLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
-                        Send
-                      </button>
-                    </form>
-                  </section>
-                )}
-                {canSupervisorAssistant && (
-                  <section className="assistantBox supervisor" aria-busy={supervisorLoading}>
-                    <div className="sectionHeader">
-                      <Bot size={18} />
-                      <div>
-                        <h2>{supervisorAssistantName}</h2>
-                        <small>Supervisor AI assistant with shared LLM configuration</small>
-                      </div>
-                    </div>
-                    <div className="assistantTranscript" aria-label={`${supervisorAssistantName} supervisor chat`}>
-                      {supervisorChat.map((turn) => (
-                        <div className={`chatBubble ${turn.role}`} key={turn.id}>
-                          <span>{turn.role === 'assistant' ? supervisorAssistantName : 'You'}</span>
-                          {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
-                          <AssistantMessageContent turn={turn} />
-                          {turn.details && <ul>{turn.details.map((item, index) => <li key={`${turn.id}-${index}`}>{formatWorkOrderStatusText(item)}</li>)}</ul>}
-                        </div>
-                      ))}
-                      {supervisorLoading && !supervisorStreaming && (
-                        <div className="chatBubble assistant" aria-live="polite">
-                          <span>{supervisorAssistantName}</span>
-                          <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
-                        </div>
-                      )}
-                    </div>
-                    <form className="assistantComposer" onSubmit={(event) => {
-                      event.preventDefault()
-                      runSupervisorAssistant(selectedWorkOrder.id)
-                    }}>
-                      <textarea
-                        aria-label="Supervisor question"
-                        value={supervisorQuestion}
-                        disabled={supervisorLoading}
-                        onChange={(event) => setSupervisorQuestion(event.target.value)}
-                      />
-                      <button className="textButton" type="submit" disabled={supervisorLoading}>
-                        {supervisorLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
-                        Send
-                      </button>
-                    </form>
-                  </section>
-                )}
-                {!canTechnicianAssistant && !canSupervisorAssistant && (
-                  <section className="assistantBox">
-                    <p className="emptyState">Neo is available to technician and supervisor accounts.</p>
-                  </section>
-                )}
-              </div>
-            </>
-          ) : (
-            <p className="emptyState">Select a work order to use the assistant.</p>
-          )}
-        </section>
-        <section className="detailPanel workOrderQueuePanel">
-          <div className="sectionHeader">
-            <Briefcase size={18} />
-            <h2>WOs with follow up actions</h2>
-          </div>
-          <WorkOrderTable
-            workOrders={workOrders}
-            onOpen={(id) => setSelectedWorkOrderId(id)}
-            canAssign={canAssignWorkOrders}
-            canApprove={canApproveWorkOrders}
-            canStart={canTechnicianAssistant}
-            technicians={technicians}
-            onAssign={assignWorkOrder}
-            onApprove={approveWorkOrder}
-            onStart={startWorkOrder}
-          />
-          {workOrderMessage && <p className="inlineStatus">{workOrderMessage}</p>}
-        </section>
-      </section>
-      <section className="workOrderRightColumn" aria-label="Work order right pane">
-        <section className="detailPanel workOrderDetail">
-          {selectedWorkOrder ? (
-            <>
-              <div className="sectionHeader">
-                <FileText size={18} />
-                <h2>Work Order {selectedWorkOrder.id.replace('WO-', '')}</h2>
-              </div>
-              <StatusTimeline status={selectedWorkOrder.status} />
-              <div className="workOrderSummary">
-                <span className="statusPill connected">Priority {selectedWorkOrder.priority}</span>
-                <StatusBadge status={selectedWorkOrder.status} />
-                <p className="statusDescription">{workOrderStatusDetail(selectedWorkOrder.status).description}</p>
-                <p>{selectedWorkOrder.description}</p>
-                <dl>
-                  <dt>Assigned to</dt>
-                  <dd>{selectedWorkOrder.assigned_to}</dd>
-                  <dt>Problem code</dt>
-                  <dd>{technicianAssistant?.suggested_problem_code ?? selectedWorkOrder.problem_code}</dd>
-                  <dt>Failure class</dt>
-                  <dd>{technicianAssistant?.suggested_failure_class ?? selectedWorkOrder.failure_class}</dd>
-                  <dt>Due date</dt>
-                  <dd>{formatDate(selectedWorkOrder.due_date)}</dd>
-                </dl>
-              </div>
-            </>
-          ) : (
-            <p className="emptyState">Select a work order to review.</p>
-          )}
-        </section>
-      </section>
-    </section>
-  )
-
-  const assetsView = (
-    <section className="detailPanel assetsView">
-      <div className="sectionHeader">
-        <Activity size={18} />
-        <h2>Assets</h2>
-      </div>
-      {assets.length > 0 ? (
-        <AssetsTable assets={assets} onOpen={openAsset} />
-      ) : (
-        <p className="emptyState">Asset table data is unavailable until the backend API responds.</p>
-      )}
-      {assetMessage && <p className="inlineStatus">{assetMessage}</p>}
-    </section>
-  )
-
-  const ingestionView = (
-    <section className="detailPanel ingestionView">
-      <div className="sectionHeader">
-        <Upload size={18} />
-        <h2>Ingestion</h2>
-      </div>
-      <div className="ingestionContext">
-        <span>Target asset</span>
-        <strong>{selectedHealth?.equipment.name}</strong>
-        <small>{selectedEquipment}</small>
-      </div>
-      <div className="streamingStatusPanel">
-        <div className="sectionHeader compactHeader">
-          <Activity size={18} />
-          <h3>IoT Stream</h3>
-        </div>
-        <div className="streamingStatusGrid">
-          <span>State</span>
-          <strong className={`streamState ${streamingStatus?.state ?? 'error'}`}>{streamingStatus?.state ?? 'unavailable'}</strong>
-          <span>Broker</span>
-          <strong>{streamingStatus?.broker ?? 'nats'}</strong>
-          <span>Stream</span>
-          <strong>{streamingStatus?.stream ?? 'MW_IOT'}</strong>
-          <span>Consumer</span>
-          <strong>{streamingStatus?.consumer ?? 'maintenance-wizard-ingestor'}</strong>
-          <span>Processed</span>
-          <strong>{streamingStatus?.processed_count ?? 0}</strong>
-          <span>Failed</span>
-          <strong>{streamingStatus?.failed_count ?? 0}</strong>
-          <span>Last Message</span>
-          <strong>{streamingStatus?.last_message_timestamp ?? 'None yet'}</strong>
-        </div>
-        {streamingStatus?.last_error && <p className="inlineStatus errorText">{streamingStatus.last_error}</p>}
-      </div>
-      <div className="ingestionGrid">
-        <label className="field">
-          <span>Source</span>
-          <select value={ingestSourceType} onChange={(event) => setIngestSourceType(event.target.value)}>
-            <option value="manual">Manual</option>
-            <option value="sop">SOP</option>
-            <option value="log">Log</option>
-            <option value="alert">Alert</option>
-            <option value="spares">Spares</option>
-            <option value="history">History</option>
-          </select>
-        </label>
-        <label className="field">
-          <span>Title</span>
-          <input value={ingestTitle} onChange={(event) => setIngestTitle(event.target.value)} />
-        </label>
-        <label className="field fileField">
-          <span>File</span>
-          <input
-            aria-label="Ingestion file"
-            type="file"
-            accept=".txt,.md,.markdown,.csv,.log,.json,.pdf,text/*,application/pdf"
-            onChange={(event) => setIngestFile(event.target.files?.[0] ?? null)}
-          />
-        </label>
-        <button onClick={ingestSelectedFile} title="Upload maintenance document">
-          <Upload size={16} />
-          Upload
-        </button>
-      </div>
-      <div className="jsonIngest">
-        <label className="field">
-          <span>Payload</span>
-          <select value={jsonMode} onChange={(event) => setJsonMode(event.target.value as 'documents' | 'records')}>
-            <option value="documents">Documents</option>
-            <option value="records">Records</option>
-          </select>
-        </label>
-        <textarea
-          aria-label="Ingestion JSON"
-          value={jsonPayload}
-          onChange={(event) => setJsonPayload(event.target.value)}
-          placeholder={jsonMode === 'documents' ? '{"documents":[...]}' : '{"alerts":[...],"sensor_readings":[...]}'}
-        />
-        <button className="textButton" onClick={ingestJsonPayload}>
-          <FileJson size={16} />
-          Import JSON
-        </button>
-      </div>
-      {ingestionMessage && <p className="inlineStatus">{ingestionMessage}</p>}
-    </section>
-  )
-
-  const learningModels: LearningModelVersion[] = learningSummary?.model_versions ?? []
-  const learningPrompts = learningSummary?.prompt_versions ?? []
-  const learningEvaluations: LearningEvaluationRun[] = learningSummary?.evaluation_runs ?? []
-  const learningJobs: LearningJob[] = learningSummary?.recent_jobs ?? []
-  const learningArtifacts: LearningArtifact[] = learningSummary?.recent_artifacts ?? []
-  const learningPromotions: LearningModelPromotion[] = learningSummary?.recent_promotions ?? []
-  const learningDeploymentRecords = mergeLearningDeployments(learningDeployments, learningSummary?.recent_deployments ?? [])
-  const artifactRetention = learningSummary?.artifact_store?.retention ?? {}
-  const artifactRetentionState = String(artifactRetention.state ?? 'not configured')
-  const artifactRetentionDays = String(artifactRetention.retention_days ?? 'unknown')
-  const latestDeploymentForModel = (modelId: string) =>
-    learningDeploymentRecords.find((deployment) => deployment.model_version_id === modelId)
-  const latestVerifiedDeploymentForModel = (modelId: string) =>
-    learningDeploymentRecords.find((deployment) => deployment.model_version_id === modelId && isVerifiedDeployment(deployment))
   const passedEvaluationForModel = (modelId: string) =>
-    learningEvaluations.find((run) => run.model_version_id === modelId && run.passed)
-  const selectedEmbeddingProfile = learningEmbeddingProfiles.find((profile) => profile.id === selectedEmbeddingProfileId)
-  const activeEmbeddingProfile = learningEmbeddingProfiles.find((profile) => profile.status === 'active')
-  const vectorStore = learningSummary?.vector_store
-  const vectorProfile = vectorStore?.embedding_profile
-  const ragMigrationNeeded = Boolean(vectorStore?.migration_required || (selectedEmbeddingProfile && activeEmbeddingProfile && selectedEmbeddingProfile.id !== activeEmbeddingProfile.id))
+    learningSummary?.evaluation_runs.find((run) => run.model_version_id === modelId && run.passed)
 
   async function promoteLearningAdapter(model: LearningModelVersion) {
     const evaluation = passedEvaluationForModel(model.id)
@@ -2692,706 +1677,228 @@ export function App() {
     }
   }
 
-  const learningView = (
-    <section className="detailPanel learningView">
-      <div className="sectionHeader">
-        <Sparkles size={18} />
-        <h2>Learning and Tuning</h2>
-      </div>
-      <p className="emptyState">
-        Review approved human feedback, maintenance labels, work-order outcomes, ingested documents, and assistant interactions before exporting a local tuning dataset.
-      </p>
-      <div className="learningToolbar">
-        <button className="textButton" onClick={refreshLearningExamples} disabled={learningLoading}>
-          {learningLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
-          Refresh examples
-        </button>
-        <label className="field">
-          <span>Snapshot name</span>
-          <input value={learningDatasetName} onChange={(event) => setLearningDatasetName(event.target.value)} />
-        </label>
-        <label className="field">
-          <span>Description</span>
-          <input value={learningDatasetDescription} onChange={(event) => setLearningDatasetDescription(event.target.value)} />
-        </label>
-        <button className="textButton" onClick={createLearningSnapshot} disabled={learningLoading}>
-          <FileJson size={16} />
-          Create JSONL snapshot
-        </button>
-      </div>
-      <div className="learningStats">
-        {(['interactions', 'examples', 'approved_examples', 'snapshots', 'artifacts', 'promotions', 'deployments'] as const).map((key) => (
-          <span className="learningStat" key={key}>
-            <small>{key.replace(/_/g, ' ')}</small>
-            <strong>{learningSummary?.counts[key] ?? 0}</strong>
-          </span>
-        ))}
-      </div>
-      <div className="vectorStoreStatus">
-        <div className="vectorStoreFacts">
-          <span>
-            <strong>RAG vector DB</strong>
-            <small>
-              {vectorStore?.store ?? 'unknown'} · {vectorStore?.state ?? 'not checked'}
-            </small>
-          </span>
-          <span>
-            <small>Collection</small>
-            <strong>{vectorStore?.collection ?? 'local fallback'}</strong>
-          </span>
-          <span>
-            <small>Points</small>
-            <strong>{String(vectorStore?.points_count ?? 'not checked')}</strong>
-          </span>
-          <span>
-            <small>Vector shape</small>
-            <strong>
-              {String(vectorStore?.collection_vector_size ?? 'unknown')} · {String(vectorStore?.collection_distance ?? vectorProfile?.distance ?? 'unknown')}
-            </strong>
-          </span>
-          <span>
-            <small>Active embedding</small>
-            <strong>
-              {String(vectorProfile?.provider ?? 'unknown')} · {String(vectorProfile?.model ?? 'unknown')} · v
-              {String(vectorProfile?.version ?? 'unknown')}
-            </strong>
-          </span>
-          <span>
-            <small>Profile dimensions</small>
-            <strong>{String(vectorProfile?.dimensions ?? 'unknown')}</strong>
-          </span>
-          <span>
-            <small>Migration</small>
-            <strong>{ragMigrationNeeded ? 'Required' : 'Current'}</strong>
-          </span>
-        </div>
-        {(vectorProfile?.warning || vectorStore?.error || (vectorStore?.migration_reasons ?? []).length > 0) && (
-          <div className="migrationNotice">
-            {vectorProfile?.warning && <p>{String(vectorProfile.warning)}</p>}
-            {vectorStore?.error && <p>{String(vectorStore.error)}</p>}
-            {(vectorStore?.migration_reasons ?? []).map((reason) => (
-              <p key={reason}>{reason}</p>
-            ))}
-          </div>
-        )}
-        <div className="ragControls">
-          <label className="field">
-            <span>Embedding profile</span>
-            <select value={selectedEmbeddingProfileId} onChange={(event) => setSelectedEmbeddingProfileId(event.target.value)}>
-              {learningEmbeddingProfiles.map((profile) => (
-                <option value={profile.id} key={profile.id}>
-                  {profile.provider} · {profile.model} · v{profile.version} · {profile.dimensions}d {profile.status === 'active' ? '(active)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Target collection</span>
-            <input value={ragTargetCollection} onChange={(event) => setRagTargetCollection(event.target.value)} />
-          </label>
-          <button className="outlineButton" onClick={activateSelectedEmbeddingProfile} disabled={learningLoading || !selectedEmbeddingProfileId || selectedEmbeddingProfileId === activeEmbeddingProfile?.id}>
-            Activate profile
-          </button>
-          <button className="outlineButton" onClick={previewLearningRagMigration} disabled={learningLoading || !selectedEmbeddingProfileId}>
-            Preview migration
-          </button>
-          <button className="textButton" onClick={runLearningRagMigration} disabled={learningLoading || !selectedEmbeddingProfileId}>
-            {learningLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Database size={16} />}
-            Run Qdrant migration
-          </button>
-          <button className="subtleButton" onClick={reindexLearningRag} disabled={learningLoading || ragMigrationNeeded}>
-            Reindex current profile
-          </button>
-        </div>
-        {ragMigrationPreview && (
-          <div className="migrationPreview">
-            <span>
-              <strong>Migration preview</strong>
-              <small>
-                {String(ragMigrationPreview.active_profile.model ?? 'active')} → {String(ragMigrationPreview.target_profile.model ?? 'target')}
-              </small>
-            </span>
-            <span>
-              <small>Target collection</small>
-              <strong>{ragMigrationPreview.target_collection}</strong>
-            </span>
-            <span>
-              <small>Profile activation</small>
-              <strong>{ragMigrationPreview.will_activate_profile ? 'Yes' : 'No'}</strong>
-            </span>
-            <div>
-              {ragMigrationPreview.reasons.map((reason) => (
-                <p key={reason}>{reason}</p>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-      <div className="servingModelStatus">
-        <span>
-          <strong>Serving LLM</strong>
-          <small>
-            {learningSummary?.serving_model?.source?.replace(/_/g, ' ') ?? 'unknown'} · {learningSummary?.serving_model?.provider ?? 'unknown'}
-          </small>
-        </span>
-        <span>
-          <small>Model</small>
-          <strong>
-            {learningSummary?.serving_model?.provider === 'ollama'
-              ? learningSummary?.serving_model?.ollama_model
-              : learningSummary?.serving_model?.openai_model}
-          </strong>
-        </span>
-        {learningSummary?.serving_model?.active_model_version_id && (
-          <span>
-            <small>Active version</small>
-            <strong>{learningSummary.serving_model.active_model_version_id}</strong>
-          </span>
-        )}
-        {learningSummary?.serving_model?.adapter_path && (
-          <span>
-            <small>Adapter</small>
-            <strong>{learningSummary.serving_model.adapter_path}</strong>
-          </span>
-        )}
-        {learningSummary?.serving_model?.deployment_id && (
-          <span>
-            <small>Runtime deployment</small>
-            <strong>
-              {learningSummary.serving_model.deployment_id} · {learningSummary.serving_model.health_status ?? 'not checked'}
-            </strong>
-          </span>
-        )}
-        {learningSummary?.serving_model?.served_model_name && (
-          <span>
-            <small>Served model</small>
-            <strong>{learningSummary.serving_model.served_model_name}</strong>
-          </span>
-        )}
-        {learningSummary?.serving_model?.warning && (
-          <span>
-            <small>Status</small>
-            <strong>{learningSummary.serving_model.warning}</strong>
-          </span>
-        )}
-      </div>
-      <div className="artifactStoreStatus">
-        <span>
-          <strong>Artifact store</strong>
-          <small>
-            {String(learningSummary?.artifact_store?.store ?? 'unknown')} · {String(learningSummary?.artifact_store?.state ?? 'not checked')}
-          </small>
-        </span>
-        <span>
-          <small>Location</small>
-          <strong>
-            {String(
-              learningSummary?.artifact_store?.store === 's3'
-                ? learningSummary?.artifact_store?.bucket ?? 'bucket not configured'
-                : learningSummary?.artifact_store?.local_dir ?? 'local dir not configured',
-            )}
-          </strong>
-        </span>
-        {Boolean(learningSummary?.artifact_store?.prefix) && (
-          <span>
-            <small>Prefix</small>
-            <strong>{String(learningSummary?.artifact_store?.prefix)}</strong>
-          </span>
-        )}
-        <span>
-          <small>Retention</small>
-          <strong>{artifactRetentionState} · {artifactRetentionDays} days</strong>
-        </span>
-        <button className="outlineButton" onClick={previewLearningArtifactCleanup} disabled={learningLoading}>
-          {learningLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Trash2 size={16} />}
-          Preview cleanup
-        </button>
-      </div>
-      {artifactCleanupResult && (
-        <div className={`artifactCleanupResult ${artifactCleanupResult.errors.length ? 'warning' : ''}`}>
-          <span>
-            <strong>Artifact lifecycle preview</strong>
-            <small>
-              {artifactCleanupResult.store} · {artifactCleanupResult.dry_run ? 'dry run' : 'apply'} ·
-              {artifactCleanupResult.cleanup_enabled ? ' cleanup enabled' : ' cleanup disabled'}
-            </small>
-          </span>
-          <div className="artifactCleanupStats">
-            <span>
-              <small>Eligible</small>
-              <strong>{artifactCleanupResult.expired_count}</strong>
-            </span>
-            <span>
-              <small>Protected</small>
-              <strong>{artifactCleanupResult.protected_count}</strong>
-            </span>
-            <span>
-              <small>Deleted</small>
-              <strong>{artifactCleanupResult.deleted_count}</strong>
-            </span>
-          </div>
-          {artifactCleanupResult.errors.length > 0 && (
-            <p>{artifactCleanupResult.errors.join(' ')}</p>
-          )}
-          {artifactCleanupResult.candidates.length > 0 && (
-            <div className="artifactCleanupList">
-              <small>Cleanup candidates</small>
-              {artifactCleanupResult.candidates.slice(0, 4).map((item) => (
-                <span key={String(item.artifact_id ?? item.path ?? JSON.stringify(item))}>
-                  <strong>{String(item.artifact_type ?? 'artifact')}</strong>
-                  <small>{String(item.path ?? item.uri ?? item.artifact_id ?? 'registered artifact')}</small>
-                </span>
-              ))}
-            </div>
-          )}
-          {artifactCleanupResult.protected.length > 0 && (
-            <div className="artifactCleanupList">
-              <small>Protected artifacts</small>
-              {artifactCleanupResult.protected.slice(0, 4).map((item) => (
-                <span key={String(item.artifact_id ?? item.path ?? JSON.stringify(item))}>
-                  <strong>{String(item.artifact_type ?? 'artifact')}</strong>
-                  <small>{String(item.protected_reason ?? 'protected by lifecycle policy')}</small>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      <div className="peftTrainerStatus">
-        <span>
-          <strong>PEFT trainer</strong>
-          <small>
-            {String(learningSummary?.peft_trainer?.mode ?? 'unknown')} · {String(learningSummary?.peft_trainer?.configured ? 'configured' : 'not configured')}
-          </small>
-        </span>
-        <span>
-          <small>Timeout</small>
-          <strong>{String(learningSummary?.peft_trainer?.timeout_seconds ?? 'not checked')}s</strong>
-        </span>
-        <span>
-          <small>Output</small>
-          <strong>{String(learningSummary?.peft_trainer?.output_dir ?? 'not configured')}</strong>
-        </span>
-      </div>
-      <div className="learningGrid">
-        <section className="learningPanel">
-          <h3>Approved Controls</h3>
-          <div className="learningExamples" aria-label="Learning examples">
-            {learningExamples.length ? learningExamples.slice(0, 30).map((example) => (
-              <article className={`learningExample ${example.approved ? 'approved' : ''}`} key={example.id}>
-                <div>
-                  <strong>{example.source_type.replace(/_/g, ' ')}</strong>
-                  <small>{example.equipment_id ?? 'company-wide'} · {formatDate(example.created_at)}</small>
-                </div>
-                <div className="judgeScoreRow">
-                  <span className={`judgeBadge ${example.judge_label}`}>
-                    {Math.round(example.judge_score * 100)}% · {example.judge_label.replace(/_/g, ' ')}
-                  </span>
-                  <small>{example.judge_used_live_provider ? 'Live LLM judge' : 'Judge fallback'} · {example.judge_provider}</small>
-                </div>
-                <p>{example.instruction}</p>
-                <blockquote>{clipText(example.expected_output, 220)}</blockquote>
-                {example.judge_rationale && <p className="judgeRationale">{clipText(example.judge_rationale, 220)}</p>}
-                <div className="learningExampleActions">
-                  <button className="outlineButton" onClick={() => judgeLearningExample(example)}>
-                    Judge
-                  </button>
-                  <button className={example.approved ? 'outlineButton' : 'textButton'} onClick={() => toggleLearningApproval(example)}>
-                    {example.approved ? 'Remove approval' : 'Approve'}
-                  </button>
-                </div>
-              </article>
-            )) : (
-              <p className="emptyState">No learning examples have been generated yet.</p>
-            )}
-          </div>
-        </section>
-        <section className="learningPanel">
-          <h3>Model and Prompt Versions</h3>
-          <div className="versionList">
-            {learningModels.map((model) => {
-              const promotionEvaluation = passedEvaluationForModel(model.id)
-              const latestDeployment = latestDeploymentForModel(model.id)
-              const latestVerifiedDeployment = latestVerifiedDeploymentForModel(model.id)
-              const canPromoteModel = model.status !== 'active' && Boolean(promotionEvaluation)
-              const canRollbackModel = model.status === 'retired' && Boolean(promotionEvaluation)
-              const canDeployModel = model.status === 'candidate' && Boolean(model.adapter_path)
-              return (
-                <div className="versionRow" key={model.id}>
-                  <strong>{model.model_name}</strong>
-                  <small>{model.provider} · {model.status}</small>
-                  {model.adapter_path && <small>Adapter {model.adapter_path}</small>}
-                  {latestDeployment && (
-                    <small>
-                      Latest deployment {latestDeployment.runtime_provider} · {latestDeployment.status} · health{' '}
-                      {latestDeployment.health_status ?? 'not checked'}
-                    </small>
-                  )}
-                  {latestVerifiedDeployment ? (
-                    <small>
-                      Verified deployment {latestVerifiedDeployment.served_model_name} · {latestVerifiedDeployment.serving_provider} ·{' '}
-                      {formatDate(deploymentDisplayDate(latestVerifiedDeployment))}
-                    </small>
-                  ) : (
-                    <small>No verified deployment recorded for this model.</small>
-                  )}
-                  {promotionEvaluation ? (
-                    <small>Promotion gate passed by evaluation {promotionEvaluation.id}</small>
-                  ) : model.status !== 'active' ? (
-                    <small>Promotion gate requires a passing evaluation for this model.</small>
-                  ) : null}
-                  {model.notes && <p>{model.notes}</p>}
-                  {(canPromoteModel || canRollbackModel || canDeployModel) && (
-                    <div className="versionActions">
-                      {canDeployModel && (
-                        <button className="textButton" onClick={() => deployLearningAdapter(model)} disabled={learningLoading}>
-                          <Upload size={16} />
-                          Deploy adapter
-                        </button>
-                      )}
-                      {canPromoteModel && (
-                        <button className="textButton" onClick={() => promoteLearningAdapter(model)} disabled={learningLoading}>
-                          <CheckCircle2 size={16} />
-                          Promote adapter
-                        </button>
-                      )}
-                      {canRollbackModel && (
-                        <button className="outlineButton" onClick={() => rollbackLearningAdapter(model)} disabled={learningLoading}>
-                          Roll back to this model
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            {learningPrompts.map((prompt) => (
-              <div className="versionRow" key={prompt.id}>
-                <strong>{prompt.assistant} / {prompt.version}</strong>
-                <small>{prompt.status}</small>
-                {prompt.notes && <p>{prompt.notes}</p>}
-              </div>
-            ))}
-          </div>
-          <h3>Promotion Audit</h3>
-          <div className="promotionList">
-            {learningPromotions.length ? learningPromotions.map((promotion) => (
-              <div className={`promotionRow ${promotion.action}`} key={promotion.id}>
-                <span>
-                  <strong>{promotion.action === 'promote' ? 'Adapter promoted' : 'Rollback completed'}</strong>
-                  <small>{promotion.model_version_id} · {formatDate(promotion.created_at)}</small>
-                </span>
-                <small>Evaluation {promotion.evaluation_run_id} · Dataset {promotion.dataset_id}</small>
-                <small>Reviewer {promotion.reviewer_email}</small>
-                {promotion.previous_active_model_id && <small>Previous active {promotion.previous_active_model_id}</small>}
-                {promotion.notes && <p>{promotion.notes}</p>}
-              </div>
-            )) : (
-              <p className="emptyState">Adapter promotions and rollbacks will appear after a reviewer activates a passed model.</p>
-            )}
-          </div>
-          <h3>Adapter Runtime Deployments</h3>
-          <div className="learningAdapterGrid">
-            <label className="field">
-              <span>Runtime provider</span>
-              <input value={deploymentRuntimeProvider} onChange={(event) => setDeploymentRuntimeProvider(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Runtime base URL</span>
-              <input value={deploymentBaseUrl} onChange={(event) => setDeploymentBaseUrl(event.target.value)} placeholder="optional runtime endpoint" />
-            </label>
-          </div>
-          <div className="deploymentList">
-            {learningDeploymentRecords.length ? learningDeploymentRecords.map((deployment) => (
-              <div className={`deploymentRow ${deploymentStatusClass(deployment.status)} ${deploymentStatusClass(deployment.health_status)}`} key={deployment.id}>
-                <span>
-                  <strong>{deployment.served_model_name}</strong>
-                  <small>{deployment.runtime_provider} · {deployment.serving_provider}</small>
-                </span>
-                <div className="deploymentBadges">
-                  <span className={`deploymentBadge ${deploymentStatusClass(deployment.status)}`}>{deployment.status.replace(/_/g, ' ')}</span>
-                  <span className={`deploymentBadge ${deploymentStatusClass(deployment.health_status)}`}>
-                    health {deployment.health_status?.replace(/_/g, ' ') ?? 'not checked'}
-                  </span>
-                </div>
-                <small>Model version {deployment.model_version_id} · {formatDate(deploymentDisplayDate(deployment))}</small>
-                {deployment.base_url && <small>Base URL {deployment.base_url}</small>}
-                {deployment.artifact_uri && <small>Artifact {deployment.artifact_uri}</small>}
-                {deployment.error && <p>{deployment.error}</p>}
-              </div>
-            )) : (
-              <p className="emptyState">Adapter runtime deployments will appear after a candidate deployment is queued.</p>
-            )}
-          </div>
-          <h3>Adapter Candidate</h3>
-          <div className="learningAdapterGrid">
-            <label className="field">
-              <span>Provider</span>
-              <input value={adapterProvider} onChange={(event) => setAdapterProvider(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Model</span>
-              <input value={adapterModelName} onChange={(event) => setAdapterModelName(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Base model</span>
-              <input value={adapterBaseModel} onChange={(event) => setAdapterBaseModel(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Adapter path</span>
-              <input value={adapterPath} onChange={(event) => setAdapterPath(event.target.value)} placeholder="adapter registry path or artifact URI" />
-            </label>
-            <label className="field adapterNotesField">
-              <span>Notes</span>
-              <textarea value={adapterNotes} onChange={(event) => setAdapterNotes(event.target.value)} />
-            </label>
-            <button className="textButton" onClick={registerLearningAdapter} disabled={learningLoading || !adapterModelName.trim()}>
-              <Sparkles size={16} />
-              Register adapter
-            </button>
-          </div>
-          <h3>Dataset Snapshots</h3>
-          <div className="datasetList">
-            {learningDatasets.length ? learningDatasets.map((snapshot) => (
-              <div className="datasetRow" key={snapshot.id}>
-                <span>
-                  <strong>{snapshot.name}</strong>
-                  <small>{snapshot.example_count} examples · {formatDate(snapshot.created_at)}</small>
-                </span>
-                <button className="iconTextButton" onClick={() => downloadLearningSnapshot(snapshot)}>
-                  <Download size={16} />
-                  JSONL
-                </button>
-              </div>
-            )) : (
-              <p className="emptyState">Create a snapshot after approving examples.</p>
-            )}
-          </div>
-          <h3>Evaluation Runs</h3>
-          <button className="textButton fullWidthAction" onClick={runLearningEvaluation} disabled={learningLoading}>
-            <CheckCircle2 size={16} />
-            Run dataset evaluation
-          </button>
-          <div className="evaluationList">
-            {learningEvaluations.length ? learningEvaluations.map((run) => (
-              <div className={`evaluationRow ${run.passed ? 'passed' : 'review'}`} key={run.id}>
-                <span>
-                  <strong>{run.passed ? 'Passed' : 'Needs review'}</strong>
-                  <small>{formatDate(run.created_at)}</small>
-                </span>
-                <div className="evaluationMetrics">
-                  <span>Quality <strong>{metricValue(run.metrics.quality_score)}</strong></span>
-                  <span>Avg judge <strong>{metricValue(run.metrics.average_judge_score)}</strong></span>
-                  <span>Sources <strong>{metricValue(run.metrics.source_type_coverage)}</strong></span>
-                  <span>Assets <strong>{metricValue(run.metrics.asset_coverage)}</strong></span>
-                </div>
-                {run.notes && <p>{run.notes}</p>}
-              </div>
-            )) : (
-              <p className="emptyState">Run an evaluation after creating a dataset snapshot.</p>
-            )}
-          </div>
-          <h3>Async Learning Jobs</h3>
-          <div className="learningAdapterGrid">
-            <label className="field adapterNotesField">
-              <span>PEFT adapter job name</span>
-              <input value={peftAdapterName} onChange={(event) => setPeftAdapterName(event.target.value)} />
-            </label>
-            <button className="textButton fullWidthAction" onClick={queuePeftTuningJob} disabled={learningLoading}>
-              <Sparkles size={16} />
-              Queue PEFT tuning job
-            </button>
-          </div>
-          <div className="jobList">
-            {learningJobs.length ? learningJobs.map((job) => (
-              <div className={`jobRow ${job.status}`} key={job.id}>
-                <span>
-                  <strong>{job.job_type.replace(/_/g, ' ')}</strong>
-                  <small>{job.status} · {formatDate(job.updated_at)}</small>
-                </span>
-                <small>{job.subject}</small>
-                {job.error && <p>{job.error}</p>}
-                {typeof job.output_refs.dispatch === 'string' && <p>{job.output_refs.dispatch}</p>}
-              </div>
-            )) : (
-              <p className="emptyState">Learning jobs will appear after review, dataset, evaluation, or PEFT queue actions.</p>
-            )}
-          </div>
-          <h3>Learning Artifacts</h3>
-          <div className="artifactList">
-            {learningArtifacts.length ? learningArtifacts.map((artifact) => (
-              <div className="artifactRow" key={artifact.id}>
-                <span>
-                  <strong>{artifact.artifact_type.replace(/_/g, ' ')}</strong>
-                  <small>{artifact.job_id} · {formatDate(artifact.created_at)}</small>
-                </span>
-                <small>sha256 {artifact.content_hash.slice(0, 12)}</small>
-              </div>
-            )) : (
-              <p className="emptyState">Worker-produced datasets, manifests, and adapter artifacts will appear here.</p>
-            )}
-          </div>
-        </section>
-      </div>
-      {learningMessage && <p className="inlineStatus">{learningMessage}</p>}
-    </section>
-  )
+  const openWorkOrderRoute = (workOrderId: string) => {
+    setSelectedWorkOrderId(workOrderId)
+    setActiveView('workOrders')
+  }
 
-  const usersView = (
-    <section className="detailPanel usersView">
-      <div className="sectionHeader">
-        <Users size={18} />
-        <h2>Users</h2>
-      </div>
-      <div className="userCreateGrid">
-        <label className="field">
-          <span>Email</span>
-          <input value={newUserEmail} onChange={(event) => setNewUserEmail(event.target.value)} />
-        </label>
-        <label className="field">
-          <span>Name</span>
-          <input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} />
-        </label>
-        <label className="field">
-          <span>Role</span>
-          <select value={newUserRole} onChange={(event) => setNewUserRole(event.target.value as UserRole)}>
-            {roleOptions.map((role) => (
-              <option value={role} key={role}>
-                {roleLabels[role]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Password</span>
-          <input type="password" value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} />
-        </label>
-        <button onClick={createNewUser} title="Create user">
-          <UserPlus size={16} />
-          Create
-        </button>
-      </div>
-      <div className="userList" aria-label="Application users">
-        {users.map((user) => (
-          <div className="userRow" key={user.id}>
-            <span>
-              <strong>{user.display_name}</strong>
-              <small>{user.email}</small>
-            </span>
-            <span className="rolePill">{roleLabels[user.role]}</span>
-            <span className={`activePill ${user.is_active ? 'active' : 'inactive'}`}>
-              {user.is_active ? 'Active' : 'Inactive'}
-            </span>
-            <button className="textButton subtleButton" onClick={() => toggleUserActive(user)}>
-              {user.is_active ? 'Deactivate' : 'Activate'}
-            </button>
-            <button className="iconTextButton" onClick={() => openResetPassword(user)} title="Reset password">
-              <KeyRound size={16} />
-              Reset
-            </button>
-          </div>
-        ))}
-      </div>
-      {userMessage && <p className="inlineStatus">{userMessage}</p>}
-      {resetUser && (
-        <div className="modalOverlay" role="presentation">
-          <section className="modalPanel" role="dialog" aria-modal="true" aria-labelledby="reset-password-title">
-            <div className="sectionHeader compactHeader">
-              <KeyRound size={18} />
-              <h2 id="reset-password-title">Reset Password</h2>
-            </div>
-            <p className="modalContext">
-              {resetUser.display_name}
-              <small>{resetUser.email}</small>
-            </p>
-            <label className="field">
-              <span>New Password</span>
-              <input
-                autoFocus
-                type="password"
-                value={resetPasswordValue}
-                onChange={(event) => setResetPasswordValue(event.target.value)}
-              />
-            </label>
-            <div className="modalActions">
-              <button className="outlineButton" onClick={closeResetPassword}>
-                Cancel
-              </button>
-              <button className="iconTextButton" onClick={resetPassword}>
-                <KeyRound size={16} />
-                Reset
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-    </section>
-  )
+  const activeRoute =
+    activeView === 'dashboard' ? (
+      <DashboardRoute
+        approveWorkOrder={approveWorkOrder}
+        canApproveWorkOrders={canApproveWorkOrders}
+        canTechnicianAssistant={canTechnicianAssistant}
+        dashboard={dashboard}
+        dashboardMetrics={dashboardMetrics}
+        neoLoading={neoLoading}
+        neoMessages={neoMessages}
+        neoQuestion={neoQuestion}
+        neoStreaming={neoStreaming}
+        neoTable={neoTable}
+        neoTranscriptRef={neoTranscriptRef}
+        openWorkOrder={openWorkOrderRoute}
+        sendNeoQuestion={sendNeoQuestion}
+        setNeoQuestion={setNeoQuestion}
+        startWorkOrder={startWorkOrder}
+        workOrders={workOrders}
+      />
+    ) : activeView === 'assets' ? (
+      <AssetsRoute
+        assetMessage={assetMessage}
+        assets={assets}
+        onOpenAsset={openAsset}
+      />
+    ) : activeView === 'asset' ? (
+      <AssetDetailRoute
+        approveWorkOrder={approveWorkOrder}
+        assetDetail={assetDetail}
+        assetDetailLoading={assetDetailLoading}
+        assetLoadedSections={assetLoadedSections}
+        assetMessage={assetMessage}
+        assetReliabilityLoading={assetReliabilityLoading}
+        assetReliabilityMessage={assetReliabilityMessage}
+        assetReliabilityPrediction={assetReliabilityPrediction}
+        assetReliabilityProvider={assetReliabilityProvider}
+        assetReliabilityText={assetReliabilityText}
+        assetReliabilityUsedLive={assetReliabilityUsedLive}
+        assetSectionLoading={assetSectionLoading}
+        assetTab={assetTab}
+        assetWorkOrders={assetWorkOrders}
+        canApproveWorkOrders={canApproveWorkOrders}
+        canCreateWorkOrders={canCreateWorkOrders}
+        canDecision={canDecision}
+        canFeedback={canFeedback}
+        canTechnicianAssistant={canTechnicianAssistant}
+        createWorkOrderFromContext={createWorkOrderFromContext}
+        diagnosisLoading={diagnosisLoading}
+        diagnosisMessage={diagnosisMessage}
+        diagnosisProvider={diagnosisProvider}
+        diagnosisStreamText={diagnosisStreamText}
+        diagnosisStreaming={diagnosisStreaming}
+        diagnosisUsedLive={diagnosisUsedLive}
+        downloadReport={downloadReport}
+        feedbackActionTaken={feedbackActionTaken}
+        feedbackMessage={feedbackMessage}
+        feedbackNotes={feedbackNotes}
+        feedbackOutcome={feedbackOutcome}
+        feedbackRootCause={feedbackRootCause}
+        morpheusProgressRef={morpheusProgressRef}
+        onOpenWorkOrder={openWorkOrderRoute}
+        recommendation={recommendation}
+        reliabilityStreamRef={reliabilityStreamRef}
+        reportMessage={reportMessage}
+        runDiagnosis={runDiagnosis}
+        selectedEquipment={selectedEquipment}
+        sendFeedback={sendFeedback}
+        setAssetTab={setAssetTab}
+        setFeedbackActionTaken={setFeedbackActionTaken}
+        setFeedbackNotes={setFeedbackNotes}
+        setFeedbackOutcome={setFeedbackOutcome}
+        setFeedbackRootCause={setFeedbackRootCause}
+        startWorkOrder={startWorkOrder}
+      />
+    ) : activeView === 'workOrders' ? (
+      <WorkOrdersRoute
+        approveWorkOrder={approveWorkOrder}
+        assignWorkOrder={assignWorkOrder}
+        canApproveWorkOrders={canApproveWorkOrders}
+        canAssignWorkOrders={canAssignWorkOrders}
+        canSupervisorAssistant={canSupervisorAssistant}
+        canTechnicianAssistant={canTechnicianAssistant}
+        completeSelectedWorkOrder={completeSelectedWorkOrder}
+        runSupervisorAssistant={runSupervisorAssistant}
+        runTechnicianAssistant={runTechnicianAssistant}
+        selectedWorkOrder={selectedWorkOrder}
+        setSelectedWorkOrderId={setSelectedWorkOrderId}
+        setSupervisorQuestion={setSupervisorQuestion}
+        setTechnicianObservation={setTechnicianObservation}
+        startWorkOrder={startWorkOrder}
+        supervisorAssistant={supervisorAssistant}
+        supervisorChat={supervisorChat}
+        supervisorLoading={supervisorLoading}
+        supervisorQuestion={supervisorQuestion}
+        supervisorStreaming={supervisorStreaming}
+        technicianAssistant={technicianAssistant}
+        technicianChat={technicianChat}
+        technicianLoading={technicianLoading}
+        technicianObservation={technicianObservation}
+        technicianStreaming={technicianStreaming}
+        technicians={technicians}
+        workOrderMessage={workOrderMessage}
+        workOrders={workOrders}
+      />
+    ) : activeView === 'ingestion' ? (
+      <IngestionRoute
+        ingestJsonPayload={ingestJsonPayload}
+        ingestSelectedFile={ingestSelectedFile}
+        ingestSourceType={ingestSourceType}
+        ingestTitle={ingestTitle}
+        ingestionMessage={ingestionMessage}
+        jsonMode={jsonMode}
+        jsonPayload={jsonPayload}
+        selectedEquipment={selectedEquipment}
+        selectedHealth={selectedHealth}
+        setIngestFile={setIngestFile}
+        setIngestSourceType={setIngestSourceType}
+        setIngestTitle={setIngestTitle}
+        setJsonMode={setJsonMode}
+        setJsonPayload={setJsonPayload}
+        streamingStatus={streamingStatus}
+      />
+    ) : activeView === 'learning' ? (
+      <LearningReviewRoute
+        activateSelectedEmbeddingProfile={activateSelectedEmbeddingProfile}
+        adapterBaseModel={adapterBaseModel}
+        adapterModelName={adapterModelName}
+        adapterNotes={adapterNotes}
+        adapterPath={adapterPath}
+        adapterProvider={adapterProvider}
+        artifactCleanupResult={artifactCleanupResult}
+        createLearningSnapshot={createLearningSnapshot}
+        deployLearningAdapter={deployLearningAdapter}
+        deploymentBaseUrl={deploymentBaseUrl}
+        deploymentRuntimeProvider={deploymentRuntimeProvider}
+        downloadLearningSnapshot={downloadLearningSnapshot}
+        judgeLearningExample={judgeLearningExample}
+        learningDatasetDescription={learningDatasetDescription}
+        learningDatasetName={learningDatasetName}
+        learningDatasets={learningDatasets}
+        learningDeployments={learningDeployments}
+        learningEmbeddingProfiles={learningEmbeddingProfiles}
+        learningExamples={learningExamples}
+        learningLoading={learningLoading}
+        learningMessage={learningMessage}
+        learningSummary={learningSummary}
+        peftAdapterName={peftAdapterName}
+        previewLearningArtifactCleanup={previewLearningArtifactCleanup}
+        previewLearningRagMigration={previewLearningRagMigration}
+        promoteLearningAdapter={promoteLearningAdapter}
+        queuePeftTuningJob={queuePeftTuningJob}
+        ragMigrationPreview={ragMigrationPreview}
+        ragTargetCollection={ragTargetCollection}
+        refreshLearningExamples={refreshLearningExamples}
+        registerLearningAdapter={registerLearningAdapter}
+        reindexLearningRag={reindexLearningRag}
+        rollbackLearningAdapter={rollbackLearningAdapter}
+        runLearningEvaluation={runLearningEvaluation}
+        runLearningRagMigration={runLearningRagMigration}
+        selectedEmbeddingProfileId={selectedEmbeddingProfileId}
+        setAdapterBaseModel={setAdapterBaseModel}
+        setAdapterModelName={setAdapterModelName}
+        setAdapterNotes={setAdapterNotes}
+        setAdapterPath={setAdapterPath}
+        setAdapterProvider={setAdapterProvider}
+        setDeploymentBaseUrl={setDeploymentBaseUrl}
+        setDeploymentRuntimeProvider={setDeploymentRuntimeProvider}
+        setLearningDatasetDescription={setLearningDatasetDescription}
+        setLearningDatasetName={setLearningDatasetName}
+        setPeftAdapterName={setPeftAdapterName}
+        setRagTargetCollection={setRagTargetCollection}
+        setSelectedEmbeddingProfileId={setSelectedEmbeddingProfileId}
+        toggleLearningApproval={toggleLearningApproval}
+      />
+    ) : (
+      <UsersRoute
+        closeResetPassword={closeResetPassword}
+        createNewUser={createNewUser}
+        newUserEmail={newUserEmail}
+        newUserName={newUserName}
+        newUserPassword={newUserPassword}
+        newUserRole={newUserRole}
+        openResetPassword={openResetPassword}
+        resetPassword={resetPassword}
+        resetPasswordValue={resetPasswordValue}
+        resetUser={resetUser}
+        setNewUserEmail={setNewUserEmail}
+        setNewUserName={setNewUserName}
+        setNewUserPassword={setNewUserPassword}
+        setNewUserRole={setNewUserRole}
+        setResetPasswordValue={setResetPasswordValue}
+        toggleUserActive={toggleUserActive}
+        userMessage={userMessage}
+        users={users}
+      />
+    )
 
   if (!authReady) {
-    return (
-      <main className="loginShell">
-        <section className="loginPanel">
-          <div className="sectionHeader">
-            <ShieldAlert size={20} />
-            <h1>Maintenance Wizard</h1>
-          </div>
-          <p className="emptyState">Checking session...</p>
-        </section>
-      </main>
-    )
+    return <AuthLoadingRoute />
   }
 
   if (!session) {
     return (
-      <main className="loginShell">
-        <form className="loginPanel" onSubmit={handleLogin}>
-          <div className="sectionHeader">
-            <ShieldAlert size={20} />
-            <h1>Maintenance Wizard</h1>
-          </div>
-          <p className="eyebrow">Steel Plant Maintenance</p>
-          <label className="field">
-            <span>Email</span>
-            <input value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} />
-          </label>
-          <label className="field">
-            <span>Password</span>
-            <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} />
-          </label>
-          <button className="loginButton" type="submit">
-            <LogIn size={18} />
-            Sign In
-          </button>
-          <p className="demoHint">Demo users use password DemoPass123!</p>
-          {authMessage && <p className="inlineStatus errorText">{authMessage}</p>}
-        </form>
-      </main>
+      <LoginRoute
+        authMessage={authMessage}
+        loginEmail={loginEmail}
+        loginPassword={loginPassword}
+        onLogin={handleLogin}
+        setLoginEmail={setLoginEmail}
+        setLoginPassword={setLoginPassword}
+      />
     )
   }
 
   if (currentUser?.role === 'iot_service') {
-    return (
-      <main className="appShell">
-        <header className="topBar">
-          <div>
-            <p className="eyebrow">Steel Plant Maintenance</p>
-            <h1>Maintenance Wizard</h1>
-          </div>
-          <button className="logoutButton" onClick={handleLogout}>
-            <LogOut size={16} />
-            Logout
-          </button>
-        </header>
-        <section className="detailPanel apiOnlyPanel">
-          <div className="sectionHeader">
-            <Database size={18} />
-            <h2>{currentUser.display_name}</h2>
-          </div>
-          <p className="emptyState">This account is enabled for API ingestion and does not have application navigation.</p>
-        </section>
-      </main>
-    )
+    return <ApiOnlyRoute currentUser={currentUser} onLogout={handleLogout} />
   }
 
   return (
@@ -3497,693 +2004,8 @@ export function App() {
           </div>
         </aside>
 
-        {activeView === 'dashboard' ? (
-          operationalDashboardView
-        ) : activeView === 'assets' ? (
-          assetsView
-        ) : activeView === 'asset' ? (
-          assetDetailView
-        ) : activeView === 'workOrders' ? (
-          workOrdersView
-        ) : activeView === 'ingestion' ? (
-          ingestionView
-        ) : activeView === 'learning' ? (
-          learningView
-        ) : (
-          usersView
-        )}
+        {activeRoute}
       </section>
     </main>
   )
-}
-
-function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
-  return (
-    <div className="metric">
-      <span className="metricIcon">{icon}</span>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  )
-}
-
-function KpiCard({ title, value, unit, detail, ai, className = '' }: { title: string; value: string; unit: string; detail: string; ai?: string; className?: string }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <section className={`kpiCard ${className}`}>
-      <div className="kpiHeader">
-        <h2>{title}</h2>
-        {ai && (
-          <button className="aiBadge" onClick={() => setOpen(!open)} title="Explain with AI">
-            AI
-          </button>
-        )}
-      </div>
-      <p>
-        <strong>{value}</strong> {unit}
-      </p>
-      <small>{detail}</small>
-      {open && <div className="aiPopover">{ai}</div>}
-    </section>
-  )
-}
-
-type AssistantContentBlock =
-  | { type: 'heading'; level: number; text: string }
-  | { type: 'paragraph'; text: string }
-  | { type: 'ol' | 'ul'; items: string[] }
-
-function FormattedAssistantContent({ content }: { content: string }) {
-  const blocks = parseAssistantContent(formatWorkOrderStatusText(content))
-  return (
-    <div className="assistantFormattedContent">
-      {blocks.map((block, index) => {
-        if (block.type === 'heading') {
-          const HeadingTag = block.level >= 4 ? 'h4' : 'h3'
-          return <HeadingTag key={`heading-${index}`}>{renderInlineMarkdown(block.text, `heading-${index}`)}</HeadingTag>
-        }
-        if (block.type === 'ol') {
-          return (
-            <ol key={`ol-${index}`}>
-              {block.items.map((item, itemIndex) => (
-                <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item, `ol-${index}-${itemIndex}`)}</li>
-              ))}
-            </ol>
-          )
-        }
-        if (block.type === 'ul') {
-          return (
-            <ul key={`ul-${index}`}>
-              {block.items.map((item, itemIndex) => (
-                <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item, `ul-${index}-${itemIndex}`)}</li>
-              ))}
-            </ul>
-          )
-        }
-        if (block.type === 'paragraph') {
-          return <p key={`paragraph-${index}`}>{renderInlineMarkdown(block.text, `paragraph-${index}`)}</p>
-        }
-        return null
-      })}
-    </div>
-  )
-}
-
-function parseAssistantContent(content: string): AssistantContentBlock[] {
-  const normalized = normalizeAssistantContent(content)
-  const blocks: AssistantContentBlock[] = []
-  let listType: 'ol' | 'ul' | null = null
-  let listItems: string[] = []
-
-  function flushList() {
-    if (listType && listItems.length > 0) {
-      blocks.push({ type: listType, items: listItems })
-    }
-    listType = null
-    listItems = []
-  }
-
-  normalized.split('\n').forEach((line) => {
-    const trimmed = line.trim()
-    if (!trimmed) {
-      flushList()
-      return
-    }
-
-    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/)
-    if (heading) {
-      flushList()
-      blocks.push({
-        type: 'heading',
-        level: heading[1].length,
-        text: stripMarkdownHeadingSuffix(heading[2]),
-      })
-      return
-    }
-
-    const ordered = trimmed.match(/^\d+\.\s+(.+)$/)
-    if (ordered) {
-      if (listType !== 'ol') flushList()
-      listType = 'ol'
-      listItems.push(ordered[1])
-      return
-    }
-
-    const unordered = trimmed.match(/^[-*]\s+(.+)$/)
-    if (unordered) {
-      if (listType !== 'ul') flushList()
-      listType = 'ul'
-      listItems.push(unordered[1])
-      return
-    }
-
-    flushList()
-    blocks.push({ type: 'paragraph', text: trimmed })
-  })
-
-  flushList()
-  return blocks.length > 0 ? blocks : [{ type: 'paragraph', text: content }]
-}
-
-function normalizeAssistantContent(content: string) {
-  return content
-    .replace(/\r\n/g, '\n')
-    .replace(/\s+(#{1,4}\s+)/g, '\n$1')
-    .replace(/(#{1,4}\s+[^:\n]+:)\s+(\d+\.\s+)/g, '$1\n$2')
-    .replace(/\s+(\d+\.\s+(?:\*\*|[A-Z]))/g, '\n$1')
-    .replace(/\s+-\s+(?=[A-Z*])/g, '\n- ')
-}
-
-function stripMarkdownHeadingSuffix(text: string) {
-  return text.replace(/\s+#+$/, '')
-}
-
-function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={`${keyPrefix}-strong-${index}`}>{part.slice(2, -2)}</strong>
-    }
-    return <span key={`${keyPrefix}-text-${index}`}>{part}</span>
-  })
-}
-
-function NeoResultTable({ table }: { table: NeoTable }) {
-  return (
-    <div className="neoResultTable" aria-label={`${table.title} results table`}>
-      <div className="neoResultHead" style={{ gridTemplateColumns: `repeat(${table.columns.length}, minmax(120px, 1fr))` }}>
-        {table.columns.map((column) => <span key={column}>{column}</span>)}
-      </div>
-      {table.rows.map((row, index) => (
-        <div className="neoResultRow" style={{ gridTemplateColumns: `repeat(${table.columns.length}, minmax(120px, 1fr))` }} key={`${table.title}-${index}`}>
-          {table.columns.map((column) => <span key={column}>{formatTableCell(column, row[column])}</span>)}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function AssetsTable({ assets, onOpen }: { assets: AssetListItem[]; onOpen: (assetId: string) => void }) {
-  return (
-    <div className="assetsTable" aria-label="Company assets table">
-      <div className="assetsTableHead">
-        <span>Asset</span>
-        <span>Type</span>
-        <span>Location</span>
-        <span>Criticality</span>
-        <span>Health</span>
-        <span>Risk</span>
-        <span>Open WOs</span>
-        <span>Supervisor</span>
-      </div>
-      {assets.map((asset) => (
-        <div className="assetsTableRow" key={asset.id}>
-          <button className="workOrderCellButton" type="button" onClick={() => onOpen(asset.id)}>
-            <strong>{asset.name}</strong>
-            <small>{asset.id}</small>
-          </button>
-          <span>{asset.asset_type}</span>
-          <span>
-            {asset.location_code}
-            <small>{asset.area}</small>
-          </span>
-          <span>{asset.criticality}</span>
-          <span>{asset.health_score}%</span>
-          <span className={`riskBadge ${asset.risk_level}`}>{asset.risk_level}</span>
-          <span>{asset.open_work_orders}</span>
-          <span>{asset.supervisor}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function AssetProfileFacts({ detail }: { detail: AssetDetail }) {
-  const profile = detail.profile
-  const facts = [
-    ['Asset ID', profile.equipment_id],
-    ['Type', profile.asset_type],
-    ['Location', `${profile.location_code} · ${profile.location_name}`],
-    ['System', profile.parent_system],
-    ['Manufacturer', profile.manufacturer],
-    ['Model', profile.model],
-    ['Serial', profile.serial_number],
-    ['Installed', profile.installed_at],
-    ['Owner', profile.owner_team],
-    ['Supervisor', profile.supervisor],
-  ]
-  return (
-    <>
-      <p>{profile.description}</p>
-      <dl className="assetFactGrid">
-        {facts.map(([label, value]) => (
-          <span key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </span>
-        ))}
-      </dl>
-    </>
-  )
-}
-
-function AssetMetricTile({ metric, fallbackValue }: { metric?: AssetMetricSnapshot; fallbackValue?: number }) {
-  if (!metric && fallbackValue === undefined) return null
-  const label = metric?.label ?? 'Health'
-  const value = metric?.value ?? fallbackValue ?? 0
-  const unit = metric?.unit ?? '%'
-  return (
-    <section className="healthTile">
-      <h2>{label}</h2>
-      <strong>{Math.round(value)}{unit}</strong>
-      <small>{metric?.detail ?? 'Computed from live health data.'}</small>
-    </section>
-  )
-}
-
-function AssetMetricGrid({ metrics }: { metrics: AssetMetricSnapshot[] }) {
-  return (
-    <div className="assetMetricGrid">
-      {metrics.map((metric) => (
-        <span className="assetMetric" key={metric.id}>
-          <small>{metric.label}</small>
-          <strong>{Math.round(metric.value)}{metric.unit}</strong>
-          <em>{metric.status.replace('_', ' ')}</em>
-          <p>{metric.detail}</p>
-        </span>
-      ))}
-    </div>
-  )
-}
-
-function AssetSubsystemList({ subsystems }: { subsystems: AssetSubsystem[] }) {
-  return (
-    <ol className="assetSubsystemList">
-      {subsystems.map((subsystem) => (
-        <li key={subsystem.id}>
-          <strong>{subsystem.name}</strong>
-          <span>{subsystem.component}</span>
-          <small className={`riskBadge ${subsystem.condition === 'critical' ? 'critical' : subsystem.condition === 'degraded' ? 'high' : 'medium'}`}>
-            {subsystem.condition}
-          </small>
-          <p>{subsystem.detail}</p>
-        </li>
-      ))}
-    </ol>
-  )
-}
-
-function MaintenanceEventTable({ events }: { events: MaintenanceEvent[] }) {
-  if (!events.length) return <p className="emptyState">No maintenance history is available for this asset.</p>
-  return (
-    <div className="maintenanceEventTable" aria-label="Maintenance history table">
-      <div className="maintenanceEventHead">
-        <span>Date</span>
-        <span>Issue</span>
-        <span>Root cause</span>
-        <span>Action</span>
-        <span>Downtime</span>
-      </div>
-      {events.map((event) => (
-        <div className="maintenanceEventRow" key={event.id}>
-          <span>{formatDate(event.date)}</span>
-          <span>{event.issue}</span>
-          <span>{event.root_cause}</span>
-          <span>{event.action}</span>
-          <span>{event.downtime_hours}h</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function SignalLineChartCard({ chart }: { chart: AssetPerformanceChart }) {
-  if (!chart.points.length) {
-    return (
-      <section className="detailPanel chartCard">
-        <h2>{chart.title}</h2>
-        <p className="emptyState">No performance readings are available for this signal.</p>
-      </section>
-    )
-  }
-  const values = chart.points.map((point) => point.value)
-  const min = Math.min(...values, ...chart.points.map((point) => point.threshold))
-  const max = Math.max(...values, ...chart.points.map((point) => point.threshold))
-  const span = Math.max(1, max - min)
-  const xStep = chart.points.length > 1 ? 300 / (chart.points.length - 1) : 300
-  const path = chart.points
-    .map((point, index) => {
-      const x = 20 + index * xStep
-      const y = 120 - ((point.value - min) / span) * 95
-      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`
-    })
-    .join(' ')
-  const thresholdY = 120 - (((chart.points[0]?.threshold ?? min) - min) / span) * 95
-  return (
-    <section className="detailPanel chartCard">
-      <h2>{chart.title}</h2>
-      <svg viewBox="0 0 340 140" role="img" aria-label={`${chart.title} line chart`}>
-        <path d="M20 120 H320" className="axis" />
-        <path d="M20 20 V120" className="axis" />
-        <path d={`M20 ${thresholdY} H320`} className="thresholdPath" />
-        <path d={path} className="linePath" />
-      </svg>
-      <small>{chart.points.length} readings · {chart.unit}</small>
-    </section>
-  )
-}
-
-function ReliabilityMetricGrid({ metrics }: { metrics: AssetReliabilityMetric[] }) {
-  return (
-    <div className="assetMetricGrid reliabilityGrid">
-      {metrics.map((metric) => (
-        <span className="assetMetric" key={metric.id}>
-          <small>{metric.metric_name}</small>
-          <strong>{metric.value}{metric.unit}</strong>
-          <em>{metric.status.replace('_', ' ')}</em>
-          <p>{metric.detail}</p>
-        </span>
-      ))}
-    </div>
-  )
-}
-
-function AssetDocumentList({ documents }: { documents: AssetDocument[] }) {
-  if (!documents.length) return <p className="emptyState">No documents are linked to this asset.</p>
-  return (
-    <div className="assetDocumentList">
-      {documents.map((document) => (
-        <article className="assetDocument" key={document.id}>
-          <span className="rolePill">{document.source_type}</span>
-          <h3>{document.title}</h3>
-          <p>{document.excerpt}</p>
-        </article>
-      ))}
-    </div>
-  )
-}
-
-function KnowledgeEvidenceList({ evidence }: { evidence: AssetDetail['knowledge'] }) {
-  if (!evidence.length) return <p className="emptyState">No retrieved evidence is available for this asset.</p>
-  return (
-    <div className="assetDocumentList">
-      {evidence.map((item) => (
-        <article className="assetDocument" key={item.source_id}>
-          <span className="rolePill">{item.source_type}</span>
-          <h3>{item.title}</h3>
-          <p>{item.excerpt}</p>
-          {item.relevance_reason && <small>{item.relevance_reason}</small>}
-        </article>
-      ))}
-    </div>
-  )
-}
-
-function StatusBadge({ status }: { status: WorkOrderStatus }) {
-  const detail = workOrderStatusDetail(status)
-  return (
-    <span className={`workOrderStatusBadge status-${status.toLowerCase()}`} title={`${detail.label}: ${detail.description}`}>
-      <strong>{detail.label}</strong>
-    </span>
-  )
-}
-
-function TechnicianExecutionCard({
-  assistant,
-  isLoading,
-  onComplete,
-  onStart,
-  workOrder,
-}: {
-  assistant: TechnicianAssistantResponse | null
-  isLoading: boolean
-  onComplete: () => void
-  onStart: (workOrderId: string) => void
-  workOrder: WorkOrder
-}) {
-  const statusDetail = workOrderStatusDetail(workOrder.status)
-  const canStart = ['APPR', 'WMATL'].includes(workOrder.status)
-  const canComplete = Boolean(assistant) && !['COMP', 'CLOSE'].includes(workOrder.status)
-  const steps = [
-    {
-      title: 'Confirm readiness',
-      detail: `${statusDetail.label}: ${statusDetail.description}`,
-      state: ['WAPPR'].includes(workOrder.status) ? 'current' : 'done',
-    },
-    {
-      title: 'Start field execution',
-      detail: canStart ? 'Move this approved work order to in progress before executing field work.' : 'Field execution has already moved past the start gate.',
-      state: ['APPR', 'WMATL'].includes(workOrder.status) ? 'current' : ['INPRG', 'COMP', 'CLOSE'].includes(workOrder.status) ? 'done' : 'pending',
-    },
-    {
-      title: 'Capture observations',
-      detail: assistant ? assistant.next_prompt : 'Use Neo to record abnormal conditions, measurements, and evidence from the asset.',
-      state: assistant ? 'done' : ['INPRG'].includes(workOrder.status) ? 'current' : 'pending',
-    },
-    {
-      title: 'Apply guided action',
-      detail: assistant?.recommendations[0] ?? workOrder.recommended_action,
-      state: assistant ? 'current' : 'pending',
-    },
-    {
-      title: 'Submit completion',
-      detail: assistant?.completion_summary ?? 'Completion unlocks after Neo provides the problem code, failure class, and summary.',
-      state: ['COMP', 'CLOSE'].includes(workOrder.status) ? 'done' : assistant ? 'current' : 'pending',
-    },
-  ]
-
-  return (
-    <section className="technicianExecutionCard" aria-label="Technician execution workflow">
-      <div className="sectionHeader">
-        <ClipboardList size={18} />
-        <div>
-          <h2>Technician Execution</h2>
-          <small>{workOrder.id} · {workOrder.title}</small>
-        </div>
-      </div>
-      <div className="executionStatusLine">
-        <StatusBadge status={workOrder.status} />
-        <span>{statusDetail.description}</span>
-      </div>
-      <ol className="executionSteps">
-        {steps.map((step, index) => (
-          <li className={step.state} key={step.title}>
-            <span>{index + 1}</span>
-            <div>
-              <strong>{step.title}</strong>
-              <p>{step.detail}</p>
-            </div>
-          </li>
-        ))}
-      </ol>
-      <div className="executionActions">
-        <button
-          className="outlineButton"
-          type="button"
-          disabled={!canStart || isLoading}
-          onClick={() => onStart(workOrder.id)}
-        >
-          Start work
-        </button>
-        <button
-          className="textButton"
-          type="button"
-          disabled={!canComplete || isLoading}
-          onClick={onComplete}
-        >
-          Submit completed work
-        </button>
-      </div>
-    </section>
-  )
-}
-
-function WorkOrderTable({
-  workOrders,
-  onOpen,
-  compact = false,
-  canAssign = false,
-  canApprove = false,
-  canStart = false,
-  technicians = [],
-  onAssign,
-  onApprove,
-  onStart,
-}: {
-  workOrders: WorkOrder[]
-  onOpen: (id: string) => void
-  compact?: boolean
-  canAssign?: boolean
-  canApprove?: boolean
-  canStart?: boolean
-  technicians?: AuthUser[]
-  onAssign?: (workOrderId: string, assignedTo: string) => void
-  onApprove?: (workOrderId: string) => void
-  onStart?: (workOrderId: string) => void
-}) {
-  return (
-    <div className={`workOrderTable ${compact ? 'compact' : ''} ${canAssign && !compact ? 'assignable' : ''} ${canApprove ? 'approvable' : ''}`}>
-      <div className="workOrderHead">
-        <span>Work order</span>
-        <span>Description</span>
-        {!compact && <span>Recommended action</span>}
-        <span>Status</span>
-        <span>Asset</span>
-        {canAssign && !compact && <span>Assigned to</span>}
-      </div>
-      {workOrders.map((order) => {
-        const technicianOptions = technicians.some((technician) => technician.display_name === order.assigned_to)
-          ? technicians
-          : [
-              {
-                id: `current-${order.id}`,
-                email: '',
-                display_name: order.assigned_to,
-                role: 'maintenance_technician' as UserRole,
-                is_active: true,
-              },
-              ...technicians,
-            ]
-        const canApproveOrder = canApprove && order.status === 'WAPPR'
-        const canStartOrder = canStart && ['APPR', 'WMATL'].includes(order.status)
-        return (
-          <div className="workOrderRow" key={order.id}>
-            <button className="workOrderCellButton workOrderIdButton" type="button" onClick={() => onOpen(order.id)}>
-              {order.id}
-            </button>
-            <button className="workOrderCellButton" type="button" onClick={() => onOpen(order.id)}>
-              {order.title}
-            </button>
-            {!compact && <span>{order.recommended_action}</span>}
-            <span className="workOrderStatusCell">
-              <StatusBadge status={order.status} />
-              {!compact && <small>{workOrderStatusDetail(order.status).description}</small>}
-              {canApproveOrder && (
-                <button
-                  aria-label={`Approve ${order.id}`}
-                  className="miniActionButton"
-                  type="button"
-                  onClick={() => onApprove?.(order.id)}
-                >
-                  Approve
-                </button>
-              )}
-              {canStartOrder && (
-                <button
-                  aria-label={`Start ${order.id}`}
-                  className="miniActionButton"
-                  type="button"
-                  onClick={() => onStart?.(order.id)}
-                >
-                  Start work
-                </button>
-              )}
-            </span>
-            <span>{order.equipment_id}</span>
-            {canAssign && !compact && (
-              <select
-                aria-label={`Assign ${order.id}`}
-                value={order.assigned_to}
-                onChange={(event) => onAssign?.(order.id, event.target.value)}
-              >
-                {technicianOptions.map((technician) => (
-                  <option value={technician.display_name} key={`${order.id}-${technician.id}`}>
-                    {technician.display_name}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function BarChart({ assets }: { assets: HealthSummary[] }) {
-  return (
-    <div className="barChart" aria-label="Equipment efficiency bar chart">
-      {assets.map((item) => (
-        <div className="barGroup" key={item.equipment.id}>
-          <span style={{ height: `${Math.max(8, item.health_score)}%` }} />
-          <small>{item.equipment.id.split('-')[0]}</small>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function MiniBars({ values }: { values: number[] }) {
-  return (
-    <div className="miniBars">
-      {values.map((value, index) => (
-        <span style={{ height: `${value}%` }} key={`${value}-${index}`} />
-      ))}
-    </div>
-  )
-}
-
-function StatusTimeline({ status }: { status: WorkOrderStatus }) {
-  const activeIndex = Math.max(0, workOrderStatusFlow.indexOf(status))
-  return (
-    <div className="statusTimeline" aria-label="Work order status">
-      {workOrderStatusFlow.map((item, index) => (
-        <span className={index <= activeIndex ? 'active' : ''} key={item}>
-          <i />
-          <strong>{workOrderStatusDetail(item).label}</strong>
-        </span>
-      ))}
-    </div>
-  )
-}
-
-function formatDate(value: string) {
-  try {
-    return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
-  } catch {
-    return value
-  }
-}
-
-function deploymentDisplayDate(deployment: LearningModelDeployment) {
-  return deployment.health_checked_at ?? deployment.updated_at ?? deployment.created_at
-}
-
-function deploymentTimestamp(deployment: LearningModelDeployment) {
-  const parsed = new Date(deploymentDisplayDate(deployment)).getTime()
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-function mergeLearningDeployments(
-  deployments: LearningModelDeployment[],
-  summaryDeployments: LearningModelDeployment[],
-) {
-  const records = new Map<string, LearningModelDeployment>()
-  summaryDeployments.forEach((deployment) => records.set(deployment.id, deployment))
-  deployments.forEach((deployment) => records.set(deployment.id, deployment))
-  return [...records.values()].sort((left, right) => deploymentTimestamp(right) - deploymentTimestamp(left))
-}
-
-function isVerifiedDeployment(deployment: LearningModelDeployment) {
-  const status = deployment.status.toLowerCase()
-  const healthStatus = (deployment.health_status ?? '').toLowerCase()
-  return ['healthy', 'ok', 'ready', 'verified'].includes(healthStatus) || ['healthy', 'verified'].includes(status)
-}
-
-function deploymentStatusClass(value?: string | null) {
-  return (value?.trim() || 'unknown').toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
-}
-
-function metricValue(value: unknown) {
-  if (typeof value === 'number') {
-    return Number.isInteger(value) ? `${value}` : value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')
-  }
-  if (typeof value === 'string' && value.trim()) return value
-  if (typeof value === 'boolean') return value ? 'yes' : 'no'
-  return '0'
-}
-
-function clipText(value: string, limit: number) {
-  const compact = value.replace(/\s+/g, ' ').trim()
-  if (compact.length <= limit) return compact
-  return `${compact.slice(0, limit - 1).trim()}…`
 }
