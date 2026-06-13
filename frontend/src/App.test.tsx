@@ -564,7 +564,7 @@ const learningDataset = {
 const learningEvaluation = {
   id: 'LEVAL-1',
   dataset_id: 'LDS-1',
-  model_version_id: 'model-local-qwen2.5-current',
+  model_version_id: 'model-adapter-candidate',
   prompt_version_id: 'prompt-neo-default',
   metrics: {
     quality_score: 0.81,
@@ -575,6 +575,19 @@ const learningEvaluation = {
   notes: 'Dataset quality evaluation by reliability@plant.local.',
   passed: true,
   created_at: '2026-06-13T09:10:00+05:30',
+}
+
+const learningPromotion = {
+  id: 'LPROMO-1',
+  model_version_id: 'model-adapter-candidate',
+  previous_active_model_id: 'model-local-qwen2.5-current',
+  evaluation_run_id: 'LEVAL-1',
+  dataset_id: 'LDS-1',
+  prompt_version_id: 'prompt-neo-default',
+  action: 'promote',
+  reviewer_email: 'reliability@plant.local',
+  notes: 'Promoted after passed evaluation.',
+  created_at: '2026-06-13T09:20:00+05:30',
 }
 
 const learningJob = {
@@ -608,6 +621,7 @@ function learningSummaryPayload(
   evaluations = [learningEvaluation],
   jobs = [learningJob],
   artifacts = [learningArtifact],
+  promotions = [learningPromotion],
 ) {
   return {
     counts: {
@@ -621,10 +635,21 @@ function learningSummaryPayload(
       jobs: jobs.length,
       queued_jobs: jobs.filter((job) => ['queued', 'published', 'running'].includes(job.status)).length,
       artifacts: artifacts.length,
+      promotions: promotions.length,
     },
     recent_examples: examples,
     recent_snapshots: datasets,
     model_versions: [
+      {
+        id: 'model-adapter-candidate',
+        provider: 'openai',
+        model_name: 'qwen2.5-7b-instruct-lora-candidate',
+        base_model: 'qwen2.5-7b-instruct',
+        adapter_path: 'file:///models/qwen2.5-lora',
+        status: 'candidate',
+        notes: 'Offline PEFT adapter candidate trained from approved judge-qualified examples.',
+        created_at: '2026-06-13T09:12:00+05:30',
+      },
       {
         id: 'model-local-qwen2.5-current',
         provider: 'openai',
@@ -650,6 +675,7 @@ function learningSummaryPayload(
     evaluation_runs: evaluations,
     recent_jobs: jobs,
     recent_artifacts: artifacts,
+    recent_promotions: promotions,
     vector_store: {
       store: 'qdrant',
       enabled: true,
@@ -865,6 +891,17 @@ beforeEach(() => {
             { status: 200 },
           ),
         )
+      }
+      if (url.endsWith('/api/learning/model-versions/promote')) {
+        return Promise.resolve(new Response(JSON.stringify({ ...learningPromotion, id: 'LPROMO-NEW' }), { status: 200 }))
+      }
+      if (url.endsWith('/api/learning/model-versions/rollback')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ...learningPromotion, id: 'LPROMO-ROLLBACK-1', action: 'rollback' }), { status: 200 }),
+        )
+      }
+      if (url.endsWith('/api/learning/model-promotions')) {
+        return Promise.resolve(new Response(JSON.stringify([learningPromotion]), { status: 200 }))
       }
       if (url.endsWith('/api/learning/evaluations')) {
         if (init?.method === 'POST') {
@@ -1515,6 +1552,9 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText(/completed ·/)).toBeInTheDocument()
     expect(screen.getByText('peft training manifest')).toBeInTheDocument()
     expect(screen.getByText('sha256 abcdef123456')).toBeInTheDocument()
+    expect(screen.getByText('Promotion Audit')).toBeInTheDocument()
+    expect(screen.getByText('Adapter promoted')).toBeInTheDocument()
+    expect(screen.getByText(/Promotion gate passed by evaluation LEVAL-1/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Judge' }))
     expect(await screen.findByText('Judge scored feedback at 91%')).toBeInTheDocument()
@@ -1538,6 +1578,9 @@ describe('Maintenance Wizard dashboard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Queue PEFT tuning job' }))
     expect(await screen.findByText('Queued PEFT tuning job LJOB-PEFT-1 with status queued')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Promote adapter' }))
+    expect(await screen.findByText('Promoted adapter qwen2.5-7b-instruct-lora-candidate with audit record LPROMO-NEW')).toBeInTheDocument()
   })
 
   it('hides restricted actions for operators', async () => {

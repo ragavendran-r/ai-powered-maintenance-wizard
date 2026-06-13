@@ -36,7 +36,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 | G-013 | Implement user login and role-based access control. | Complete | Added local SQLite users, bcrypt password hashes, JWT login, endpoint role guards, React login/session handling, role-gated navigation/actions, admin user management, tests, and docs. | `backend/app/core/auth.py`; `frontend/src/App.tsx`; `docs/auth-authorization-plan.md` |
 | G-014 | Create a local Kubernetes deployment script. | Complete | Added and live-verified a Kind-based script that installs Kind when missing, creates a local cluster, deploys NATS, backend, and frontend, reports status, and deletes the cluster/runtime files. | `scripts/run-local-k8s.sh`; `README.md`; live Kind deployment |
 | G-015 | Add LLM/SLM leverage for analytics and retrieval. | Complete | Added structured LLM contracts, document intelligence extraction, label normalization, LLM reranking, anomaly/prediction explanations, and UI/API evidence display while preserving deterministic fallback behavior. | `backend/app/services/retrieval.py`; `backend/app/services/risk.py`; `backend/app/services/recommendations.py`; `README.md`; `docs/architecture.md` |
-| G-016 | Build production-ready Qdrant-backed RAG + PEFT + NATS continuous learning and tuning. | In Progress | Current design now explicitly combines Qdrant-backed RAG, LLM-as-a-Judge gates, PEFT adapter tuning, NATS-backed async jobs, evaluation/version controls, artifact storage, and promotion gates. Implementation has synchronous local review/export controls, persisted learning jobs, PEFT queueing, async learning enabled by default, Qdrant as the production vector DB, a durable learning worker, local PEFT artifact preparation, artifact hashes, and documented production worker design. | `docs/rag-peft-nats-learning-architecture.md`; `backend/app/services/learning.py`; `backend/app/services/learning_worker.py`; `backend/app/services/vector_store.py`; `frontend/src/App.tsx`; `scripts/export-learning-dataset.py` |
+| G-016 | Build production-ready Qdrant-backed RAG + PEFT + NATS continuous learning and tuning. | In Progress | Current design now explicitly combines Qdrant-backed RAG, LLM-as-a-Judge gates, PEFT adapter tuning, NATS-backed async jobs, evaluation/version controls, artifact storage, and promotion gates. Implementation has synchronous local review/export controls, persisted learning jobs, PEFT queueing, async learning enabled by default, Qdrant as the production vector DB, a durable learning worker, local PEFT artifact preparation, artifact hashes, evaluation-gated adapter promotion/rollback controls, and documented production worker design. | `docs/rag-peft-nats-learning-architecture.md`; `backend/app/services/learning.py`; `backend/app/services/learning_worker.py`; `backend/app/services/vector_store.py`; `frontend/src/App.tsx`; `scripts/export-learning-dataset.py` |
 
 ## Detailed Goal Notes
 
@@ -418,13 +418,13 @@ Delivered so far:
 - Qdrant vector store integration for indexed document chunks, retrieval-first lookup, Learning Review vector-store status, and local stack/local Kubernetes deployment.
 - Durable learning worker process for NATS-backed refresh, judge, dataset, evaluation, and PEFT preparation jobs.
 - `learning_artifacts` registry with content hashes for worker-produced PEFT dataset and training-manifest artifacts.
+- Evaluation-gated Learning Review controls for adapter promotion and rollback, with persisted promotion audit records.
 - Production RAG + PEFT + NATS design document with NATS subjects, worker responsibilities, persistence, quality gates, observability, and rollout sequence.
 
 Remaining production work:
 
 - Add object storage integration for snapshots, training logs, and adapter outputs.
 - Add PEFT job execution or orchestrator integration for local Qwen/SLM LoRA or QLoRA training beyond the prepared artifact handoff.
-- Add adapter promotion and rollback controls gated by evaluation results and reviewer approval.
 - Add production embedding model selection/versioning and Qdrant collection migration controls.
 - Migrate learning state from SQLite prototype tables to Postgres for multi-worker production use.
 

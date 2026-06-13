@@ -595,6 +595,19 @@ export interface LearningEvaluationRun {
   created_at: string
 }
 
+export interface LearningModelPromotion {
+  id: string
+  model_version_id: string
+  previous_active_model_id?: string | null
+  evaluation_run_id: string
+  dataset_id: string
+  prompt_version_id: string
+  action: 'promote' | 'rollback'
+  reviewer_email: string
+  notes?: string | null
+  created_at: string
+}
+
 export interface LearningJob {
   id: string
   job_type: string
@@ -629,6 +642,7 @@ export interface LearningSummary {
   evaluation_runs: LearningEvaluationRun[]
   recent_jobs: LearningJob[]
   recent_artifacts: LearningArtifact[]
+  recent_promotions: LearningModelPromotion[]
   vector_store: {
     store?: string
     enabled?: boolean
@@ -891,6 +905,17 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   learningEvaluations: () => request<LearningEvaluationRun[]>('/api/learning/evaluations'),
+  promoteLearningModelVersion: (payload: { model_version_id: string; evaluation_run_id: string; notes?: string }) =>
+    request<LearningModelPromotion>('/api/learning/model-versions/promote', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  rollbackLearningModelVersion: (payload: { target_model_version_id: string; evaluation_run_id: string; notes?: string }) =>
+    request<LearningModelPromotion>('/api/learning/model-versions/rollback', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  learningModelPromotions: () => request<LearningModelPromotion[]>('/api/learning/model-promotions'),
   learningJobs: () => request<LearningJob[]>('/api/learning/jobs'),
   queueLearningPeftJob: (payload: {
     dataset_id: string

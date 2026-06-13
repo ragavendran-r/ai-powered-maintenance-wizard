@@ -837,6 +837,7 @@ h3 {
 
 .learningExamples,
 .versionList,
+.promotionList,
 .datasetList,
 .evaluationList,
 .jobList,
@@ -847,6 +848,7 @@ h3 {
 
 .learningExample,
 .versionRow,
+.promotionRow,
 .datasetRow,
 .evaluationRow,
 .jobRow,
@@ -865,6 +867,7 @@ h3 {
 
 .learningExample small,
 .versionRow small,
+.promotionRow small,
 .datasetRow small,
 .jobRow small,
 .artifactRow small {
@@ -876,6 +879,7 @@ h3 {
 
 .learningExample p,
 .versionRow p,
+.promotionRow p,
 .evaluationRow p,
 .jobRow p,
 .artifactRow p {
@@ -934,6 +938,32 @@ h3 {
 .datasetRow {
   align-items: center;
   grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.versionActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.promotionRow {
+  background: #fbfcfd;
+  border-left: 4px solid #7ca7b4;
+}
+
+.promotionRow.promote {
+  border-left-color: #2d8f5f;
+}
+
+.promotionRow.rollback {
+  border-left-color: #d5aa24;
+}
+
+.promotionRow > span {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
 }
 
 .learningAdapterGrid {

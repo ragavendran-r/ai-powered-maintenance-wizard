@@ -212,5 +212,5 @@ Production should track:
 4. Run the learning worker process against NATS JetStream.
 5. Move large JSONL/model artifacts to object storage.
 6. Add PEFT worker integration for local Qwen/SLM LoRA jobs.
-7. Add active/candidate/retired adapter promotion controls after evaluation gates pass.
+7. Add production registry integration so promoted adapters can be activated by the serving runtime without manual path changes.
 8. Move prototype SQLite learning state to Postgres for multi-worker production use.

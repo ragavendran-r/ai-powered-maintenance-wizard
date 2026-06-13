@@ -46,6 +46,7 @@ import {
   type LearningExample,
   type LearningArtifact,
   type LearningJob,
+  type LearningModelPromotion,
   type LearningModelVersion,
   type LearningSummary,
   type MaintenanceEvent,
@@ -2407,6 +2408,57 @@ export function App() {
   const learningEvaluations: LearningEvaluationRun[] = learningSummary?.evaluation_runs ?? []
   const learningJobs: LearningJob[] = learningSummary?.recent_jobs ?? []
   const learningArtifacts: LearningArtifact[] = learningSummary?.recent_artifacts ?? []
+  const learningPromotions: LearningModelPromotion[] = learningSummary?.recent_promotions ?? []
+  const passedEvaluationForModel = (modelId: string) =>
+    learningEvaluations.find((run) => run.model_version_id === modelId && run.passed)
+
+  async function promoteLearningAdapter(model: LearningModelVersion) {
+    const evaluation = passedEvaluationForModel(model.id)
+    if (!evaluation) {
+      setLearningMessage('Run a passing evaluation for this adapter before promotion')
+      return
+    }
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const promotion = await api.promoteLearningModelVersion({
+        model_version_id: model.id,
+        evaluation_run_id: evaluation.id,
+        notes: `Promoted from Learning Review by ${currentUser?.email ?? 'reviewer'}.`,
+      })
+      const summary = await api.learningSummary()
+      setLearningSummary(summary)
+      setLearningMessage(`Promoted adapter ${model.model_name} with audit record ${promotion.id}`)
+    } catch {
+      setLearningMessage('Adapter promotion was rejected by the evaluation gate')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
+
+  async function rollbackLearningAdapter(model: LearningModelVersion) {
+    const evaluation = passedEvaluationForModel(model.id)
+    if (!evaluation) {
+      setLearningMessage('Run a passing evaluation for this model before rollback')
+      return
+    }
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const promotion = await api.rollbackLearningModelVersion({
+        target_model_version_id: model.id,
+        evaluation_run_id: evaluation.id,
+        notes: `Rollback from Learning Review by ${currentUser?.email ?? 'reviewer'}.`,
+      })
+      const summary = await api.learningSummary()
+      setLearningSummary(summary)
+      setLearningMessage(`Rolled back to ${model.model_name} with audit record ${promotion.id}`)
+    } catch {
+      setLearningMessage('Model rollback was rejected by the evaluation gate')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
 
   const learningView = (
     <section className="detailPanel learningView">
@@ -2436,7 +2488,7 @@ export function App() {
         </button>
       </div>
       <div className="learningStats">
-        {(['interactions', 'examples', 'approved_examples', 'snapshots', 'artifacts'] as const).map((key) => (
+        {(['interactions', 'examples', 'approved_examples', 'snapshots', 'artifacts', 'promotions'] as const).map((key) => (
           <span className="learningStat" key={key}>
             <small>{key.replace(/_/g, ' ')}</small>
             <strong>{learningSummary?.counts[key] ?? 0}</strong>
@@ -2491,13 +2543,39 @@ export function App() {
         <section className="learningPanel">
           <h3>Model and Prompt Versions</h3>
           <div className="versionList">
-            {learningModels.map((model) => (
-              <div className="versionRow" key={model.id}>
-                <strong>{model.model_name}</strong>
-                <small>{model.provider} · {model.status}</small>
-                {model.notes && <p>{model.notes}</p>}
-              </div>
-            ))}
+            {learningModels.map((model) => {
+              const promotionEvaluation = passedEvaluationForModel(model.id)
+              const canPromoteModel = model.status !== 'active' && Boolean(promotionEvaluation)
+              const canRollbackModel = model.status === 'retired' && Boolean(promotionEvaluation)
+              return (
+                <div className="versionRow" key={model.id}>
+                  <strong>{model.model_name}</strong>
+                  <small>{model.provider} · {model.status}</small>
+                  {model.adapter_path && <small>Adapter {model.adapter_path}</small>}
+                  {promotionEvaluation ? (
+                    <small>Promotion gate passed by evaluation {promotionEvaluation.id}</small>
+                  ) : model.status !== 'active' ? (
+                    <small>Promotion gate requires a passing evaluation for this model.</small>
+                  ) : null}
+                  {model.notes && <p>{model.notes}</p>}
+                  {(canPromoteModel || canRollbackModel) && (
+                    <div className="versionActions">
+                      {canPromoteModel && (
+                        <button className="textButton" onClick={() => promoteLearningAdapter(model)} disabled={learningLoading}>
+                          <CheckCircle2 size={16} />
+                          Promote adapter
+                        </button>
+                      )}
+                      {canRollbackModel && (
+                        <button className="outlineButton" onClick={() => rollbackLearningAdapter(model)} disabled={learningLoading}>
+                          Roll back to this model
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
             {learningPrompts.map((prompt) => (
               <div className="versionRow" key={prompt.id}>
                 <strong>{prompt.assistant} / {prompt.version}</strong>
@@ -2505,6 +2583,23 @@ export function App() {
                 {prompt.notes && <p>{prompt.notes}</p>}
               </div>
             ))}
+          </div>
+          <h3>Promotion Audit</h3>
+          <div className="promotionList">
+            {learningPromotions.length ? learningPromotions.map((promotion) => (
+              <div className={`promotionRow ${promotion.action}`} key={promotion.id}>
+                <span>
+                  <strong>{promotion.action === 'promote' ? 'Adapter promoted' : 'Rollback completed'}</strong>
+                  <small>{promotion.model_version_id} · {formatDate(promotion.created_at)}</small>
+                </span>
+                <small>Evaluation {promotion.evaluation_run_id} · Dataset {promotion.dataset_id}</small>
+                <small>Reviewer {promotion.reviewer_email}</small>
+                {promotion.previous_active_model_id && <small>Previous active {promotion.previous_active_model_id}</small>}
+                {promotion.notes && <p>{promotion.notes}</p>}
+              </div>
+            )) : (
+              <p className="emptyState">Adapter promotions and rollbacks will appear after a reviewer activates a passed model.</p>
+            )}
           </div>
           <h3>Adapter Candidate</h3>
           <div className="learningAdapterGrid">
