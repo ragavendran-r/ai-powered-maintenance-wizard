@@ -181,6 +181,28 @@ function workOrderStatusDetail(status: WorkOrderStatus) {
   return workOrderStatusDetails[status]
 }
 
+const workOrderStatusPattern = new RegExp(`\\b(${workOrderStatusFlow.join('|')})\\b`, 'g')
+
+function isWorkOrderStatus(value: string): value is WorkOrderStatus {
+  return Object.prototype.hasOwnProperty.call(workOrderStatusDetails, value)
+}
+
+function workOrderStatusLabel(status: WorkOrderStatus) {
+  return workOrderStatusDetail(status).label
+}
+
+function formatWorkOrderStatusText(text: string) {
+  return text.replace(workOrderStatusPattern, (status) => workOrderStatusLabel(status as WorkOrderStatus))
+}
+
+function formatTableCell(column: string, value: unknown) {
+  const text = String(value ?? '')
+  if (column.trim().toLowerCase() === 'status' && isWorkOrderStatus(text)) {
+    return workOrderStatusLabel(text)
+  }
+  return text
+}
+
 const fallbackWorkOrders: WorkOrder[] = [
   {
     id: 'WO-8304',
@@ -1462,8 +1484,8 @@ export function App() {
 
   function supervisorAssistantDetails(response: SupervisorAssistantResponse) {
     return [
-      ...response.follow_up_actions,
-      ...response.risks.map((item) => `Risk: ${item}`),
+      ...response.follow_up_actions.map(formatWorkOrderStatusText),
+      ...response.risks.map((item) => `Risk: ${formatWorkOrderStatusText(item)}`),
       ...(response.draft_work_order ? [`Draft work order: ${response.draft_work_order.title}`] : []),
     ]
   }
@@ -1721,7 +1743,9 @@ export function App() {
       const fallbackResponse: SupervisorAssistantResponse = {
         summary: `${workOrders.length} work order(s) reviewed locally.`,
         follow_up_actions: workOrders.filter((item) => item.follow_up_required).map((item) => `${item.id}: ${item.recommended_action}`),
-        risks: workOrders.filter((item) => item.priority === 1 && !['COMP', 'CLOSE'].includes(item.status)).map((item) => `${item.id} remains ${item.status}`),
+        risks: workOrders
+          .filter((item) => item.priority === 1 && !['COMP', 'CLOSE'].includes(item.status))
+          .map((item) => `${item.id} remains ${workOrderStatusLabel(item.status)}`),
         draft_work_order: null,
         referenced_work_orders: workOrders.map((item) => item.id),
         used_live_provider: false,
@@ -2001,7 +2025,7 @@ export function App() {
                   <span>{turn.role === 'assistant' ? 'Neo' : 'You'}</span>
                   {assistantProviderLabel(turn) && <small>{assistantProviderLabel(turn)}</small>}
                   <AssistantMessageContent turn={turn} />
-                  {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+                  {turn.details && <ul>{turn.details.map((item, index) => <li key={`${turn.id}-${index}`}>{formatWorkOrderStatusText(item)}</li>)}</ul>}
                 </div>
               ))}
               {neoLoading && !neoStreaming && (
@@ -2316,7 +2340,7 @@ export function App() {
                           <span>{turn.role === 'assistant' ? technicianAssistantName : 'You'}</span>
                           {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
                           <AssistantMessageContent turn={turn} />
-                          {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+                          {turn.details && <ul>{turn.details.map((item, index) => <li key={`${turn.id}-${index}`}>{formatWorkOrderStatusText(item)}</li>)}</ul>}
                         </div>
                       ))}
                       {technicianLoading && !technicianStreaming && (
@@ -2358,7 +2382,7 @@ export function App() {
                           <span>{turn.role === 'assistant' ? supervisorAssistantName : 'You'}</span>
                           {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
                           <AssistantMessageContent turn={turn} />
-                          {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+                          {turn.details && <ul>{turn.details.map((item, index) => <li key={`${turn.id}-${index}`}>{formatWorkOrderStatusText(item)}</li>)}</ul>}
                         </div>
                       ))}
                       {supervisorLoading && !supervisorStreaming && (
@@ -3530,7 +3554,7 @@ type AssistantContentBlock =
   | { type: 'ol' | 'ul'; items: string[] }
 
 function FormattedAssistantContent({ content }: { content: string }) {
-  const blocks = parseAssistantContent(content)
+  const blocks = parseAssistantContent(formatWorkOrderStatusText(content))
   return (
     <div className="assistantFormattedContent">
       {blocks.map((block, index) => {
@@ -3651,7 +3675,7 @@ function NeoResultTable({ table }: { table: NeoTable }) {
       </div>
       {table.rows.map((row, index) => (
         <div className="neoResultRow" style={{ gridTemplateColumns: `repeat(${table.columns.length}, minmax(120px, 1fr))` }} key={`${table.title}-${index}`}>
-          {table.columns.map((column) => <span key={column}>{String(row[column] ?? '')}</span>)}
+          {table.columns.map((column) => <span key={column}>{formatTableCell(column, row[column])}</span>)}
         </div>
       ))}
     </div>
@@ -3877,7 +3901,7 @@ function KnowledgeEvidenceList({ evidence }: { evidence: AssetDetail['knowledge'
 function StatusBadge({ status }: { status: WorkOrderStatus }) {
   const detail = workOrderStatusDetail(status)
   return (
-    <span className={`workOrderStatusBadge status-${status.toLowerCase()}`} title={`${status}: ${detail.description}`}>
+    <span className={`workOrderStatusBadge status-${status.toLowerCase()}`} title={`${detail.label}: ${detail.description}`}>
       <strong>{detail.label}</strong>
     </span>
   )
