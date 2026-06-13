@@ -33,6 +33,7 @@ from app.services.artifact_store import (
     validate_learning_artifact_lifecycle_config,
 )
 from app.services.vector_store import VectorStoreHit, embedding_profile_status
+from app.services.embeddings import embedding_profile_id
 from app.services.learning_worker import process_learning_job_message
 
 
@@ -82,7 +83,7 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "13"
+    assert status["schema_version"] == "14"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["asset_profiles"] == 5
     assert status["counts"]["asset_metric_snapshots"] == 15
@@ -104,6 +105,28 @@ def test_database_status_reports_seeded_tables():
     assert status["counts"]["learning_prompt_versions"] >= 3
     assert "learning_jobs" in status["counts"]
     assert "learning_artifacts" in status["counts"]
+    assert status["counts"]["rag_embedding_profiles"] >= 1
+
+
+def test_embedding_profile_id_changes_with_model_version_and_dimensions():
+    first = embedding_profile_id("deterministic_hash", "maintenance-hash-v1", "1", 64, "Cosine")
+    second = embedding_profile_id("deterministic_hash", "maintenance-hash-v2", "2", 64, "Cosine")
+    third = embedding_profile_id("deterministic_hash", "maintenance-hash-v1", "1", 128, "Cosine")
+
+    assert first.startswith("emb-")
+    assert first != second
+    assert first != third
+
+
+def test_document_chunks_persist_embedding_profile_metadata():
+    active_profile = repository.get_active_rag_embedding_profile()
+    assert active_profile
+
+    chunks = repository.list_document_chunks()
+    assert chunks
+    assert {chunk["embedding_profile_id"] for chunk in chunks} == {active_profile["id"]}
+    assert {chunk["embedding_model"] for chunk in chunks} == {active_profile["model"]}
+    assert {chunk["embedding_dimensions"] for chunk in chunks} == {active_profile["dimensions"]}
 
 
 def test_assets_api_returns_company_asset_table():
@@ -1199,6 +1222,87 @@ def test_learning_model_registration_rejects_active_status():
     )
 
     assert response.status_code == 422
+
+
+def test_rag_embedding_profile_and_migration_controls_are_audited():
+    operator_response = client.get(
+        "/api/learning/rag/embedding-profiles",
+        headers=auth_headers("operator@plant.local"),
+    )
+    assert operator_response.status_code == 403
+
+    headers = auth_headers("reliability@plant.local")
+    profiles_response = client.get("/api/learning/rag/embedding-profiles", headers=headers)
+    assert profiles_response.status_code == 200
+    active_profile = next(profile for profile in profiles_response.json() if profile["status"] == "active")
+    assert active_profile["model"] == "maintenance-hash-v1"
+
+    create_response = client.post(
+        "/api/learning/rag/embedding-profiles",
+        json={
+            "provider": "deterministic_hash",
+            "model": "maintenance-hash-v2",
+            "version": "2",
+            "dimensions": 64,
+            "distance": "Cosine",
+            "notes": "Regression-test candidate profile.",
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 200
+    candidate = create_response.json()
+    assert candidate["status"] == "candidate"
+    assert candidate["id"] != active_profile["id"]
+
+    preview_response = client.post(
+        "/api/learning/rag/migration/preview",
+        json={"profile_id": candidate["id"], "target_collection": "maintenance_wizard_documents_v2"},
+        headers=headers,
+    )
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview["dry_run"] is True
+    assert preview["will_activate_profile"] is True
+    assert preview["target_profile"]["id"] == candidate["id"]
+    assert any("differs from active profile" in reason for reason in preview["reasons"])
+    assert repository.get_active_rag_embedding_profile()["id"] == active_profile["id"]
+
+    activate_response = client.post(
+        f"/api/learning/rag/embedding-profiles/{candidate['id']}/activate",
+        headers=headers,
+    )
+    assert activate_response.status_code == 200
+    assert activate_response.json()["job_type"] == "rag_embedding_profile"
+    assert repository.get_active_rag_embedding_profile()["id"] == candidate["id"]
+
+    migration_response = client.post(
+        "/api/learning/rag/migration",
+        json={
+            "profile_id": candidate["id"],
+            "target_collection": "maintenance_wizard_documents_v2",
+            "recreate_collection": False,
+            "activate_profile": True,
+            "notes": "Apply test migration.",
+        },
+        headers=headers,
+    )
+    assert migration_response.status_code == 200
+    migration_job = migration_response.json()
+    assert migration_job["job_type"] == "rag_migration"
+    assert migration_job["output_refs"]["result"]["chunk_count"] >= 1
+    migrated_chunks = repository.list_document_chunks(current_profile_only=True)
+    assert migrated_chunks
+    assert {chunk["embedding_profile_id"] for chunk in migrated_chunks} == {candidate["id"]}
+
+    reindex_response = client.post(
+        "/api/learning/rag/reindex",
+        json={"target_collection": "maintenance_wizard_documents_v2", "recreate_collection": False},
+        headers=headers,
+    )
+    assert reindex_response.status_code == 200
+    reindex_job = reindex_response.json()
+    assert reindex_job["job_type"] == "rag_reindex"
+    assert reindex_job["input_refs"]["target_collection"] == "maintenance_wizard_documents_v2"
 
 
 def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):

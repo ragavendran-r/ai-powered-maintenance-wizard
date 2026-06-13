@@ -286,7 +286,10 @@ def _execute_learning_job(job: dict[str, Any], payload: dict[str, Any]) -> dict[
     if job_type == "adapter_registered":
         return {"message": "Adapter registration is already persisted by the API path."}
     if job_type == "rag_reindex":
-        return repository.rebuild_all_document_chunks()
+        return repository.rebuild_all_document_chunks(
+            collection_name=input_refs.get("target_collection"),
+            recreate_collection=bool(input_refs.get("recreate_collection", False)),
+        )
     raise ValueError(f"Unsupported learning job type: {job_type}")
 
 

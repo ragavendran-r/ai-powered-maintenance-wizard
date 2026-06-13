@@ -1,6 +1,4 @@
-import hashlib
 import json
-import math
 import re
 from typing import Any
 
@@ -24,17 +22,10 @@ def chunk_text(text: str, max_words: int = 70, overlap_words: int = 14) -> list[
     return chunks
 
 
-def embed_text(text: str) -> list[float]:
-    vector = [0.0] * VECTOR_DIMENSIONS
-    for token in tokenize(text):
-        digest = hashlib.sha256(token.encode("utf-8")).digest()
-        index = int.from_bytes(digest[:2], "big") % VECTOR_DIMENSIONS
-        sign = 1.0 if digest[2] % 2 == 0 else -1.0
-        vector[index] += sign
-    norm = math.sqrt(sum(value * value for value in vector))
-    if norm == 0:
-        return vector
-    return [round(value / norm, 6) for value in vector]
+def embed_text(text: str, profile: Any = None) -> list[float]:
+    from app.services.embeddings import embed_text as active_embed_text
+
+    return active_embed_text(text, profile)
 
 
 def tokenize(text: str) -> list[str]:
@@ -55,6 +46,9 @@ def decode_embedding(value: str) -> list[float]:
 
 
 def build_chunks_for_document(document: dict[str, Any]) -> list[dict[str, Any]]:
+    from app.services.embeddings import current_embedding_profile
+
+    profile = current_embedding_profile()
     chunks = chunk_text(document["content"])
     if not chunks:
         chunks = [document["content"]]
@@ -71,7 +65,13 @@ def build_chunks_for_document(document: dict[str, Any]) -> list[dict[str, Any]]:
                 "equipment_id": document.get("equipment_id"),
                 "title": document["title"],
                 "content": content,
-                "embedding": encode_embedding(embed_text(text_for_embedding)),
+                "embedding": encode_embedding(embed_text(text_for_embedding, profile)),
+                "embedding_profile_id": profile.id,
+                "embedding_provider": profile.provider,
+                "embedding_model": profile.model,
+                "embedding_version": profile.version,
+                "embedding_dimensions": profile.dimensions,
+                "embedding_distance": profile.distance,
             }
         )
     return indexed_chunks

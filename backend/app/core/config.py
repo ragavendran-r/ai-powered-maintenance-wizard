@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     rag_vector_store: str = Field(default="qdrant", alias="RAG_VECTOR_STORE")
     rag_qdrant_url: str = Field(default="http://localhost:6333", alias="RAG_QDRANT_URL")
     rag_qdrant_collection: str = Field(default="maintenance_wizard_documents", alias="RAG_QDRANT_COLLECTION")
+    rag_qdrant_collection_alias: Optional[str] = Field(default=None, alias="RAG_QDRANT_COLLECTION_ALIAS")
     rag_qdrant_api_key: Optional[str] = Field(default=None, alias="RAG_QDRANT_API_KEY")
     rag_vector_timeout_seconds: float = Field(default=2.0, ge=0.1, alias="RAG_VECTOR_TIMEOUT_SECONDS")
     rag_embedding_provider: str = Field(default="deterministic_hash", alias="RAG_EMBEDDING_PROVIDER")
@@ -79,6 +80,10 @@ class Settings(BaseSettings):
     rag_embedding_version: str = Field(default="1", alias="RAG_EMBEDDING_VERSION")
     rag_embedding_dimensions: int = Field(default=64, ge=1, alias="RAG_EMBEDDING_DIMENSIONS")
     rag_embedding_distance: str = Field(default="Cosine", alias="RAG_EMBEDDING_DISTANCE")
+    rag_embedding_base_url: Optional[str] = Field(default=None, alias="RAG_EMBEDDING_BASE_URL")
+    rag_embedding_api_key: Optional[str] = Field(default=None, alias="RAG_EMBEDDING_API_KEY")
+    rag_embedding_timeout_seconds: float = Field(default=10.0, ge=0.1, alias="RAG_EMBEDDING_TIMEOUT_SECONDS")
+    rag_embedding_batch_size: int = Field(default=32, ge=1, le=512, alias="RAG_EMBEDDING_BATCH_SIZE")
     data_dir: Path = Field(
         default=Path(__file__).resolve().parents[3] / "assets" / "sample_data",
         alias="DATA_DIR",

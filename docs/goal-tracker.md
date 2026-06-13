@@ -14,6 +14,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 ## Current Goal State
 
 - Active implementation goal: G-016 production Qdrant-backed RAG + PEFT + NATS continuous-learning and tuning design.
+- Current G-016 scope is production-aligned but constrained to the local Mac stack; Postgres migration, S3/object-store lifecycle and access-policy hardening, and environment-specific LM Studio/Ollama adapter loader integration are tracked as future phases.
 - Latest completed tracked goal: G-015 LLM/SLM leverage for analytics and retrieval.
 - Branch workflow rule: work intended for `main` must happen on a feature branch and merge through a PR.
 
@@ -36,7 +37,15 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 | G-013 | Implement user login and role-based access control. | Complete | Added local SQLite users, bcrypt password hashes, JWT login, endpoint role guards, React login/session handling, role-gated navigation/actions, admin user management, tests, and docs. | `backend/app/core/auth.py`; `frontend/src/App.tsx`; `docs/auth-authorization-plan.md` |
 | G-014 | Create a local Kubernetes deployment script. | Complete | Added and live-verified a Kind-based script that installs Kind when missing, creates a local cluster, deploys NATS, backend, and frontend, reports status, and deletes the cluster/runtime files. | `scripts/run-local-k8s.sh`; `README.md`; live Kind deployment |
 | G-015 | Add LLM/SLM leverage for analytics and retrieval. | Complete | Added structured LLM contracts, document intelligence extraction, label normalization, LLM reranking, anomaly/prediction explanations, and UI/API evidence display while preserving deterministic fallback behavior. | `backend/app/services/retrieval.py`; `backend/app/services/risk.py`; `backend/app/services/recommendations.py`; `README.md`; `docs/architecture.md` |
-| G-016 | Build production-ready Qdrant-backed RAG + PEFT + NATS continuous learning and tuning. | In Progress | Current design now explicitly combines Qdrant-backed RAG, LLM-as-a-Judge gates, PEFT adapter tuning, NATS-backed async jobs, evaluation/version controls, artifact storage, runtime deployment gates, and promotion gates. Implementation has synchronous local review/export controls, persisted learning jobs, PEFT queueing, async learning enabled by default, Qdrant as the production vector DB, embedding profile/version status with reviewer reindex controls, a durable learning worker, local PEFT artifact preparation, filesystem/S3 artifact storage with hashes and retention policy status, optional external PEFT trainer execution with a bundled Qwen LoRA/QLoRA template, evaluation-gated adapter promotion/rollback controls, adapter runtime deployment tracking/gating, verified-deployment serving resolution, and documented production worker design. | `docs/rag-peft-nats-learning-architecture.md`; `backend/app/services/learning.py`; `backend/app/services/learning_worker.py`; `backend/app/services/vector_store.py`; `frontend/src/App.tsx`; `scripts/export-learning-dataset.py`; `scripts/peft/train_qwen_lora.py` |
+| G-016 | Build production-ready Qdrant-backed RAG + PEFT + NATS continuous learning and tuning. | In Progress | Current design now explicitly combines Qdrant-backed RAG, LLM-as-a-Judge gates, PEFT adapter tuning, NATS-backed async jobs, evaluation/version controls, artifact storage, runtime deployment gates, and promotion gates. Implementation has synchronous local review/export controls, persisted learning jobs, PEFT queueing, async learning enabled by default, Qdrant as the production vector DB, embedding profile/version status with reviewer reindex controls, a durable learning worker, local PEFT artifact preparation, filesystem/S3-compatible artifact registration with hashes and retention policy status, optional external PEFT trainer execution with a bundled Qwen LoRA/QLoRA template, evaluation-gated adapter promotion/rollback controls, adapter runtime deployment tracking/gating, verified-deployment serving resolution, and documented production worker design. Postgres migration, object-store lifecycle/access-policy hardening, and environment-specific LM Studio/Ollama adapter loader integration are future phases so the current goal remains implementable on the local Mac stack. | `docs/rag-peft-nats-learning-architecture.md`; `backend/app/services/learning.py`; `backend/app/services/learning_worker.py`; `backend/app/services/vector_store.py`; `frontend/src/App.tsx`; `scripts/export-learning-dataset.py`; `scripts/peft/train_qwen_lora.py` |
+
+## Future Production Phases
+
+These phases are outside the active G-016 completion criteria but remain part of the production roadmap:
+
+- **F-001 Object-Store Hardening**: add bucket-native lifecycle, retention, encryption, access-policy, audit, and disaster-recovery controls for S3-compatible learning artifacts after the local filesystem/MinIO-compatible registry path is stable.
+- **F-002 Postgres Migration**: move learning, operational, and audit state from local SQLite to Postgres for multi-worker and multi-instance deployments.
+- **F-003 Adapter Loader Integration**: wire approved PEFT adapter artifacts into the chosen serving runtime, such as LM Studio, Ollama, or a hosted OpenAI-compatible endpoint, while keeping the current in-app deployment records and promotion gates as the control plane.
 
 ## Detailed Goal Notes
 
@@ -404,7 +413,7 @@ Production design:
 - Async learning is enabled by default for production-like runs and local stack scripts.
 - LLM-as-a-Judge is advisory quality scoring only. Human approval, role authorization, deterministic workflow rules, and schema validation remain authoritative.
 - Dataset snapshots, model versions, prompt versions, evaluation runs, artifact paths, and adapter promotion state must be persisted for auditability and rollback.
-- Production deployment should move learning state to Postgres and large JSONL/model artifacts to object storage.
+- Future production phases should move learning state to Postgres and harden large JSONL/model artifact storage with object-store lifecycle and access controls.
 
 Delivered so far:
 
@@ -423,15 +432,18 @@ Delivered so far:
 - Active promoted model-version resolution for real LLM serving clients, with Learning Review visibility into the selected serving model and adapter path.
 - Adapter runtime deployment tracking/gating for PEFT outputs, with deployment status kept separate from evaluation-gated promotion and active serving-model resolution.
 - DB-backed learning artifact cleanup preview and guarded filesystem deletion API, with protected model/deployment references, role gating, explicit enable flag, and cleanup audit jobs.
+- Schema version 14 RAG embedding profile records, document chunk embedding metadata, active-profile retrieval filtering, Qdrant collection status/shape checks, reviewer-audited embedding profile activation, RAG reindex, and Qdrant migration preview/run controls.
 - Production RAG + PEFT + NATS design document with NATS subjects, worker responsibilities, persistence, quality gates, observability, and rollout sequence.
 
-Remaining production work:
+Remaining G-016 work:
 
-- Add bundled PEFT trainer templates for local Qwen/SLM LoRA or QLoRA training beyond the generic external-command hook.
-- Add production embedding model selection/versioning and Qdrant collection migration controls.
+- Keep tightening the local-Mac RAG + PEFT + NATS control plane, evaluations, prompt/model reporting, and assistant feedback loops until the active goal is demonstrably complete.
+
+Future phases after G-016:
+
 - Add production object-bucket lifecycle and access policy hardening for S3-compatible artifact storage.
 - Configure environment-specific adapter loader integration for LM Studio/Ollama or another serving runtime; runtime deployment tracking/gating is now handled inside the app.
-- Migrate learning state from SQLite prototype tables to Postgres for multi-worker production use.
+- Migrate learning state from SQLite local/demo tables to Postgres for multi-worker production use.
 
 Status: `In Progress`
 

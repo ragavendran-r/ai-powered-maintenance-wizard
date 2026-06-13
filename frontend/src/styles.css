@@ -795,7 +795,6 @@ h3 {
   font-size: 1.7rem;
 }
 
-.vectorStoreStatus,
 .servingModelStatus,
 .artifactStoreStatus,
 .peftTrainerStatus {
@@ -810,7 +809,6 @@ h3 {
   padding: 10px 12px;
 }
 
-.vectorStoreStatus span,
 .servingModelStatus span,
 .artifactStoreStatus span,
 .peftTrainerStatus span {
@@ -818,7 +816,6 @@ h3 {
   gap: 2px;
 }
 
-.vectorStoreStatus small,
 .servingModelStatus small,
 .artifactStoreStatus small,
 .peftTrainerStatus small {
@@ -837,6 +834,71 @@ h3 {
 .artifactStoreStatus strong,
 .peftTrainerStatus strong {
   overflow-wrap: anywhere;
+}
+
+.vectorStoreStatus {
+  background: #f7fafb;
+  border: 1px solid #dce6eb;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.vectorStoreFacts,
+.migrationPreview {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.vectorStoreFacts span,
+.migrationPreview span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vectorStoreFacts small,
+.migrationPreview small {
+  color: #60717c;
+  font-weight: 700;
+}
+
+.vectorStoreFacts strong,
+.migrationPreview strong {
+  overflow-wrap: anywhere;
+}
+
+.ragControls {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(180px, 1fr) repeat(4, auto);
+}
+
+.migrationNotice,
+.migrationPreview {
+  background: #ffffff;
+  border: 1px solid #d5e2e8;
+  border-left: 4px solid #d5aa24;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.migrationPreview {
+  border-left-color: #237982;
+}
+
+.migrationNotice p,
+.migrationPreview p {
+  margin: 0;
+}
+
+.migrationPreview > div {
+  display: grid;
+  gap: 4px;
+  grid-column: 1 / -1;
 }
 
 .artifactCleanupResult {

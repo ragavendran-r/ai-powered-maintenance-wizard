@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Optional
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -61,6 +61,11 @@ from app.models.schemas import (
     NeoChatResponse,
     PasswordResetRequest,
     PredictionRequest,
+    RagEmbeddingProfile,
+    RagEmbeddingProfileCreateRequest,
+    RagMigrationPlan,
+    RagMigrationRequest,
+    RagReindexRequest,
     Recommendation,
     StreamingStatus,
     SupervisorAssistantRequest,
@@ -83,14 +88,18 @@ from app.services.artifact_store import cleanup_registered_learning_artifacts
 from app.services.document_intelligence import analyze_documents, document_intelligence
 from app.services.iot_streaming import StreamingIngestionService
 from app.services.learning import (
+    activate_rag_embedding_profile,
     create_dataset_snapshot,
+    create_rag_embedding_profile,
     learning_summary,
+    migrate_rag_vectors,
+    preview_rag_migration,
     promote_model_version,
     queue_adapter_deployment_job,
     queue_peft_tuning_job,
     record_learning_job,
     record_assistant_interaction,
-    reindex_rag_vectors,
+    reindex_rag_vectors_with_request,
     refresh_learning_examples,
     register_model_version,
     rejudge_learning_example,
@@ -98,6 +107,7 @@ from app.services.learning import (
     run_learning_evaluation,
     set_example_approval,
 )
+from app.services.vector_store import vector_store_status
 from app.services.maintenance_labeling import label_feedback, label_maintenance_event, label_maintenance_history, stored_labels
 from app.services.neo_assistant import neo_assistance, neo_welcome, stream_neo_assistance
 from app.services.recommendations import generate_recommendation, stream_recommendation
@@ -884,15 +894,90 @@ def list_learning_jobs():
     return repository.list_learning_jobs(limit=50)
 
 
+@app.get(
+    "/api/learning/rag/status",
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def learning_rag_status():
+    return vector_store_status()
+
+
+@app.get(
+    "/api/learning/rag/embedding-profiles",
+    response_model=list[RagEmbeddingProfile],
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_rag_embedding_profiles():
+    return repository.list_rag_embedding_profiles()
+
+
+@app.post(
+    "/api/learning/rag/embedding-profiles",
+    response_model=RagEmbeddingProfile,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def create_learning_rag_embedding_profile(
+    request: RagEmbeddingProfileCreateRequest,
+    current_user: UserPublic = Depends(get_current_user),
+):
+    try:
+        return create_rag_embedding_profile(request, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/learning/rag/embedding-profiles/{profile_id}/activate",
+    response_model=LearningJob,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def activate_learning_rag_embedding_profile(
+    profile_id: str,
+    current_user: UserPublic = Depends(get_current_user),
+):
+    try:
+        return activate_rag_embedding_profile(profile_id, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/learning/rag/migration/preview",
+    response_model=RagMigrationPlan,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def preview_learning_rag_migration(request: RagMigrationRequest):
+    try:
+        return preview_rag_migration(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/learning/rag/migration",
+    response_model=LearningJob,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def run_learning_rag_migration(
+    request: RagMigrationRequest,
+    current_user: UserPublic = Depends(get_current_user),
+):
+    try:
+        return migrate_rag_vectors(request, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post(
     "/api/learning/rag/reindex",
     response_model=LearningJob,
     dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
 )
 def reindex_learning_rag_vectors(
+    request: RagReindexRequest = Body(default_factory=RagReindexRequest),
     current_user: UserPublic = Depends(get_current_user),
 ):
-    return reindex_rag_vectors(current_user)
+    return reindex_rag_vectors_with_request(request, current_user)
 
 
 @app.post(

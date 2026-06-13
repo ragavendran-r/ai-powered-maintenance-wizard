@@ -23,12 +23,18 @@ from app.models.schemas import (
     LearningModelRollbackRequest,
     LearningModelVersionCreateRequest,
     LearningPeftJobCreateRequest,
+    RagEmbeddingProfile,
+    RagEmbeddingProfileCreateRequest,
+    RagMigrationPlan,
+    RagMigrationRequest,
+    RagReindexRequest,
     LearningSummary,
     UserPublic,
 )
 from app.services.ai_client import active_llm_serving_config, configured_llm_client
 from app.services.artifact_store import artifact_store_status, store_learning_artifact_file
-from app.services.vector_store import vector_store_status
+from app.services.embeddings import current_embedding_profile, embedding_profile_id, supported_embedding_provider
+from app.services.vector_store import plan_qdrant_migration, vector_store_status
 
 
 APPROVED_FEEDBACK_STATUSES = {"accepted", "corrected"}
@@ -44,6 +50,8 @@ LEARNING_JOB_SUBJECTS = {
     "adapter_registered": "adapter.registered",
     "model_promotion": "adapter.promoted",
     "rag_reindex": "rag.reindex.requested",
+    "rag_embedding_profile": "rag.embedding.profile.requested",
+    "rag_migration": "rag.migration.requested",
     "artifact_cleanup": "artifact.cleanup.requested",
 }
 
@@ -566,16 +574,129 @@ def queue_peft_tuning_job(request: LearningPeftJobCreateRequest, current_user: U
 
 
 def reindex_rag_vectors(current_user: UserPublic) -> LearningJob:
-    result = repository.rebuild_all_document_chunks()
+    return reindex_rag_vectors_with_request(RagReindexRequest(), current_user)
+
+
+def reindex_rag_vectors_with_request(request: RagReindexRequest, current_user: UserPublic) -> LearningJob:
+    profile = current_embedding_profile()
+    result = repository.rebuild_all_document_chunks(
+        collection_name=request.target_collection,
+        recreate_collection=request.recreate_collection,
+    )
     job = record_learning_job(
         "rag_reindex",
         current_user,
         input_refs={
             "reason": "manual_reindex",
+            "notes": request.notes,
+            "target_collection": request.target_collection,
+            "recreate_collection": request.recreate_collection,
+            "embedding_profile_id": profile.id,
             "vector_store": result["index_result"].get("store"),
             "collection": result["index_result"].get("collection"),
         },
         output_refs=result,
+        status="completed",
+    )
+    return LearningJob(**job)
+
+
+def create_rag_embedding_profile(request: RagEmbeddingProfileCreateRequest, current_user: UserPublic) -> RagEmbeddingProfile:
+    if not supported_embedding_provider(request.provider):
+        raise ValueError(f"Embedding provider {request.provider} is not supported by this runtime")
+    profile_id = embedding_profile_id(
+        request.provider,
+        request.model,
+        request.version,
+        request.dimensions,
+        request.distance,
+    )
+    profile = repository.save_rag_embedding_profile(
+        {
+            "id": profile_id,
+            "provider": request.provider,
+            "model": request.model,
+            "version": request.version,
+            "dimensions": request.dimensions,
+            "distance": request.distance,
+            "status": "candidate",
+            "notes": request.notes,
+            "metadata": {
+                **request.metadata,
+                "created_by": current_user.email,
+            },
+        }
+    )
+    record_learning_job(
+        "rag_embedding_profile",
+        current_user,
+        input_refs={"profile_id": profile_id, "action": "register"},
+        output_refs={"profile": profile},
+        status="completed",
+    )
+    return RagEmbeddingProfile(**profile)
+
+
+def activate_rag_embedding_profile(profile_id: str, current_user: UserPublic) -> LearningJob:
+    profile = repository.get_rag_embedding_profile(profile_id)
+    if not profile:
+        raise ValueError(f"RAG embedding profile {profile_id} was not found")
+    if not supported_embedding_provider(profile["provider"]):
+        raise ValueError(f"Embedding provider {profile['provider']} is not supported by this runtime")
+    active = repository.activate_rag_embedding_profile(profile_id)
+    job = record_learning_job(
+        "rag_embedding_profile",
+        current_user,
+        input_refs={"profile_id": profile_id, "action": "activate"},
+        output_refs={
+            "profile": active,
+            "vector_store": vector_store_status(),
+            "migration_required": True,
+        },
+        status="completed",
+    )
+    return LearningJob(**job)
+
+
+def preview_rag_migration(request: RagMigrationRequest) -> RagMigrationPlan:
+    return RagMigrationPlan(**plan_qdrant_migration(request.profile_id, request.target_collection))
+
+
+def migrate_rag_vectors(request: RagMigrationRequest, current_user: UserPublic) -> LearningJob:
+    plan = plan_qdrant_migration(request.profile_id, request.target_collection)
+    previous_active = repository.get_active_rag_embedding_profile()
+    target_profile = plan["target_profile"]
+    if request.activate_profile and target_profile.get("id") != (previous_active or {}).get("id"):
+        repository.activate_rag_embedding_profile(str(target_profile["id"]))
+    try:
+        result = repository.rebuild_all_document_chunks(
+            collection_name=plan["target_collection"],
+            recreate_collection=request.recreate_collection,
+        )
+    except Exception:
+        if previous_active:
+            repository.activate_rag_embedding_profile(previous_active["id"])
+        raise
+    index_result = result.get("index_result", {})
+    if index_result.get("state") == "fallback":
+        if previous_active:
+            repository.activate_rag_embedding_profile(previous_active["id"])
+        raise ValueError(str(index_result.get("error") or "RAG migration failed during vector indexing"))
+    job = record_learning_job(
+        "rag_migration",
+        current_user,
+        input_refs={
+            "profile_id": request.profile_id,
+            "target_collection": plan["target_collection"],
+            "recreate_collection": request.recreate_collection,
+            "activate_profile": request.activate_profile,
+            "notes": request.notes,
+        },
+        output_refs={
+            "plan": plan,
+            "result": result,
+            "vector_store": vector_store_status(),
+        },
         status="completed",
     )
     return LearningJob(**job)

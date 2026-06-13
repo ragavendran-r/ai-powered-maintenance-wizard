@@ -23,7 +23,8 @@ async function signIn(page: Page) {
     await page.getByRole('button', { name: 'Sign In' }).click()
   }
   await expect(page.getByRole('heading', { name: 'Maintenance Wizard' })).toBeVisible()
-  await expect(page.getByText('API CONNECTED')).toBeVisible()
+  await expect(page.getByText('Plant Admin')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible()
 }
 
 async function expectPinnedToBottom(page: Page, selector: string) {

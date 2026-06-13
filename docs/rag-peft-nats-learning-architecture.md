@@ -10,13 +10,13 @@ The production design combines three layers:
 - **PEFT** for controlled offline/local adapter tuning from curated JSONL snapshots.
 - **NATS JetStream** for asynchronous learning jobs, retries, durable progress tracking, and eventual scale-out beyond one FastAPI process.
 
-Production RAG requires a real vector database. Maintenance Wizard uses Qdrant as the default open-source vector store for document chunks and approved knowledge. SQLite/local-vector retrieval exists only for tests, disconnected development, or emergency fallback.
+Production RAG requires a real vector database. Maintenance Wizard uses Qdrant as the default open-source vector store for document chunks and approved knowledge. SQLite/local-vector retrieval exists only for tests, disconnected development, or emergency fallback. The active implementation scope is production-aligned but constrained to the local Mac stack; Postgres migration, bucket-native object-store hardening, and environment-specific adapter-loader automation are future phases.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  app["FastAPI APIs<br/>Feedback, work orders, assistants, ingestion"] --> db[("Operational Store<br/>SQLite now, Postgres in production")]
+  app["FastAPI APIs<br/>Feedback, work orders, assistants, ingestion"] --> db[("Operational Store<br/>SQLite local, Postgres future phase")]
   app --> nats["NATS JetStream"]
 
   nats --> judgeWorker["Judge Worker<br/>LLM-as-a-Judge scoring"]
@@ -119,7 +119,7 @@ Current implementation:
 - Worker-executed PEFT jobs prepare a JSONL dataset artifact and training manifest, persist `learning_artifacts` rows with content hashes, and mark the job as awaiting a trainer when no trainer command is configured. Artifacts can be stored on the local filesystem for offline runs or uploaded to S3-compatible object storage such as MinIO by setting `LEARNING_ARTIFACT_STORE=s3`.
 - When `LEARNING_PEFT_TRAINER_COMMAND` is configured, the worker invokes the command without a shell, passes dataset/manifest/output paths through environment variables, enforces `LEARNING_PEFT_TRAINER_TIMEOUT_SECONDS`, stores trainer logs and adapter manifests, and registers the result as a `candidate` model version. The promotion gate still requires a passing evaluation and human reviewer action.
 - The bundled `scripts/peft/train_qwen_lora.py` template provides an optional local Qwen/SLM LoRA or QLoRA path. It consumes the worker-provided `MW_PEFT_DATASET_PATH`, `MW_PEFT_MANIFEST_PATH`, `MW_PEFT_OUTPUT_DIR`, `MW_PEFT_ADAPTER_NAME`, and `MW_PEFT_BASE_MODEL` variables, imports heavy trainer dependencies only during real training, and writes `adapter_manifest.json` in the registration format the backend consumes.
-- Artifact cleanup is registry-first. The cleanup API only evaluates rows in `learning_artifacts`, refuses to sweep arbitrary filesystem paths, protects active/candidate/promoted model adapter references and verified deployment artifacts, and exposes dry-run previews to Learning Review. Deletion requires both a non-dry-run admin or reliability-engineer request and `LEARNING_ARTIFACT_CLEANUP_ENABLED=true`; S3-compatible stores are intentionally read-only until bucket-native lifecycle and access policies are configured.
+- Artifact cleanup is registry-first. The cleanup API only evaluates rows in `learning_artifacts`, refuses to sweep arbitrary filesystem paths, protects active/candidate/promoted model adapter references and verified deployment artifacts, and exposes dry-run previews to Learning Review. Deletion requires both a non-dry-run admin or reliability-engineer request and `LEARNING_ARTIFACT_CLEANUP_ENABLED=true`; S3-compatible stores are intentionally read-only in the app.
 
 ## Vector Store
 
@@ -130,6 +130,8 @@ Qdrant is the production vector store for RAG:
 - `RAG_QDRANT_COLLECTION=maintenance_wizard_documents`
 
 Uploaded and seeded document chunks are indexed into Qdrant after SQLite persistence. Retrieval queries Qdrant first, filters hits by asset context, and falls back to SQLite/local-vector scoring only when Qdrant is unavailable or explicitly disabled for tests.
+
+Learning Review exposes the active embedding profile, collection vector shape, migration reasons, profile activation, migration preview, Qdrant migration execution, and current-profile reindex controls. Document chunks persist the embedding profile id/provider/model/version/dimensions/distance so retrieval can avoid mixing incompatible embedding spaces during fallback and migration windows.
 
 The local stack starts Qdrant with NATS and the app. The local Kubernetes runner also deploys Qdrant and points the backend to the in-cluster service.
 
@@ -173,7 +175,7 @@ The local stack starts Qdrant with NATS and the app. The local Kubernetes runner
 
 ## Persistence
 
-Prototype SQLite tables are acceptable for local demos. Production should move learning state to Postgres, vector retrieval to Qdrant, and artifacts to object storage.
+SQLite tables are acceptable for the current local/demo implementation. Production-like RAG uses Qdrant, and learning artifacts can be registered from local filesystem or S3-compatible storage.
 
 Required production tables:
 
@@ -217,7 +219,13 @@ Production should track:
 2. Keep Qdrant and NATS enabled in dev, local Kubernetes, and production-like runs.
 3. Keep `learning_jobs`, `learning_artifacts`, and NATS publishing enabled for production-like runs.
 4. Run the learning worker process against NATS JetStream.
-5. Configure S3-compatible artifact storage for production-like runs and add bucket retention/access policies; keep app-side deletion disabled for object stores until those controls are reviewed.
-6. Validate the bundled PEFT trainer template on the target CUDA or LoRA training host before enabling it in shared environments.
-7. Configure the environment-specific adapter loader for LM Studio, Ollama, or the hosted serving runtime, using the app's adapter deployment records and gates as the audit/control plane.
-8. Move prototype SQLite learning state to Postgres for multi-worker production use.
+5. Validate the bundled PEFT trainer template on the target CUDA or LoRA training host before enabling it in shared environments.
+6. Use adapter runtime deployment records and promotion gates as the audit/control plane for whichever serving runtime is configured.
+
+## Future Phases
+
+These phases remain part of the production roadmap but are outside current G-016 completion criteria because they require deployment choices beyond the local Mac setup:
+
+1. **Postgres migration**: move learning, operational, and audit state from SQLite to Postgres for multi-worker and multi-instance deployment.
+2. **Object-store hardening**: add bucket-native lifecycle, retention, encryption, access-policy, audit, and recovery controls for S3-compatible learning artifacts.
+3. **Adapter-loader automation**: automate loading approved PEFT adapter artifacts into LM Studio, Ollama, or another serving runtime while preserving the app's model deployment records and promotion gates.

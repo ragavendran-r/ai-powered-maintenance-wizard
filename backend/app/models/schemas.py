@@ -642,6 +642,8 @@ LearningJobType = Literal[
     "adapter_registered",
     "model_promotion",
     "rag_reindex",
+    "rag_embedding_profile",
+    "rag_migration",
     "artifact_cleanup",
 ]
 LearningJobStatus = Literal["queued", "published", "running", "completed", "failed"]
@@ -690,6 +692,58 @@ class LearningArtifactCleanupResult(BaseModel):
     protected: list[dict[str, Any]] = []
     deleted_paths: list[str] = []
     errors: list[str] = []
+
+
+class RagEmbeddingProfile(BaseModel):
+    id: str
+    provider: str
+    model: str
+    version: str
+    dimensions: int
+    distance: str
+    status: str = "candidate"
+    notes: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+    updated_at: str
+
+
+class RagEmbeddingProfileCreateRequest(BaseModel):
+    provider: Literal["deterministic_hash", "openai", "openai_compatible"] = "deterministic_hash"
+    model: str
+    version: str = "1"
+    dimensions: int = Field(default=64, ge=1)
+    distance: str = "Cosine"
+    notes: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RagReindexRequest(BaseModel):
+    target_collection: Optional[str] = None
+    recreate_collection: bool = False
+    notes: Optional[str] = None
+
+
+class RagMigrationRequest(BaseModel):
+    profile_id: Optional[str] = None
+    target_collection: Optional[str] = None
+    recreate_collection: bool = True
+    activate_profile: bool = True
+    notes: Optional[str] = None
+
+
+class RagMigrationPlan(BaseModel):
+    dry_run: bool = True
+    store: str
+    source_collection: str
+    target_collection: str
+    active_profile: dict[str, Any]
+    target_profile: dict[str, Any]
+    migration_required: bool = False
+    will_activate_profile: bool = False
+    will_recreate_collection: bool = False
+    reasons: list[str] = []
+    status: dict[str, Any] = Field(default_factory=dict)
 
 
 class LearningPeftJobCreateRequest(BaseModel):

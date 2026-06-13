@@ -694,6 +694,62 @@ export interface LearningArtifactCleanupResult {
   errors: string[]
 }
 
+export interface LearningEmbeddingProfile {
+  id: string
+  provider: string
+  model: string
+  version: string
+  dimensions: number
+  distance: string
+  status: string
+  notes?: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface LearningVectorStoreStatus {
+  store?: string
+  enabled?: boolean
+  collection?: string
+  collection_alias?: string | null
+  url?: string
+  embedding_profile?: LearningEmbeddingProfile & {
+    state?: string
+    configured_dimensions?: number
+    warning?: string
+  }
+  points_count?: number | null
+  collection_vector_size?: number | null
+  collection_distance?: string | null
+  migration_required?: boolean
+  migration_reasons?: string[]
+  state?: string
+  error?: string | null
+}
+
+export interface LearningRagMigrationPlan {
+  dry_run: boolean
+  store: string
+  source_collection: string
+  target_collection: string
+  active_profile: Record<string, unknown>
+  target_profile: Record<string, unknown>
+  migration_required: boolean
+  will_activate_profile: boolean
+  will_recreate_collection: boolean
+  reasons: string[]
+  status: LearningVectorStoreStatus
+}
+
+export interface LearningRagMigrationRequest {
+  profile_id?: string | null
+  target_collection?: string | null
+  recreate_collection?: boolean
+  activate_profile?: boolean
+  notes?: string
+}
+
 export interface LearningSummary {
   counts: Record<string, number>
   recent_examples: LearningExample[]
@@ -716,18 +772,7 @@ export interface LearningSummary {
     [key: string]: unknown
   }
   peft_trainer: Record<string, unknown>
-  vector_store: {
-    store?: string
-    enabled?: boolean
-    collection?: string
-    url?: string
-    embedding_profile?: Record<string, unknown>
-    points_count?: number | null
-    collection_vector_size?: number | null
-    migration_required?: boolean
-    state?: string
-    error?: string | null
-  }
+  vector_store: LearningVectorStoreStatus
 }
 
 export type WorkOrderStatus = 'WAPPR' | 'WMATL' | 'APPR' | 'INPRG' | 'COMP' | 'CLOSE'
@@ -1005,9 +1050,38 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   learningJobs: () => request<LearningJob[]>('/api/learning/jobs'),
-  reindexLearningRag: () =>
+  learningEmbeddingProfiles: () => request<LearningEmbeddingProfile[]>('/api/learning/rag/embedding-profiles'),
+  createLearningEmbeddingProfile: (payload: {
+    provider: string
+    model: string
+    version?: string
+    dimensions?: number
+    distance?: string
+    notes?: string
+    metadata?: Record<string, unknown>
+  }) =>
+    request<LearningEmbeddingProfile>('/api/learning/rag/embedding-profiles', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  activateLearningEmbeddingProfile: (profileId: string) =>
+    request<LearningJob>(`/api/learning/rag/embedding-profiles/${profileId}/activate`, {
+      method: 'POST',
+    }),
+  previewLearningRagMigration: (payload: LearningRagMigrationRequest) =>
+    request<LearningRagMigrationPlan>('/api/learning/rag/migration/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  migrateLearningRag: (payload: LearningRagMigrationRequest) =>
+    request<LearningJob>('/api/learning/rag/migration', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  reindexLearningRag: (payload: { target_collection?: string | null; recreate_collection?: boolean; notes?: string } = {}) =>
     request<LearningJob>('/api/learning/rag/reindex', {
       method: 'POST',
+      body: JSON.stringify(payload),
     }),
   queueLearningPeftJob: (payload: {
     dataset_id: string

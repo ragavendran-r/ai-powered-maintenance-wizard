@@ -205,7 +205,30 @@ SCHEMA_STATEMENTS = [
         title TEXT NOT NULL,
         content TEXT NOT NULL,
         embedding TEXT NOT NULL,
+        embedding_profile_id TEXT NOT NULL DEFAULT 'emb-legacy',
+        embedding_provider TEXT NOT NULL DEFAULT 'deterministic_hash',
+        embedding_model TEXT NOT NULL DEFAULT 'maintenance-hash-v1',
+        embedding_version TEXT NOT NULL DEFAULT '1',
+        embedding_dimensions INTEGER NOT NULL DEFAULT 64,
+        embedding_distance TEXT NOT NULL DEFAULT 'Cosine',
+        embedded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (document_id) REFERENCES documents(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS rag_embedding_profiles (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        version TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        distance TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'candidate',
+        notes TEXT,
+        metadata TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(provider, model, version, dimensions, distance)
     )
     """,
     """
@@ -454,7 +477,12 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "13"
+SCHEMA_VERSION = "14"
+_INITIALIZING = False
+
+
+def is_initializing_database() -> bool:
+    return _INITIALIZING
 
 
 def get_database_path() -> Path:
@@ -475,33 +503,53 @@ def connect() -> Iterator[sqlite3.Connection]:
 
 
 def initialize_database(seed: bool = True) -> None:
-    with connect() as connection:
-        for statement in SCHEMA_STATEMENTS:
-            connection.execute(statement)
-        _ensure_column(connection, "feedback", "equipment_id", "TEXT")
-        _ensure_column(connection, "learning_examples", "judge_score", "REAL NOT NULL DEFAULT 0")
-        _ensure_column(connection, "learning_examples", "judge_label", "TEXT NOT NULL DEFAULT 'not_scored'")
-        _ensure_column(connection, "learning_examples", "judge_rationale", "TEXT")
-        _ensure_column(connection, "learning_examples", "judge_provider", "TEXT NOT NULL DEFAULT 'not_scored'")
-        _ensure_column(connection, "learning_examples", "judge_used_live_provider", "INTEGER NOT NULL DEFAULT 0")
-        _ensure_column(connection, "learning_examples", "judged_at", "TEXT")
-        _ensure_column(connection, "learning_jobs", "output_refs", "TEXT NOT NULL DEFAULT '{}'")
-        _ensure_column(connection, "learning_jobs", "retry_count", "INTEGER NOT NULL DEFAULT 0")
-        _ensure_column(connection, "learning_model_deployments", "metadata", "TEXT NOT NULL DEFAULT '{}'")
-        _ensure_column(connection, "learning_model_deployments", "error", "TEXT")
-        connection.execute(
-            """
-            INSERT INTO schema_metadata (key, value)
-            VALUES ('schema_version', ?)
-            ON CONFLICT(key) DO UPDATE SET value=excluded.value
-            """,
-            (SCHEMA_VERSION,),
-        )
-        _seed_learning_defaults(connection)
-        if seed:
-            seed_from_sample_data(connection)
-            if get_settings().auth_seed_demo_users:
-                _execute_seed_sql(connection, "users_seed.sql")
+    global _INITIALIZING
+    _INITIALIZING = True
+    try:
+        with connect() as connection:
+            for statement in SCHEMA_STATEMENTS:
+                connection.execute(statement)
+            _ensure_column(connection, "feedback", "equipment_id", "TEXT")
+            _ensure_column(connection, "learning_examples", "judge_score", "REAL NOT NULL DEFAULT 0")
+            _ensure_column(connection, "learning_examples", "judge_label", "TEXT NOT NULL DEFAULT 'not_scored'")
+            _ensure_column(connection, "learning_examples", "judge_rationale", "TEXT")
+            _ensure_column(connection, "learning_examples", "judge_provider", "TEXT NOT NULL DEFAULT 'not_scored'")
+            _ensure_column(connection, "learning_examples", "judge_used_live_provider", "INTEGER NOT NULL DEFAULT 0")
+            _ensure_column(connection, "learning_examples", "judged_at", "TEXT")
+            _ensure_column(connection, "learning_jobs", "output_refs", "TEXT NOT NULL DEFAULT '{}'")
+            _ensure_column(connection, "learning_jobs", "retry_count", "INTEGER NOT NULL DEFAULT 0")
+            _ensure_column(connection, "learning_model_deployments", "metadata", "TEXT NOT NULL DEFAULT '{}'")
+            _ensure_column(connection, "learning_model_deployments", "error", "TEXT")
+            _ensure_column(connection, "document_chunks", "embedding_profile_id", "TEXT NOT NULL DEFAULT 'emb-legacy'")
+            _ensure_column(connection, "document_chunks", "embedding_provider", "TEXT NOT NULL DEFAULT 'deterministic_hash'")
+            _ensure_column(connection, "document_chunks", "embedding_model", "TEXT NOT NULL DEFAULT 'maintenance-hash-v1'")
+            _ensure_column(connection, "document_chunks", "embedding_version", "TEXT NOT NULL DEFAULT '1'")
+            _ensure_column(connection, "document_chunks", "embedding_dimensions", "INTEGER NOT NULL DEFAULT 64")
+            _ensure_column(connection, "document_chunks", "embedding_distance", "TEXT NOT NULL DEFAULT 'Cosine'")
+            _ensure_column(connection, "document_chunks", "embedded_at", "TEXT")
+            connection.execute(
+                """
+                UPDATE document_chunks
+                SET embedded_at = CURRENT_TIMESTAMP
+                WHERE embedded_at IS NULL
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO schema_metadata (key, value)
+                VALUES ('schema_version', ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (SCHEMA_VERSION,),
+            )
+            _seed_learning_defaults(connection)
+            _seed_rag_embedding_profile(connection)
+            if seed:
+                seed_from_sample_data(connection)
+                if get_settings().auth_seed_demo_users:
+                    _execute_seed_sql(connection, "users_seed.sql")
+    finally:
+        _INITIALIZING = False
 
 
 def seed_from_sample_data(connection: sqlite3.Connection) -> None:
@@ -691,6 +739,7 @@ def database_status() -> dict[str, Any]:
         "work_order_logs",
         "documents",
         "document_chunks",
+        "rag_embedding_profiles",
         "document_intelligence",
         "feedback",
         "maintenance_labels",
@@ -810,4 +859,57 @@ def _seed_learning_defaults(connection: sqlite3.Connection) -> None:
                 "Used for streamed reliability prediction.",
             ),
         ],
+    )
+
+
+def _seed_rag_embedding_profile(connection: sqlite3.Connection) -> None:
+    from app.services.embeddings import settings_embedding_profile
+
+    profile = settings_embedding_profile()
+    connection.execute(
+        """
+        UPDATE rag_embedding_profiles
+        SET status = 'candidate',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'active'
+          AND id <> ?
+        """,
+        (profile.id,),
+    )
+    connection.execute(
+        """
+        INSERT INTO rag_embedding_profiles (
+            id,
+            provider,
+            model,
+            version,
+            dimensions,
+            distance,
+            status,
+            notes,
+            metadata
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            provider=excluded.provider,
+            model=excluded.model,
+            version=excluded.version,
+            dimensions=excluded.dimensions,
+            distance=excluded.distance,
+            status='active',
+            notes=excluded.notes,
+            metadata=excluded.metadata,
+            updated_at=CURRENT_TIMESTAMP
+        """,
+        (
+            profile.id,
+            profile.provider,
+            profile.model,
+            profile.version,
+            profile.dimensions,
+            profile.distance,
+            "active",
+            profile.notes,
+            json.dumps(profile.metadata or {}, separators=(",", ":")),
+        ),
     )

@@ -47,6 +47,8 @@ import {
   type LearningExample,
   type LearningArtifact,
   type LearningArtifactCleanupResult,
+  type LearningEmbeddingProfile,
+  type LearningRagMigrationPlan,
   type LearningJob,
   type LearningModelDeployment,
   type LearningModelPromotion,
@@ -424,6 +426,10 @@ export function App() {
   const [learningExamples, setLearningExamples] = useState<LearningExample[]>([])
   const [learningDatasets, setLearningDatasets] = useState<LearningDatasetSnapshot[]>([])
   const [learningDeployments, setLearningDeployments] = useState<LearningModelDeployment[]>([])
+  const [learningEmbeddingProfiles, setLearningEmbeddingProfiles] = useState<LearningEmbeddingProfile[]>([])
+  const [selectedEmbeddingProfileId, setSelectedEmbeddingProfileId] = useState('')
+  const [ragMigrationPreview, setRagMigrationPreview] = useState<LearningRagMigrationPlan | null>(null)
+  const [ragTargetCollection, setRagTargetCollection] = useState('')
   const [artifactCleanupResult, setArtifactCleanupResult] = useState<LearningArtifactCleanupResult | null>(null)
   const [learningMessage, setLearningMessage] = useState('')
   const [learningLoading, setLearningLoading] = useState(false)
@@ -489,6 +495,10 @@ export function App() {
     setLearningExamples([])
     setLearningDatasets([])
     setLearningDeployments([])
+    setLearningEmbeddingProfiles([])
+    setSelectedEmbeddingProfileId('')
+    setRagMigrationPreview(null)
+    setRagTargetCollection('')
     setArtifactCleanupResult(null)
     setLearningMessage('')
     setLearningLoading(false)
@@ -622,12 +632,21 @@ export function App() {
       api.learningExamples(),
       api.learningDatasets(),
       api.learningModelDeployments().catch((): LearningModelDeployment[] => []),
+      api.learningEmbeddingProfiles().catch((): LearningEmbeddingProfile[] => []),
     ])
-      .then(([summary, examples, datasets, deployments]) => {
+      .then(([summary, examples, datasets, deployments, embeddingProfiles]) => {
         setLearningSummary(summary)
         setLearningExamples(examples)
         setLearningDatasets(datasets)
         setLearningDeployments(deployments)
+        setLearningEmbeddingProfiles(embeddingProfiles)
+        const activeProfile = embeddingProfiles.find((profile) => profile.status === 'active') ?? embeddingProfiles[0]
+        if (activeProfile && !selectedEmbeddingProfileId) {
+          setSelectedEmbeddingProfileId(activeProfile.id)
+        }
+        if (!ragTargetCollection && summary.vector_store?.collection) {
+          setRagTargetCollection(summary.vector_store.collection)
+        }
         setApiState('connected')
       })
       .catch(() => {
@@ -802,13 +821,79 @@ export function App() {
     setLearningLoading(true)
     setLearningMessage('')
     try {
-      const job = await api.reindexLearningRag()
+      const job = await api.reindexLearningRag({
+        target_collection: ragTargetCollection.trim() || undefined,
+        recreate_collection: false,
+        notes: `Current-profile reindex requested from Learning Review by ${currentUser?.email ?? 'reviewer'}.`,
+      })
       const summary = await api.learningSummary()
       setLearningSummary(summary)
       const chunkCount = Number(job.output_refs?.chunk_count ?? 0)
       setLearningMessage(`Reindexed ${chunkCount} RAG chunk${chunkCount === 1 ? '' : 's'} with status ${job.status}`)
     } catch {
       setLearningMessage('RAG vector reindex could not be completed')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
+
+  async function activateSelectedEmbeddingProfile() {
+    if (!selectedEmbeddingProfileId) return
+    setLearningLoading(true)
+    setLearningMessage('')
+    setRagMigrationPreview(null)
+    try {
+      const job = await api.activateLearningEmbeddingProfile(selectedEmbeddingProfileId)
+      const [summary, profiles] = await Promise.all([api.learningSummary(), api.learningEmbeddingProfiles()])
+      setLearningSummary(summary)
+      setLearningEmbeddingProfiles(profiles)
+      setLearningMessage(`Activated embedding profile with audit job ${job.id}. Preview migration before relying on RAG results.`)
+    } catch {
+      setLearningMessage('Embedding profile activation could not be completed')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
+
+  async function previewLearningRagMigration() {
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const preview = await api.previewLearningRagMigration({
+        profile_id: selectedEmbeddingProfileId || undefined,
+        target_collection: ragTargetCollection.trim() || undefined,
+        recreate_collection: true,
+        activate_profile: true,
+      })
+      setRagMigrationPreview(preview)
+      setRagTargetCollection(preview.target_collection)
+      setLearningMessage(`Previewed RAG migration to ${preview.target_collection}`)
+    } catch {
+      setLearningMessage('RAG migration preview could not be completed')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
+
+  async function runLearningRagMigration() {
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const job = await api.migrateLearningRag({
+        profile_id: selectedEmbeddingProfileId || undefined,
+        target_collection: ragTargetCollection.trim() || ragMigrationPreview?.target_collection,
+        recreate_collection: true,
+        activate_profile: true,
+        notes: `RAG migration requested from Learning Review by ${currentUser?.email ?? 'reviewer'}.`,
+      })
+      const [summary, profiles] = await Promise.all([api.learningSummary(), api.learningEmbeddingProfiles()])
+      setLearningSummary(summary)
+      setLearningEmbeddingProfiles(profiles)
+      setRagMigrationPreview(null)
+      const chunkCount = Number(job.output_refs?.result && (job.output_refs.result as { chunk_count?: number }).chunk_count)
+      setLearningMessage(`Migrated RAG vectors with ${Number.isFinite(chunkCount) ? chunkCount : 0} chunk(s); job ${job.status}`)
+    } catch {
+      setLearningMessage('RAG migration could not be completed')
     } finally {
       setLearningLoading(false)
     }
@@ -2452,6 +2537,11 @@ export function App() {
     learningDeploymentRecords.find((deployment) => deployment.model_version_id === modelId && isVerifiedDeployment(deployment))
   const passedEvaluationForModel = (modelId: string) =>
     learningEvaluations.find((run) => run.model_version_id === modelId && run.passed)
+  const selectedEmbeddingProfile = learningEmbeddingProfiles.find((profile) => profile.id === selectedEmbeddingProfileId)
+  const activeEmbeddingProfile = learningEmbeddingProfiles.find((profile) => profile.status === 'active')
+  const vectorStore = learningSummary?.vector_store
+  const vectorProfile = vectorStore?.embedding_profile
+  const ragMigrationNeeded = Boolean(vectorStore?.migration_required || (selectedEmbeddingProfile && activeEmbeddingProfile && selectedEmbeddingProfile.id !== activeEmbeddingProfile.id))
 
   async function promoteLearningAdapter(model: LearningModelVersion) {
     const evaluation = passedEvaluationForModel(model.id)
@@ -2584,31 +2674,104 @@ export function App() {
         ))}
       </div>
       <div className="vectorStoreStatus">
-        <span>
-          <strong>RAG vector DB</strong>
-          <small>
-            {learningSummary?.vector_store?.store ?? 'unknown'} · {learningSummary?.vector_store?.state ?? 'not checked'}
-          </small>
-        </span>
-        <span>
-          <small>Collection</small>
-          <strong>{learningSummary?.vector_store?.collection ?? 'local fallback'}</strong>
-        </span>
-        <span>
-          <small>Embedding</small>
-          <strong>
-            {String(learningSummary?.vector_store?.embedding_profile?.model ?? 'unknown')} · v
-            {String(learningSummary?.vector_store?.embedding_profile?.version ?? 'unknown')}
-          </strong>
-        </span>
-        <span>
-          <small>Migration</small>
-          <strong>{learningSummary?.vector_store?.migration_required ? 'Required' : 'Current'}</strong>
-        </span>
-        <button className="textButton" onClick={reindexLearningRag} disabled={learningLoading}>
-          {learningLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Database size={16} />}
-          Reindex RAG
-        </button>
+        <div className="vectorStoreFacts">
+          <span>
+            <strong>RAG vector DB</strong>
+            <small>
+              {vectorStore?.store ?? 'unknown'} · {vectorStore?.state ?? 'not checked'}
+            </small>
+          </span>
+          <span>
+            <small>Collection</small>
+            <strong>{vectorStore?.collection ?? 'local fallback'}</strong>
+          </span>
+          <span>
+            <small>Points</small>
+            <strong>{String(vectorStore?.points_count ?? 'not checked')}</strong>
+          </span>
+          <span>
+            <small>Vector shape</small>
+            <strong>
+              {String(vectorStore?.collection_vector_size ?? 'unknown')} · {String(vectorStore?.collection_distance ?? vectorProfile?.distance ?? 'unknown')}
+            </strong>
+          </span>
+          <span>
+            <small>Active embedding</small>
+            <strong>
+              {String(vectorProfile?.provider ?? 'unknown')} · {String(vectorProfile?.model ?? 'unknown')} · v
+              {String(vectorProfile?.version ?? 'unknown')}
+            </strong>
+          </span>
+          <span>
+            <small>Profile dimensions</small>
+            <strong>{String(vectorProfile?.dimensions ?? 'unknown')}</strong>
+          </span>
+          <span>
+            <small>Migration</small>
+            <strong>{ragMigrationNeeded ? 'Required' : 'Current'}</strong>
+          </span>
+        </div>
+        {(vectorProfile?.warning || vectorStore?.error || (vectorStore?.migration_reasons ?? []).length > 0) && (
+          <div className="migrationNotice">
+            {vectorProfile?.warning && <p>{String(vectorProfile.warning)}</p>}
+            {vectorStore?.error && <p>{String(vectorStore.error)}</p>}
+            {(vectorStore?.migration_reasons ?? []).map((reason) => (
+              <p key={reason}>{reason}</p>
+            ))}
+          </div>
+        )}
+        <div className="ragControls">
+          <label className="field">
+            <span>Embedding profile</span>
+            <select value={selectedEmbeddingProfileId} onChange={(event) => setSelectedEmbeddingProfileId(event.target.value)}>
+              {learningEmbeddingProfiles.map((profile) => (
+                <option value={profile.id} key={profile.id}>
+                  {profile.provider} · {profile.model} · v{profile.version} · {profile.dimensions}d {profile.status === 'active' ? '(active)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Target collection</span>
+            <input value={ragTargetCollection} onChange={(event) => setRagTargetCollection(event.target.value)} />
+          </label>
+          <button className="outlineButton" onClick={activateSelectedEmbeddingProfile} disabled={learningLoading || !selectedEmbeddingProfileId || selectedEmbeddingProfileId === activeEmbeddingProfile?.id}>
+            Activate profile
+          </button>
+          <button className="outlineButton" onClick={previewLearningRagMigration} disabled={learningLoading || !selectedEmbeddingProfileId}>
+            Preview migration
+          </button>
+          <button className="textButton" onClick={runLearningRagMigration} disabled={learningLoading || !selectedEmbeddingProfileId}>
+            {learningLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Database size={16} />}
+            Run Qdrant migration
+          </button>
+          <button className="subtleButton" onClick={reindexLearningRag} disabled={learningLoading || ragMigrationNeeded}>
+            Reindex current profile
+          </button>
+        </div>
+        {ragMigrationPreview && (
+          <div className="migrationPreview">
+            <span>
+              <strong>Migration preview</strong>
+              <small>
+                {String(ragMigrationPreview.active_profile.model ?? 'active')} → {String(ragMigrationPreview.target_profile.model ?? 'target')}
+              </small>
+            </span>
+            <span>
+              <small>Target collection</small>
+              <strong>{ragMigrationPreview.target_collection}</strong>
+            </span>
+            <span>
+              <small>Profile activation</small>
+              <strong>{ragMigrationPreview.will_activate_profile ? 'Yes' : 'No'}</strong>
+            </span>
+            <div>
+              {ragMigrationPreview.reasons.map((reason) => (
+                <p key={reason}>{reason}</p>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div className="servingModelStatus">
         <span>
