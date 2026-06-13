@@ -54,6 +54,10 @@ done
 
 ## Verification Hooks
 
+Before split-safe implementation or review work:
+
+- Spawn independent agents in parallel whenever the tool is available. Use them for bounded audits, implementation slices, or validation passes, while keeping final integration and verification in the main thread.
+
 Before backend changes:
 
 - Inspect whether the change affects API routes, Pydantic schemas, SQLite schema, repository methods, retrieval, or frontend API types.
@@ -86,6 +90,7 @@ cd frontend && npm run test:e2e
 Validation procedure:
 
 - Use Playwright as the default UI validation tool because it supports repeatable browser flows, DOM/layout assertions, screenshots, traces, and video on failure.
+- Run Playwright E2E outside the sandbox/elevated host context by default. On this macOS environment, sandboxed Chromium launch fails on Mach port permissions, so do not spend a run on the sandboxed path unless the host setup changes.
 - Keep Playwright tests focused on the changed workflow; mock slow LLM streaming endpoints inside the test when validating scroll, spinner, formatting, or layout behavior.
 - Prefer assertions for visible text, role-specific controls, scroll position, viewport position, and absence of horizontal overflow before relying on screenshots.
 - Use screenshots/video/trace as local failure artifacts for diagnosis, not as pull request description content.

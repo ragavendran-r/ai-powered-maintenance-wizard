@@ -24,6 +24,12 @@ Implement a working AI-powered Maintenance Wizard prototype in `/Users/ragaven/w
 
 ## Latest Session Update
 
+- Continued G-016 with learning artifact lifecycle hardening. Added DB-backed cleanup preview/apply support for registered `learning_artifacts`, protected active/candidate/promoted model and verified deployment artifact references, kept non-filesystem stores read-only, role-gated destructive cleanup to admin/reliability-engineer with `LEARNING_ARTIFACT_CLEANUP_ENABLED=true`, and audited cleanup attempts as learning jobs.
+- Added Learning Review artifact-store retention visibility and a dry-run cleanup preview showing eligible, protected, deleted, and warning states without exposing browser-side deletion controls.
+- Tightened durable collaboration rules so split-safe work uses parallel agents whenever the tool is available, not only for large tasks.
+- Updated README, RAG+PEFT+NATS design notes, and the goal tracker to reflect registry-first artifact cleanup and remaining object-bucket lifecycle/access policy work.
+- Verification passed for the artifact lifecycle slice: `PYTHONPYCACHEPREFIX=.pycache python3 -m compileall backend/app`, `backend/.venv/bin/pytest backend/tests/test_api.py -q` with 88 tests, `npm --prefix frontend run test` with 17 tests, `npm --prefix frontend run build`, `git diff --check`, and `npm --prefix frontend run test:e2e` after browser-launch escalation. The local stack health check passed with backend, frontend, NATS, Qdrant, and the learning worker running.
+
 - Continued G-016 with adapter runtime deployment tracking and promotion gating. Schema version 13 adds `learning_model_deployments`; Learning Review can queue adapter deployment jobs; the learning worker verifies manual/OpenAI-compatible/Ollama runtime deployments; adapter promotion now requires a verified runtime deployment when the model has an adapter artifact; and active real LLM serving resolution prefers verified deployment metadata such as served model, runtime provider, health status, and base URL.
 - Updated Learning Review UI/API types to display runtime deployments, deploy candidates, and show verified deployment details in the serving-model status panel.
 - Updated README, architecture, RAG+PEFT+NATS design, and goal tracker to reflect in-app runtime deployment tracking/gating while keeping environment-specific LM Studio/Ollama loader integration as remaining production work.

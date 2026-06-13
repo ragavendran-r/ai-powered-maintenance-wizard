@@ -12,7 +12,7 @@ Use this file for durable product and engineering rules. Use `docs/hooks.md` for
 
 ## Verification
 
-- For sizable tasks, spawn independent agents in parallel whenever the tool is available and the work can be split safely. Keep the main thread responsible for integrating, testing, documenting, and resolving conflicts from agent output.
+- Spawn independent agents in parallel whenever the tool is available and the work can be split safely. Keep the main thread responsible for integrating, testing, documenting, and resolving conflicts from agent output.
 - Backend changes require:
   - `PYTHONPYCACHEPREFIX=.pycache python3 -m compileall backend/app`
   - `cd backend && .venv/bin/pytest`
@@ -22,6 +22,7 @@ Use this file for durable product and engineering rules. Use `docs/hooks.md` for
 - UI layout, streaming, navigation, role visibility, or interaction changes require Playwright validation against the running local app:
   - `cd frontend && npm run test:e2e`
   - Prefer a focused Playwright spec for the changed workflow; keep screenshots, traces, and video as local failure artifacts rather than tracked files.
+  - Run Playwright E2E outside the sandbox/elevated host context by default because sandboxed Chromium launch is blocked on this macOS environment.
 - Documentation-only changes require a link/path sanity check for touched docs.
 - Update `docs/progress.md` at the end of each implementation session with completed work, checks run, next steps, blockers, and decisions.
 - Send desktop and mobile notifications when a requested task is complete.

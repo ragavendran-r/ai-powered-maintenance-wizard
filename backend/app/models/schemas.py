@@ -642,6 +642,7 @@ LearningJobType = Literal[
     "adapter_registered",
     "model_promotion",
     "rag_reindex",
+    "artifact_cleanup",
 ]
 LearningJobStatus = Literal["queued", "published", "running", "completed", "failed"]
 
@@ -669,6 +670,26 @@ class LearningArtifact(BaseModel):
     content_hash: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str
+
+
+class LearningArtifactCleanupRequest(BaseModel):
+    dry_run: bool = True
+    notes: Optional[str] = None
+
+
+class LearningArtifactCleanupResult(BaseModel):
+    dry_run: bool
+    cleanup_enabled: bool
+    deletion_allowed: bool
+    store: str
+    retention: dict[str, Any] = Field(default_factory=dict)
+    expired_count: int = 0
+    protected_count: int = 0
+    deleted_count: int = 0
+    candidates: list[dict[str, Any]] = []
+    protected: list[dict[str, Any]] = []
+    deleted_paths: list[str] = []
+    errors: list[str] = []
 
 
 class LearningPeftJobCreateRequest(BaseModel):
