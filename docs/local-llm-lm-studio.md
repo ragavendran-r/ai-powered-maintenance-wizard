@@ -139,10 +139,10 @@ Local 7B inference can be slow when the app asks for long responses, sends large
 - Keep LM Studio context length at `4096` unless a specific workflow needs more retrieved context.
 - Keep `.env` at `LLM_TIMEOUT_SECONDS=15`, `LLM_STREAM_TIMEOUT_SECONDS=60`, `LLM_STRUCTURED_MAX_TOKENS=300`, and `LLM_TEXT_MAX_TOKENS=600`.
 - Keep retrieved context small; Neo uses only the most relevant evidence snippets for general questions.
-- Neo, Smith, and Trinity stream chat answers from their `/stream` endpoints, so the dashboard can render tokens as Qwen produces them instead of waiting for the whole answer.
+- Neo streams dashboard, technician, and supervisor chat answers from its `/stream` endpoints, so the UI can render tokens as Qwen produces them instead of waiting for the whole answer.
 - Neo asks Qwen to finish complete answers within the configured text budget, which avoids half-rendered sections such as an orphaned heading at the end of the chat bubble.
 
-The backend still falls back deterministically if the local model misses the configured timeout. Request/response calls use `LLM_TIMEOUT_SECONDS`; streaming chat endpoints use `LLM_STREAM_TIMEOUT_SECONDS` so a local model can take longer to emit the first token without losing the live stream. Diagnosis, document intelligence, and other structured JSON routes remain request/response because they need a complete valid JSON object before the backend can validate and merge them with app data. Smith and Trinity stream the visible chat text first, then send a final structured event with app-owned fields such as problem code, completion summary, follow-up actions, and draft follow-up work.
+The backend still falls back deterministically if the local model misses the configured timeout. Request/response calls use `LLM_TIMEOUT_SECONDS`; streaming chat endpoints use `LLM_STREAM_TIMEOUT_SECONDS` so a local model can take longer to emit the first token without losing the live stream. Diagnosis, document intelligence, and other structured JSON routes remain request/response because they need a complete valid JSON object before the backend can validate and merge them with app data. Neo work-order modes stream the visible chat text first, then send a final structured event with app-owned fields such as problem code, completion summary, follow-up actions, and draft follow-up work.
 
 The response should contain `choices[0].message.content` as valid JSON with:
 
@@ -166,8 +166,8 @@ Then verify:
 - Frontend responds at `http://127.0.0.1:5173`.
 - Login works with `admin@plant.local` and `DemoPass123!`.
 - Engineer Query for `RM-DRIVE-01` returns a recommendation badge such as `Live LLM · openai`.
-- Login as `technician@plant.local`, open Work Orders, and use Smith's chat `Send` button. The response should show `Live LLM · openai`.
-- Login as `supervisor@plant.local`, open Work Orders, and use Trinity's chat `Send` button. The response should show `Live LLM · openai`.
+- Login as `technician@plant.local`, open Work Orders, and use Neo's technician chat `Send` button. The response should show `Live LLM · openai`.
+- Login as `supervisor@plant.local`, open Work Orders, and use Neo's supervisor chat `Send` button. The response should show `Live LLM · openai`.
 
 The backend validates every model response with Pydantic. If LM Studio is stopped, times out, or returns malformed JSON, the app falls back to deterministic local reasoning. The full Engineer Query path can invoke several optional enrichment calls, so it is slower than the focused technician and supervisor assistant routes on a local 7B model.
 

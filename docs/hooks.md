@@ -77,6 +77,20 @@ After frontend changes:
 cd frontend && npm run test && npm run build
 ```
 
+For UI layout, streaming, navigation, role visibility, or interaction changes:
+
+```bash
+cd frontend && npm run test:e2e
+```
+
+Validation procedure:
+
+- Use Playwright as the default UI validation tool because it supports repeatable browser flows, DOM/layout assertions, screenshots, traces, and video on failure.
+- Keep Playwright tests focused on the changed workflow; mock slow LLM streaming endpoints inside the test when validating scroll, spinner, formatting, or layout behavior.
+- Prefer assertions for visible text, role-specific controls, scroll position, viewport position, and absence of horizontal overflow before relying on screenshots.
+- Use screenshots/video/trace as local failure artifacts for diagnosis, not as pull request description content.
+- When a faster or more reliable UI validation technique is found, update this procedure and the relevant Playwright spec before marking the task complete.
+
 After docs or progress changes:
 
 - Re-read touched docs for stale paths, commands, links, and status language.

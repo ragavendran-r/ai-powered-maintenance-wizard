@@ -13,8 +13,8 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 
 ## Current Goal State
 
-- Active implementation goal: none.
-- Latest completed tracked goal: G-014 local Kubernetes deployment script.
+- Active implementation goal: G-016 production Qdrant-backed RAG + PEFT + NATS continuous-learning and tuning design.
+- Latest completed tracked goal: G-015 LLM/SLM leverage for analytics and retrieval.
 - Branch workflow rule: work intended for `main` must happen on a feature branch and merge through a PR.
 
 ## Goal Index
@@ -35,6 +35,8 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 | G-012 | Enable NATS JetStream IoT streaming ingestion. | Complete | Added optional durable NATS JetStream ingestion, validation, DLQ handling, `/api/streaming/status`, frontend status, tests, docs, and local stack runner. | PR #11; PR #12; PR #13; `docs/iot-streaming-ingestion-plan.md`; `scripts/run-local-stack.sh` |
 | G-013 | Implement user login and role-based access control. | Complete | Added local SQLite users, bcrypt password hashes, JWT login, endpoint role guards, React login/session handling, role-gated navigation/actions, admin user management, tests, and docs. | `backend/app/core/auth.py`; `frontend/src/App.tsx`; `docs/auth-authorization-plan.md` |
 | G-014 | Create a local Kubernetes deployment script. | Complete | Added and live-verified a Kind-based script that installs Kind when missing, creates a local cluster, deploys NATS, backend, and frontend, reports status, and deletes the cluster/runtime files. | `scripts/run-local-k8s.sh`; `README.md`; live Kind deployment |
+| G-015 | Add LLM/SLM leverage for analytics and retrieval. | Complete | Added structured LLM contracts, document intelligence extraction, label normalization, LLM reranking, anomaly/prediction explanations, and UI/API evidence display while preserving deterministic fallback behavior. | `backend/app/services/retrieval.py`; `backend/app/services/risk.py`; `backend/app/services/recommendations.py`; `README.md`; `docs/architecture.md` |
+| G-016 | Build production-ready Qdrant-backed RAG + PEFT + NATS continuous learning and tuning. | In Progress | Current design now explicitly combines Qdrant-backed RAG, LLM-as-a-Judge gates, PEFT adapter tuning, NATS-backed async jobs, evaluation/version controls, artifact storage, and promotion gates. Implementation has synchronous local review/export controls, persisted learning jobs, PEFT queueing, async learning enabled by default, Qdrant as the production vector DB, a durable learning worker, local PEFT artifact preparation, artifact hashes, and documented production worker design. | `docs/rag-peft-nats-learning-architecture.md`; `backend/app/services/learning.py`; `backend/app/services/learning_worker.py`; `backend/app/services/vector_store.py`; `frontend/src/App.tsx`; `scripts/export-learning-dataset.py` |
 
 ## Detailed Goal Notes
 
@@ -385,6 +387,48 @@ Verification recorded:
 - `cd frontend && npm run build` passed.
 
 Status: `Complete`
+
+### G-016: Production RAG + PEFT + NATS Continuous Learning
+
+Requested outcome:
+
+- Continuously improve Neo, Morpheus, Smith, and recommendation behavior from interactions, maintenance history, work-order outcomes, human feedback, ingested documents, labels, and maintenance results.
+- Use LLM-as-a-Judge scoring to decide whether content is worthy of training or tuning.
+- Modify the active design goal to explicitly include Qdrant-backed RAG + PEFT + NATS and make the design production ready.
+
+Production design:
+
+- RAG is the immediate improvement path. Only reviewer-approved, judge-qualified examples can be reused as retrieval or prompt context; Qdrant is the production vector database for document chunks and approved knowledge.
+- PEFT is the controlled tuning path. Approved immutable JSONL snapshots can feed offline/local LoRA or QLoRA adapter jobs for Qwen/SLM runtimes.
+- NATS JetStream is the async job backbone for judge, dataset, evaluation, and PEFT jobs so long-running work does not block FastAPI requests.
+- Async learning is enabled by default for production-like runs and local stack scripts.
+- LLM-as-a-Judge is advisory quality scoring only. Human approval, role authorization, deterministic workflow rules, and schema validation remain authoritative.
+- Dataset snapshots, model versions, prompt versions, evaluation runs, artifact paths, and adapter promotion state must be persisted for auditability and rollback.
+- Production deployment should move learning state to Postgres and large JSONL/model artifacts to object storage.
+
+Delivered so far:
+
+- Candidate learning examples from feedback, labels, completed work orders, approved assistant interactions, and documents.
+- LLM-as-a-Judge scoring with deterministic fallback and reviewer approval controls.
+- Judge-qualified JSONL dataset export for local/offline PEFT preparation.
+- Model-version registration and evaluation-run APIs for adapter candidate tracking.
+- Learning Review UI for example review, approval, dataset snapshots, adapter registration, and evaluation runs.
+- Persisted `learning_jobs` records for refresh, judge, dataset, evaluation, adapter registration, and PEFT tuning requests.
+- PEFT tuning job queue API and Learning Review control, with optional NATS publication when async learning is enabled.
+- Qdrant vector store integration for indexed document chunks, retrieval-first lookup, Learning Review vector-store status, and local stack/local Kubernetes deployment.
+- Durable learning worker process for NATS-backed refresh, judge, dataset, evaluation, and PEFT preparation jobs.
+- `learning_artifacts` registry with content hashes for worker-produced PEFT dataset and training-manifest artifacts.
+- Production RAG + PEFT + NATS design document with NATS subjects, worker responsibilities, persistence, quality gates, observability, and rollout sequence.
+
+Remaining production work:
+
+- Add object storage integration for snapshots, training logs, and adapter outputs.
+- Add PEFT job execution or orchestrator integration for local Qwen/SLM LoRA or QLoRA training beyond the prepared artifact handoff.
+- Add adapter promotion and rollback controls gated by evaluation results and reviewer approval.
+- Add production embedding model selection/versioning and Qdrant collection migration controls.
+- Migrate learning state from SQLite prototype tables to Postgres for multi-worker production use.
+
+Status: `In Progress`
 
 ## Maintenance Rules For This File
 

@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Optional
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -26,6 +26,8 @@ from app.core.security import create_access_token, verify_password
 from app.data import repository
 from app.data.database import initialize_database
 from app.models.schemas import (
+    AssetDetail,
+    AssetListItem,
     ChatRequest,
     ChatResponse,
     DashboardSummary,
@@ -34,6 +36,20 @@ from app.models.schemas import (
     FeedbackRequest,
     FeedbackResponse,
     HealthSummary,
+    LearningDatasetCreateRequest,
+    LearningDatasetSnapshot,
+    LearningEvaluationCreateRequest,
+    LearningEvaluationRun,
+    LearningExample,
+    LearningExampleUpdateRequest,
+    LearningJob,
+    LearningModelPromotion,
+    LearningModelPromotionRequest,
+    LearningModelRollbackRequest,
+    LearningModelVersion,
+    LearningModelVersionCreateRequest,
+    LearningPeftJobCreateRequest,
+    LearningSummary,
     MaintenanceLabelsResponse,
     LoginRequest,
     NeoChatRequest,
@@ -55,11 +71,28 @@ from app.models.schemas import (
     WorkOrderLogRequest,
     WorkOrderUpdateRequest,
 )
+from app.services.assets import get_asset_detail as load_asset_detail
+from app.services.assets import list_assets as load_assets
+from app.services.assets import stream_asset_reliability_prediction
 from app.services.document_intelligence import analyze_documents, document_intelligence
 from app.services.iot_streaming import StreamingIngestionService
+from app.services.learning import (
+    create_dataset_snapshot,
+    learning_summary,
+    promote_model_version,
+    queue_peft_tuning_job,
+    record_learning_job,
+    record_assistant_interaction,
+    refresh_learning_examples,
+    register_model_version,
+    rejudge_learning_example,
+    rollback_model_version,
+    run_learning_evaluation,
+    set_example_approval,
+)
 from app.services.maintenance_labeling import label_feedback, label_maintenance_event, label_maintenance_history, stored_labels
-from app.services.neo_assistant import neo_assistance, stream_neo_assistance
-from app.services.recommendations import generate_recommendation
+from app.services.neo_assistant import neo_assistance, neo_welcome, stream_neo_assistance
+from app.services.recommendations import generate_recommendation, stream_recommendation
 from app.services.document_parser import parse_upload_to_document
 from app.services.reports import recommendation_to_markdown
 from app.services.retrieval import retrieve_evidence
@@ -71,6 +104,9 @@ from app.services.work_order_assistant import (
     supervisor_assistance,
     technician_assistance,
 )
+
+
+LEARNING_REVIEW_ROLES = ("admin", "maintenance_engineer", "reliability_engineer")
 
 
 @asynccontextmanager
@@ -252,6 +288,33 @@ def get_equipment():
     return equipment_records()
 
 
+@app.get("/api/assets", response_model=list[AssetListItem], dependencies=[Depends(require_roles(*READ_ROLES))])
+def list_assets():
+    return load_assets()
+
+
+@app.get("/api/assets/{equipment_id}", response_model=AssetDetail, dependencies=[Depends(require_roles(*READ_ROLES))])
+def get_asset_detail(equipment_id: str, sections: str = Query(default="all")):
+    requested_sections = {section.strip() for section in sections.split(",") if section.strip()}
+    return load_asset_detail(equipment_id, requested_sections)
+
+
+@app.get("/api/assets/{equipment_id}/reliability/stream", dependencies=[Depends(require_roles(*READ_ROLES))])
+def asset_reliability_prediction_stream(equipment_id: str):
+    def events():
+        for event in stream_asset_reliability_prediction(equipment_id):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get(
     "/api/equipment/{equipment_id}/health",
     response_model=HealthSummary,
@@ -388,17 +451,23 @@ def add_work_order_log(work_order_id: str, request: WorkOrderLogRequest):
     response_model=TechnicianAssistantResponse,
     dependencies=[Depends(require_roles(*TECHNICIAN_ASSISTANT_ROLES))],
 )
-def technician_assist(request: TechnicianAssistantRequest):
-    return technician_assistance(request)
+def technician_assist(
+    request: TechnicianAssistantRequest,
+    current_user: UserPublic = Depends(require_roles(*TECHNICIAN_ASSISTANT_ROLES)),
+):
+    return technician_assistance(request, current_user)
 
 
 @app.post(
     "/api/work-orders/technician-assist/stream",
     dependencies=[Depends(require_roles(*TECHNICIAN_ASSISTANT_ROLES))],
 )
-def technician_assist_stream(request: TechnicianAssistantRequest):
+def technician_assist_stream(
+    request: TechnicianAssistantRequest,
+    current_user: UserPublic = Depends(require_roles(*TECHNICIAN_ASSISTANT_ROLES)),
+):
     def events():
-        for event in stream_technician_assistance(request):
+        for event in stream_technician_assistance(request, current_user):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(
@@ -416,17 +485,23 @@ def technician_assist_stream(request: TechnicianAssistantRequest):
     response_model=SupervisorAssistantResponse,
     dependencies=[Depends(require_roles(*SUPERVISOR_ASSISTANT_ROLES))],
 )
-def supervisor_assist(request: SupervisorAssistantRequest):
-    return supervisor_assistance(request)
+def supervisor_assist(
+    request: SupervisorAssistantRequest,
+    current_user: UserPublic = Depends(require_roles(*SUPERVISOR_ASSISTANT_ROLES)),
+):
+    return supervisor_assistance(request, current_user)
 
 
 @app.post(
     "/api/work-orders/supervisor-assist/stream",
     dependencies=[Depends(require_roles(*SUPERVISOR_ASSISTANT_ROLES))],
 )
-def supervisor_assist_stream(request: SupervisorAssistantRequest):
+def supervisor_assist_stream(
+    request: SupervisorAssistantRequest,
+    current_user: UserPublic = Depends(require_roles(*SUPERVISOR_ASSISTANT_ROLES)),
+):
     def events():
-        for event in stream_supervisor_assistance(request):
+        for event in stream_supervisor_assistance(request, current_user):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(
@@ -445,6 +520,32 @@ def neo_chat(
     current_user: UserPublic = Depends(require_roles(*READ_ROLES)),
 ):
     return neo_assistance(request, current_user)
+
+
+@app.get("/api/neo/welcome", response_model=NeoChatResponse)
+def neo_role_welcome(current_user: UserPublic = Depends(require_roles(*READ_ROLES))):
+    response = neo_welcome(current_user)
+    record_assistant_interaction(
+        assistant="neo",
+        interaction_type="role_aware_welcome",
+        current_user=current_user,
+        prompt=f"Load role-aware welcome for {current_user.role}",
+        response=response.answer,
+        provider=response.provider,
+        used_live_provider=response.used_live_provider,
+        source_refs=[
+            {
+                "source_type": "neo_table",
+                "source_id": response.table.title,
+                "title": response.table.title,
+                "rows": len(response.table.rows),
+            }
+        ]
+        if response.table
+        else [],
+        outcome_status=response.action.status if response.action else None,
+    )
+    return response
 
 
 @app.post("/api/neo/chat/stream")
@@ -483,6 +584,25 @@ def diagnose(request: DiagnosisRequest):
     return generate_recommendation(request)
 
 
+@app.post("/api/diagnose/stream", dependencies=[Depends(require_roles(*DECISION_ROLES))])
+def diagnose_stream(request: DiagnosisRequest):
+    def events():
+        try:
+            for event in stream_recommendation(request):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Morpheus could not complete diagnosis: {exc}'})}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.post("/api/predict", dependencies=[Depends(require_roles(*DECISION_ROLES))])
 def predict(request: PredictionRequest):
     return predict_failure(request.equipment_id)
@@ -497,11 +617,211 @@ def store_feedback(recommendation_id: str, feedback: FeedbackRequest):
     repository.save_feedback(recommendation_id, feedback.model_dump())
     saved_feedback = repository.list_feedback(feedback.equipment_id)[0] if feedback.equipment_id else repository.list_feedback()[0]
     label_feedback(saved_feedback)
+    refresh_learning_examples(include_documents=False, include_interactions=False)
     return FeedbackResponse(
         recommendation_id=recommendation_id,
         stored=True,
         message="Feedback stored for future recommendation context.",
     )
+
+
+@app.get(
+    "/api/learning/summary",
+    response_model=LearningSummary,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def get_learning_summary():
+    return learning_summary()
+
+
+@app.post(
+    "/api/learning/examples/refresh",
+    response_model=list[LearningExample],
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def refresh_learning_dataset_examples(current_user: UserPublic = Depends(get_current_user)):
+    examples = refresh_learning_examples()
+    record_learning_job(
+        "refresh_examples",
+        current_user,
+        input_refs={"include_documents": True, "include_interactions": True},
+        output_refs={"example_count": len(examples)},
+        status="completed",
+    )
+    return examples
+
+
+@app.get(
+    "/api/learning/examples",
+    response_model=list[LearningExample],
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_dataset_examples(approved_only: Optional[bool] = None):
+    return repository.list_learning_examples(approved_only=approved_only, limit=200)
+
+
+@app.patch(
+    "/api/learning/examples/{example_id}",
+    response_model=LearningExample,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def update_learning_example(example_id: str, request: LearningExampleUpdateRequest):
+    example = set_example_approval(example_id, request.approved)
+    if not example:
+        raise HTTPException(status_code=404, detail="Learning example not found")
+    return example
+
+
+@app.post(
+    "/api/learning/examples/{example_id}/judge",
+    response_model=LearningExample,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def judge_learning_dataset_example(example_id: str, current_user: UserPublic = Depends(get_current_user)):
+    example = rejudge_learning_example(example_id)
+    if not example:
+        raise HTTPException(status_code=404, detail="Learning example not found")
+    record_learning_job(
+        "judge_example",
+        current_user,
+        input_refs={"example_id": example_id},
+        output_refs={
+            "example_id": example["id"],
+            "judge_score": example["judge_score"],
+            "judge_label": example["judge_label"],
+        },
+        status="completed",
+    )
+    return example
+
+
+@app.post(
+    "/api/learning/datasets",
+    response_model=LearningDatasetSnapshot,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def create_learning_dataset(request: LearningDatasetCreateRequest, current_user: UserPublic = Depends(get_current_user)):
+    return create_dataset_snapshot(request, current_user)
+
+
+@app.get(
+    "/api/learning/datasets",
+    response_model=list[LearningDatasetSnapshot],
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_datasets():
+    return repository.list_learning_dataset_snapshots(limit=20)
+
+
+@app.get("/api/learning/datasets/{dataset_id}/jsonl", dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))])
+def learning_dataset_jsonl(dataset_id: str):
+    snapshot = repository.get_learning_dataset_snapshot(dataset_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Learning dataset not found")
+    return Response(
+        content=snapshot["jsonl_content"],
+        media_type="application/jsonl",
+        headers={"Content-Disposition": f'attachment; filename="{dataset_id}.jsonl"'},
+    )
+
+
+@app.post(
+    "/api/learning/model-versions",
+    response_model=LearningModelVersion,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def create_learning_model_version(
+    request: LearningModelVersionCreateRequest,
+    current_user: UserPublic = Depends(get_current_user),
+):
+    return register_model_version(request, current_user)
+
+
+@app.post(
+    "/api/learning/model-versions/promote",
+    response_model=LearningModelPromotion,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def promote_learning_model_version(
+    request: LearningModelPromotionRequest,
+    current_user: UserPublic = Depends(get_current_user),
+):
+    try:
+        return promote_model_version(request, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/learning/model-versions/rollback",
+    response_model=LearningModelPromotion,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def rollback_learning_model_version(
+    request: LearningModelRollbackRequest,
+    current_user: UserPublic = Depends(get_current_user),
+):
+    try:
+        return rollback_model_version(request, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/learning/model-promotions",
+    response_model=list[LearningModelPromotion],
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_model_promotions():
+    return repository.list_learning_model_promotions(limit=50)
+
+
+@app.post(
+    "/api/learning/evaluations",
+    response_model=LearningEvaluationRun,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def create_learning_evaluation(
+    request: LearningEvaluationCreateRequest,
+    current_user: UserPublic = Depends(get_current_user),
+):
+    try:
+        return run_learning_evaluation(request, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/learning/evaluations",
+    response_model=list[LearningEvaluationRun],
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_evaluations():
+    return repository.list_learning_evaluation_runs(limit=20)
+
+
+@app.get(
+    "/api/learning/jobs",
+    response_model=list[LearningJob],
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_jobs():
+    return repository.list_learning_jobs(limit=50)
+
+
+@app.post(
+    "/api/learning/jobs/peft",
+    response_model=LearningJob,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def create_learning_peft_job(
+    request: LearningPeftJobCreateRequest,
+    current_user: UserPublic = Depends(get_current_user),
+):
+    try:
+        return queue_peft_tuning_job(request, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get(

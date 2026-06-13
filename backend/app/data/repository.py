@@ -8,6 +8,7 @@ import uuid
 from app.core.security import hash_password
 from app.data.database import connect, initialize_database
 from app.services.vector_index import build_chunks_for_document
+from app.services.vector_store import index_document_chunks
 
 
 _READY = False
@@ -30,6 +31,73 @@ def list_equipment() -> list[dict[str, Any]]:
 
 def get_equipment(equipment_id: str) -> Optional[dict[str, Any]]:
     return _fetch_one("SELECT * FROM equipment WHERE id = ?", (equipment_id,))
+
+
+def list_asset_profiles() -> list[dict[str, Any]]:
+    return _fetch_all(
+        """
+        SELECT e.*, p.*
+        FROM equipment e
+        JOIN asset_profiles p ON p.equipment_id = e.id
+        ORDER BY e.criticality DESC, e.name ASC
+        """
+    )
+
+
+def get_asset_profile(equipment_id: str) -> Optional[dict[str, Any]]:
+    return _fetch_one(
+        """
+        SELECT e.*, p.*
+        FROM equipment e
+        JOIN asset_profiles p ON p.equipment_id = e.id
+        WHERE e.id = ?
+        """,
+        (equipment_id,),
+    )
+
+
+def list_asset_metric_snapshots(equipment_id: str) -> list[dict[str, Any]]:
+    return _fetch_all(
+        """
+        SELECT * FROM asset_metric_snapshots
+        WHERE equipment_id = ?
+        ORDER BY sort_order ASC, label ASC
+        """,
+        (equipment_id,),
+    )
+
+
+def list_asset_recommendations(equipment_id: str) -> list[dict[str, Any]]:
+    return _fetch_all(
+        """
+        SELECT * FROM asset_recommendations
+        WHERE equipment_id = ?
+        ORDER BY priority ASC, sort_order ASC
+        """,
+        (equipment_id,),
+    )
+
+
+def list_asset_subsystems(equipment_id: str) -> list[dict[str, Any]]:
+    return _fetch_all(
+        """
+        SELECT * FROM asset_subsystems
+        WHERE equipment_id = ?
+        ORDER BY sort_order ASC, name ASC
+        """,
+        (equipment_id,),
+    )
+
+
+def list_asset_reliability_metrics(equipment_id: str) -> list[dict[str, Any]]:
+    return _fetch_all(
+        """
+        SELECT * FROM asset_reliability_metrics
+        WHERE equipment_id = ?
+        ORDER BY sort_order ASC, metric_name ASC
+        """,
+        (equipment_id,),
+    )
 
 
 def list_alerts(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
@@ -255,6 +323,7 @@ def add_documents(documents: list[dict[str, Any]]) -> int:
     ensure_ready()
     if not documents:
         return 0
+    chunk_rows: list[dict[str, Any]] = []
     with connect() as connection:
         connection.executemany(
             """
@@ -277,7 +346,8 @@ def add_documents(documents: list[dict[str, Any]]) -> int:
                 for document in documents
             ],
         )
-        upsert_document_chunks(connection, documents)
+        chunk_rows = upsert_document_chunks(connection, documents)
+    index_document_chunks(chunk_rows)
     return len(documents)
 
 
@@ -348,12 +418,13 @@ def list_document_intelligence(equipment_id: Optional[str] = None) -> list[dict[
 def rebuild_document_chunks(connection: sqlite3.Connection) -> None:
     documents = [dict(row) for row in connection.execute("SELECT * FROM documents").fetchall()]
     connection.execute("DELETE FROM document_chunks")
-    upsert_document_chunks(connection, documents)
+    chunk_rows = upsert_document_chunks(connection, documents)
+    index_document_chunks(chunk_rows)
 
 
-def upsert_document_chunks(connection: sqlite3.Connection, documents: list[dict[str, Any]]) -> None:
+def upsert_document_chunks(connection: sqlite3.Connection, documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not documents:
-        return
+        return []
     chunk_rows: list[dict[str, Any]] = []
     for document in documents:
         connection.execute("DELETE FROM document_chunks WHERE document_id = ?", (document["id"],))
@@ -394,6 +465,7 @@ def upsert_document_chunks(connection: sqlite3.Connection, documents: list[dict[
             for chunk in chunk_rows
         ],
     )
+    return chunk_rows
 
 
 def add_records(payload: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
@@ -717,6 +789,679 @@ def save_streaming_message(
         )
 
 
+def save_learning_interaction(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    interaction_id = payload.get("id") or f"LINT-{uuid.uuid4().hex[:12].upper()}"
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO learning_interactions (
+                id,
+                assistant,
+                interaction_type,
+                user_id,
+                user_role,
+                equipment_id,
+                work_order_id,
+                prompt,
+                response,
+                provider,
+                used_live_provider,
+                prompt_version,
+                model_version,
+                source_refs,
+                approved_for_learning,
+                outcome_status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                response=excluded.response,
+                provider=excluded.provider,
+                used_live_provider=excluded.used_live_provider,
+                source_refs=excluded.source_refs,
+                approved_for_learning=excluded.approved_for_learning,
+                outcome_status=excluded.outcome_status
+            """,
+            (
+                interaction_id,
+                payload["assistant"],
+                payload["interaction_type"],
+                payload.get("user_id"),
+                payload.get("user_role"),
+                payload.get("equipment_id"),
+                payload.get("work_order_id"),
+                payload["prompt"],
+                payload["response"],
+                payload.get("provider") or "mock",
+                1 if payload.get("used_live_provider") else 0,
+                payload.get("prompt_version") or "default",
+                payload.get("model_version") or "model-local-qwen2.5-current",
+                _json_dump_any(payload.get("source_refs", [])),
+                1 if payload.get("approved_for_learning") else 0,
+                payload.get("outcome_status"),
+            ),
+        )
+    interaction = get_learning_interaction(interaction_id)
+    if not interaction:
+        raise RuntimeError("Learning interaction was not persisted")
+    return interaction
+
+
+def get_learning_interaction(interaction_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM learning_interactions WHERE id = ?", (interaction_id,))
+    return _decode_learning_interaction(row) if row else None
+
+
+def list_learning_interactions(
+    approved_only: Optional[bool] = None,
+    equipment_id: Optional[str] = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if approved_only is not None:
+        clauses.append("approved_for_learning = ?")
+        params.append(1 if approved_only else 0)
+    if equipment_id:
+        clauses.append("equipment_id = ?")
+        params.append(equipment_id)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    rows = _fetch_all(
+        f"""
+        SELECT * FROM learning_interactions
+        {where}
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    )
+    return [_decode_learning_interaction(row) for row in rows]
+
+
+def upsert_learning_example(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    example_id = payload.get("id") or f"LEX-{uuid.uuid4().hex[:12].upper()}"
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO learning_examples (
+                id,
+                source_type,
+                source_id,
+                equipment_id,
+                work_order_id,
+                instruction,
+                input_text,
+                expected_output,
+                metadata,
+                approved,
+                judge_score,
+                judge_label,
+                judge_rationale,
+                judge_provider,
+                judge_used_live_provider,
+                judged_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(source_type, source_id) DO UPDATE SET
+                equipment_id=excluded.equipment_id,
+                work_order_id=excluded.work_order_id,
+                instruction=excluded.instruction,
+                input_text=excluded.input_text,
+                expected_output=excluded.expected_output,
+                metadata=excluded.metadata,
+                approved=excluded.approved,
+                judge_score=excluded.judge_score,
+                judge_label=excluded.judge_label,
+                judge_rationale=excluded.judge_rationale,
+                judge_provider=excluded.judge_provider,
+                judge_used_live_provider=excluded.judge_used_live_provider,
+                judged_at=CURRENT_TIMESTAMP
+            """,
+            (
+                example_id,
+                payload["source_type"],
+                payload["source_id"],
+                payload.get("equipment_id"),
+                payload.get("work_order_id"),
+                payload["instruction"],
+                payload["input_text"],
+                payload["expected_output"],
+                _json_dump_any(payload.get("metadata", {})),
+                1 if payload.get("approved") else 0,
+                float(payload.get("judge_score") or 0),
+                payload.get("judge_label") or "not_scored",
+                payload.get("judge_rationale"),
+                payload.get("judge_provider") or "not_scored",
+                1 if payload.get("judge_used_live_provider") else 0,
+            ),
+        )
+    example = get_learning_example_by_source(payload["source_type"], payload["source_id"])
+    if not example:
+        raise RuntimeError("Learning example was not persisted")
+    return example
+
+
+def get_learning_example(example_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM learning_examples WHERE id = ?", (example_id,))
+    return _decode_learning_example(row) if row else None
+
+
+def get_learning_example_by_source(source_type: str, source_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one(
+        "SELECT * FROM learning_examples WHERE source_type = ? AND source_id = ?",
+        (source_type, source_id),
+    )
+    return _decode_learning_example(row) if row else None
+
+
+def list_learning_examples(
+    approved_only: Optional[bool] = None,
+    equipment_id: Optional[str] = None,
+    min_judge_score: Optional[float] = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if approved_only is not None:
+        clauses.append("approved = ?")
+        params.append(1 if approved_only else 0)
+    if equipment_id:
+        clauses.append("equipment_id = ?")
+        params.append(equipment_id)
+    if min_judge_score is not None:
+        clauses.append("judge_score >= ?")
+        params.append(min_judge_score)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    rows = _fetch_all(
+        f"""
+        SELECT * FROM learning_examples
+        {where}
+        ORDER BY approved DESC, created_at DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    )
+    return [_decode_learning_example(row) for row in rows]
+
+
+def set_learning_example_approval(example_id: str, approved: bool) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    with connect() as connection:
+        connection.execute(
+            "UPDATE learning_examples SET approved = ? WHERE id = ?",
+            (1 if approved else 0, example_id),
+        )
+    return get_learning_example(example_id)
+
+
+def update_learning_example_judgement(
+    example_id: str,
+    score: float,
+    label: str,
+    rationale: str,
+    provider: str,
+    used_live_provider: bool,
+) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE learning_examples
+            SET
+                judge_score = ?,
+                judge_label = ?,
+                judge_rationale = ?,
+                judge_provider = ?,
+                judge_used_live_provider = ?,
+                judged_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (score, label, rationale, provider, 1 if used_live_provider else 0, example_id),
+        )
+    return get_learning_example(example_id)
+
+
+def create_learning_dataset_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    snapshot_id = payload.get("id") or f"LDS-{uuid.uuid4().hex[:12].upper()}"
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO learning_dataset_snapshots (
+                id,
+                name,
+                description,
+                example_count,
+                approved_only,
+                jsonl_content,
+                created_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                snapshot_id,
+                payload["name"],
+                payload.get("description"),
+                payload["example_count"],
+                1 if payload.get("approved_only", True) else 0,
+                payload["jsonl_content"],
+                payload.get("created_by"),
+            ),
+        )
+    snapshot = get_learning_dataset_snapshot(snapshot_id)
+    if not snapshot:
+        raise RuntimeError("Learning dataset snapshot was not persisted")
+    return snapshot
+
+
+def get_learning_dataset_snapshot(snapshot_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM learning_dataset_snapshots WHERE id = ?", (snapshot_id,))
+    return _decode_learning_snapshot(row) if row else None
+
+
+def list_learning_dataset_snapshots(limit: int = 20) -> list[dict[str, Any]]:
+    rows = _fetch_all(
+        """
+        SELECT * FROM learning_dataset_snapshots
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    return [_decode_learning_snapshot(row) for row in rows]
+
+
+def list_learning_model_versions() -> list[dict[str, Any]]:
+    return _fetch_all("SELECT * FROM learning_model_versions ORDER BY created_at DESC")
+
+
+def get_learning_model_version(model_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM learning_model_versions WHERE id = ?", (model_id,))
+    return dict(row) if row else None
+
+
+def save_learning_model_version(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    model_id = payload.get("id") or f"model-{uuid.uuid4().hex[:12].lower()}"
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO learning_model_versions (
+                id,
+                provider,
+                model_name,
+                base_model,
+                adapter_path,
+                status,
+                notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                provider=excluded.provider,
+                model_name=excluded.model_name,
+                base_model=excluded.base_model,
+                adapter_path=excluded.adapter_path,
+                status=excluded.status,
+                notes=excluded.notes
+            """,
+            (
+                model_id,
+                payload["provider"],
+                payload["model_name"],
+                payload.get("base_model"),
+                payload.get("adapter_path"),
+                payload.get("status") or "candidate",
+                payload.get("notes"),
+            ),
+        )
+    model = _fetch_one("SELECT * FROM learning_model_versions WHERE id = ?", (model_id,))
+    if not model:
+        raise RuntimeError("Learning model version was not persisted")
+    return dict(model)
+
+
+def set_learning_model_status(model_id: str, status: str, notes: Optional[str] = None) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    existing = get_learning_model_version(model_id)
+    if not existing:
+        return None
+    next_notes = notes if notes is not None else existing.get("notes")
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE learning_model_versions
+            SET status = ?, notes = ?
+            WHERE id = ?
+            """,
+            (status, next_notes, model_id),
+        )
+    return get_learning_model_version(model_id)
+
+
+def list_learning_prompt_versions() -> list[dict[str, Any]]:
+    return _fetch_all("SELECT * FROM learning_prompt_versions ORDER BY assistant ASC, created_at DESC")
+
+
+def get_learning_prompt_version(prompt_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM learning_prompt_versions WHERE id = ?", (prompt_id,))
+    return dict(row) if row else None
+
+
+def save_learning_evaluation_run(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    run_id = payload.get("id") or f"LEVAL-{uuid.uuid4().hex[:12].upper()}"
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO learning_evaluation_runs (
+                id,
+                dataset_id,
+                model_version_id,
+                prompt_version_id,
+                metrics,
+                notes,
+                passed
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                payload.get("dataset_id"),
+                payload.get("model_version_id"),
+                payload.get("prompt_version_id"),
+                _json_dump_any(payload.get("metrics", {})),
+                payload.get("notes"),
+                1 if payload.get("passed") else 0,
+            ),
+        )
+    run = get_learning_evaluation_run(run_id)
+    if not run:
+        raise RuntimeError("Learning evaluation run was not persisted")
+    return run
+
+
+def get_learning_evaluation_run(run_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM learning_evaluation_runs WHERE id = ?", (run_id,))
+    return _decode_learning_evaluation(row) if row else None
+
+
+def list_learning_evaluation_runs(limit: int = 20) -> list[dict[str, Any]]:
+    rows = _fetch_all(
+        """
+        SELECT * FROM learning_evaluation_runs
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    return [_decode_learning_evaluation(row) for row in rows]
+
+
+def save_learning_model_promotion(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    promotion_id = payload.get("id") or f"LPROMO-{uuid.uuid4().hex[:12].upper()}"
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO learning_model_promotions (
+                id,
+                model_version_id,
+                previous_active_model_id,
+                evaluation_run_id,
+                dataset_id,
+                prompt_version_id,
+                action,
+                reviewer_email,
+                notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                promotion_id,
+                payload["model_version_id"],
+                payload.get("previous_active_model_id"),
+                payload["evaluation_run_id"],
+                payload["dataset_id"],
+                payload["prompt_version_id"],
+                payload["action"],
+                payload["reviewer_email"],
+                payload.get("notes"),
+            ),
+        )
+    promotion = get_learning_model_promotion(promotion_id)
+    if not promotion:
+        raise RuntimeError("Learning model promotion was not persisted")
+    return promotion
+
+
+def get_learning_model_promotion(promotion_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM learning_model_promotions WHERE id = ?", (promotion_id,))
+    return dict(row) if row else None
+
+
+def list_learning_model_promotions(limit: int = 20) -> list[dict[str, Any]]:
+    return _fetch_all(
+        """
+        SELECT * FROM learning_model_promotions
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+
+
+def save_learning_job(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    job_id = payload.get("id") or f"LJOB-{uuid.uuid4().hex[:12].upper()}"
+    correlation_id = payload.get("correlation_id") or job_id
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO learning_jobs (
+                id,
+                job_type,
+                subject,
+                status,
+                requested_by,
+                correlation_id,
+                input_refs,
+                output_refs,
+                error,
+                retry_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                job_type=excluded.job_type,
+                subject=excluded.subject,
+                status=excluded.status,
+                requested_by=excluded.requested_by,
+                correlation_id=excluded.correlation_id,
+                input_refs=excluded.input_refs,
+                output_refs=excluded.output_refs,
+                error=excluded.error,
+                retry_count=excluded.retry_count,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                job_id,
+                payload["job_type"],
+                payload["subject"],
+                payload.get("status") or "queued",
+                payload.get("requested_by"),
+                correlation_id,
+                _json_dump_any(payload.get("input_refs", {})),
+                _json_dump_any(payload.get("output_refs", {})),
+                payload.get("error"),
+                int(payload.get("retry_count") or 0),
+            ),
+        )
+    job = get_learning_job(job_id)
+    if not job:
+        raise RuntimeError("Learning job was not persisted")
+    return job
+
+
+def update_learning_job_status(
+    job_id: str,
+    status: str,
+    *,
+    output_refs: Optional[dict[str, Any]] = None,
+    error: Optional[str] = None,
+    retry_count: Optional[int] = None,
+) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    existing = get_learning_job(job_id)
+    if not existing:
+        return None
+    next_output_refs = output_refs if output_refs is not None else existing.get("output_refs", {})
+    next_retry_count = retry_count if retry_count is not None else existing.get("retry_count", 0)
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE learning_jobs
+            SET status = ?,
+                output_refs = ?,
+                error = ?,
+                retry_count = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                status,
+                _json_dump_any(next_output_refs),
+                error,
+                int(next_retry_count or 0),
+                job_id,
+            ),
+        )
+    return get_learning_job(job_id)
+
+
+def get_learning_job(job_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM learning_jobs WHERE id = ?", (job_id,))
+    return _decode_learning_job(row) if row else None
+
+
+def list_learning_jobs(limit: int = 20, status: Optional[str] = None) -> list[dict[str, Any]]:
+    if status:
+        rows = _fetch_all(
+            """
+            SELECT * FROM learning_jobs
+            WHERE status = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (status, limit),
+        )
+    else:
+        rows = _fetch_all(
+            """
+            SELECT * FROM learning_jobs
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+    return [_decode_learning_job(row) for row in rows]
+
+
+def save_learning_artifact(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    artifact_id = payload.get("id") or f"LART-{uuid.uuid4().hex[:12].upper()}"
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO learning_artifacts (
+                id,
+                job_id,
+                artifact_type,
+                uri,
+                content_hash,
+                metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                job_id=excluded.job_id,
+                artifact_type=excluded.artifact_type,
+                uri=excluded.uri,
+                content_hash=excluded.content_hash,
+                metadata=excluded.metadata
+            """,
+            (
+                artifact_id,
+                payload["job_id"],
+                payload["artifact_type"],
+                payload["uri"],
+                payload["content_hash"],
+                _json_dump_any(payload.get("metadata", {})),
+            ),
+        )
+    artifact = get_learning_artifact(artifact_id)
+    if not artifact:
+        raise RuntimeError("Learning artifact was not persisted")
+    return artifact
+
+
+def get_learning_artifact(artifact_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM learning_artifacts WHERE id = ?", (artifact_id,))
+    return _decode_learning_artifact(row) if row else None
+
+
+def list_learning_artifacts(job_id: Optional[str] = None, limit: int = 20) -> list[dict[str, Any]]:
+    if job_id:
+        rows = _fetch_all(
+            """
+            SELECT * FROM learning_artifacts
+            WHERE job_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (job_id, limit),
+        )
+    else:
+        rows = _fetch_all(
+            """
+            SELECT * FROM learning_artifacts
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+    return [_decode_learning_artifact(row) for row in rows]
+
+
+def learning_counts() -> dict[str, int]:
+    rows = _fetch_all(
+        """
+        SELECT 'interactions' AS name, COUNT(*) AS count FROM learning_interactions
+        UNION ALL
+        SELECT 'examples' AS name, COUNT(*) AS count FROM learning_examples
+        UNION ALL
+        SELECT 'approved_examples' AS name, COUNT(*) AS count FROM learning_examples WHERE approved = 1
+        UNION ALL
+        SELECT 'snapshots' AS name, COUNT(*) AS count FROM learning_dataset_snapshots
+        UNION ALL
+        SELECT 'model_versions' AS name, COUNT(*) AS count FROM learning_model_versions
+        UNION ALL
+        SELECT 'prompt_versions' AS name, COUNT(*) AS count FROM learning_prompt_versions
+        UNION ALL
+        SELECT 'evaluation_runs' AS name, COUNT(*) AS count FROM learning_evaluation_runs
+        UNION ALL
+        SELECT 'jobs' AS name, COUNT(*) AS count FROM learning_jobs
+        UNION ALL
+        SELECT 'queued_jobs' AS name, COUNT(*) AS count FROM learning_jobs WHERE status IN ('queued', 'published', 'running')
+        UNION ALL
+        SELECT 'artifacts' AS name, COUNT(*) AS count FROM learning_artifacts
+        UNION ALL
+        SELECT 'promotions' AS name, COUNT(*) AS count FROM learning_model_promotions
+        """
+    )
+    return {row["name"]: int(row["count"]) for row in rows}
+
+
 def _normalize_user(user: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
     if not user:
         return None
@@ -729,6 +1474,10 @@ def _json_dump(value: Any) -> str:
     return json.dumps(value or [], separators=(",", ":"))
 
 
+def _json_dump_any(value: Any) -> str:
+    return json.dumps(value if value is not None else {}, separators=(",", ":"))
+
+
 def _json_load_list(value: Any) -> list[str]:
     if not value:
         return []
@@ -739,6 +1488,25 @@ def _json_load_list(value: Any) -> list[str]:
     if not isinstance(decoded, list):
         return []
     return [str(item) for item in decoded if str(item).strip()]
+
+
+def _json_load_dict(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _json_load_any(value: Any) -> Any:
+    if not value:
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _decode_document_intelligence(row: dict[str, Any]) -> dict[str, Any]:
@@ -762,6 +1530,50 @@ def _decode_maintenance_label(row: dict[str, Any]) -> dict[str, Any]:
     decoded["signal_hints"] = _json_load_list(decoded.get("signal_hints"))
     decoded["usable_for_training"] = bool(decoded.get("usable_for_training"))
     decoded["used_live_provider"] = bool(decoded.get("used_live_provider"))
+    return decoded
+
+
+def _decode_learning_interaction(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["source_refs"] = _json_load_any(decoded.get("source_refs")) or []
+    decoded["used_live_provider"] = bool(decoded.get("used_live_provider"))
+    decoded["approved_for_learning"] = bool(decoded.get("approved_for_learning"))
+    return decoded
+
+
+def _decode_learning_example(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["metadata"] = _json_load_dict(decoded.get("metadata"))
+    decoded["approved"] = bool(decoded.get("approved"))
+    decoded["judge_score"] = float(decoded.get("judge_score") or 0)
+    decoded["judge_used_live_provider"] = bool(decoded.get("judge_used_live_provider"))
+    return decoded
+
+
+def _decode_learning_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["approved_only"] = bool(decoded.get("approved_only"))
+    return decoded
+
+
+def _decode_learning_evaluation(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["metrics"] = _json_load_dict(decoded.get("metrics"))
+    decoded["passed"] = bool(decoded.get("passed"))
+    return decoded
+
+
+def _decode_learning_job(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["input_refs"] = _json_load_dict(decoded.get("input_refs"))
+    decoded["output_refs"] = _json_load_dict(decoded.get("output_refs"))
+    decoded["retry_count"] = int(decoded.get("retry_count") or 0)
+    return decoded
+
+
+def _decode_learning_artifact(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["metadata"] = _json_load_dict(decoded.get("metadata"))
     return decoded
 
 

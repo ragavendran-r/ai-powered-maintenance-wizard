@@ -70,7 +70,7 @@ Unauthorized requests must return `401`. Authenticated users without the require
 
 ## Demo Users
 
-Seed demo users only when `AUTH_SEED_DEMO_USERS=true`. Demo credentials are for local evaluation only and must not be used in production.
+Seed demo users from `assets/sample_data/users_seed.sql` only when `AUTH_SEED_DEMO_USERS=true`. Demo credentials are for local evaluation only and must not be used in production.
 
 | User | Role |
 | --- | --- |

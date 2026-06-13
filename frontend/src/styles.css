@@ -757,6 +757,273 @@ h3 {
   width: 100%;
 }
 
+.learningView {
+  align-content: start;
+  display: grid;
+  gap: 14px;
+}
+
+.learningToolbar {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(180px, 0.9fr) minmax(260px, 1.4fr) auto;
+}
+
+.learningStats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.learningStat {
+  background: #f7fafb;
+  border: 1px solid #dce6eb;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.learningStat small {
+  color: #60717c;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.learningStat strong {
+  font-size: 1.7rem;
+}
+
+.vectorStoreStatus {
+  align-items: center;
+  background: #f7fafb;
+  border: 1px solid #dce6eb;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.vectorStoreStatus span {
+  display: grid;
+  gap: 2px;
+}
+
+.vectorStoreStatus small {
+  color: #60717c;
+  font-weight: 700;
+}
+
+.learningGrid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+}
+
+.learningPanel {
+  border: 1px solid #dce6eb;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.learningPanel h3 {
+  margin: 0;
+}
+
+.learningExamples,
+.versionList,
+.datasetList,
+.evaluationList,
+.jobList,
+.artifactList {
+  display: grid;
+  gap: 10px;
+}
+
+.learningExample,
+.versionRow,
+.datasetRow,
+.evaluationRow,
+.jobRow,
+.artifactRow {
+  border: 1px solid #dce6eb;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.learningExample.approved {
+  background: #f0f8f5;
+  border-color: #b9dbc9;
+}
+
+.learningExample small,
+.versionRow small,
+.datasetRow small,
+.jobRow small,
+.artifactRow small {
+  color: #60717c;
+  display: block;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.learningExample p,
+.versionRow p,
+.evaluationRow p,
+.jobRow p,
+.artifactRow p {
+  margin: 0;
+}
+
+.learningExample blockquote {
+  border-left: 4px solid #b9d7de;
+  color: #344854;
+  margin: 0;
+  padding-left: 10px;
+}
+
+.judgeScoreRow {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.judgeBadge {
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 5px 9px;
+  text-transform: capitalize;
+}
+
+.judgeBadge.training_worthy {
+  background: #dcefe5;
+  color: #17643e;
+}
+
+.judgeBadge.review,
+.judgeBadge.not_scored {
+  background: #fff1d9;
+  color: #91510d;
+}
+
+.judgeBadge.reject {
+  background: #f4d7d8;
+  color: #a3202b;
+}
+
+.judgeRationale {
+  color: #43535d;
+  font-size: 0.9rem;
+}
+
+.learningExampleActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.datasetRow {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.learningAdapterGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.learningAdapterGrid .adapterNotesField,
+.learningAdapterGrid button {
+  grid-column: 1 / -1;
+}
+
+.learningAdapterGrid textarea {
+  min-height: 80px;
+}
+
+.fullWidthAction {
+  width: 100%;
+}
+
+.evaluationRow.passed {
+  background: #f0f8f5;
+  border-color: #b9dbc9;
+}
+
+.evaluationRow.review {
+  background: #fff8ed;
+  border-color: #efd9b8;
+}
+
+.jobRow {
+  border-left: 4px solid #b9d7de;
+  background: #f7fafb;
+}
+
+.jobRow.completed {
+  border-left-color: #2d8f5f;
+}
+
+.jobRow.published,
+.jobRow.running {
+  border-left-color: #d5aa24;
+}
+
+.jobRow.failed {
+  border-left-color: #ba3944;
+}
+
+.jobRow > span {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.artifactRow {
+  background: #fbfcfd;
+  border-left: 4px solid #7ca7b4;
+}
+
+.artifactRow > span {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.evaluationMetrics {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.evaluationMetrics span {
+  background: #f7fafb;
+  border: 1px solid #e1eaee;
+  border-radius: 6px;
+  color: #60717c;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 7px;
+}
+
+.evaluationMetrics strong {
+  color: #1d2733;
+  display: block;
+  font-size: 1rem;
+}
+
 .usersView {
   align-content: start;
 }
@@ -1052,6 +1319,7 @@ h3 {
   min-height: 180px;
   overflow-y: auto;
   padding: 10px;
+  scroll-behavior: smooth;
 }
 
 .neoThinking p {
@@ -1278,8 +1546,11 @@ h3 {
 }
 
 .assetDetailGrid {
+  align-content: start;
+  align-self: start;
   display: grid;
   gap: 16px;
+  grid-auto-rows: max-content;
   grid-template-columns: 1.2fr 0.9fr 0.6fr 1.2fr;
 }
 
@@ -1340,6 +1611,12 @@ h3 {
   padding-left: 20px;
 }
 
+.actionList li span {
+  color: #4f606b;
+  display: block;
+  margin-top: 3px;
+}
+
 .healthStack {
   display: grid;
   gap: 16px;
@@ -1374,9 +1651,317 @@ h3 {
   stroke-width: 3;
 }
 
-.assetVisual,
-.assistantPanelWide {
+.thresholdPath {
+  fill: none;
+  stroke: #d19b2b;
+  stroke-dasharray: 6 6;
+  stroke-width: 2;
+}
+
+.assetVisual {
   grid-column: span 2;
+}
+
+.widePanel,
+.assetTabGrid {
+  grid-column: 1 / -1;
+}
+
+.assetsView {
+  align-self: start;
+  min-width: 0;
+}
+
+.assetSummaryGrid {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(190px, 0.65fr) minmax(360px, 1.45fr);
+}
+
+.summarySubsystems {
+  grid-column: 1;
+}
+
+.summaryHealthStack {
+  grid-column: 2;
+}
+
+.summaryProfile {
+  grid-column: 3;
+}
+
+.summaryInsight {
+  grid-column: 1 / span 2;
+}
+
+.summaryActions {
+  grid-column: 3;
+}
+
+.assetDecisionPanel {
+  grid-column: 1 / -1;
+}
+
+.assetDecisionPanel .diagnoseActionRow {
+  margin-bottom: 12px;
+}
+
+.assetDecisionPanel .recommendationPanel {
+  margin-top: 0;
+}
+
+.morpheusPanel {
+  display: grid;
+  gap: 12px;
+}
+
+.smithPredictionPanel {
+  display: grid;
+  gap: 12px;
+}
+
+.assistantHeaderCompact {
+  align-items: center;
+  border-bottom: 1px solid #dfe6ea;
+  display: flex;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+
+.assistantHeaderCompact h2 {
+  font-size: 18px;
+}
+
+.assistantHeaderCompact small {
+  color: #60717c;
+  font-weight: 700;
+}
+
+.assistantAvatar {
+  align-items: center;
+  background: #1f6f78;
+  border-radius: 50%;
+  color: #ffffff;
+  display: inline-flex;
+  font-weight: 900;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.morpheusProgress {
+  background: #f4f7f8;
+  border-left: 4px solid #1f6f78;
+  border-radius: 6px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 12px;
+  scroll-behavior: smooth;
+}
+
+.reliabilityPredictionStream {
+  background: #f8fafb;
+  border: 1px solid #dfe8ed;
+  border-radius: 6px;
+  display: grid;
+  gap: 12px;
+  max-height: 420px;
+  min-height: 180px;
+  overflow-y: auto;
+  padding: 12px;
+  scroll-behavior: smooth;
+}
+
+.recommendationTitle {
+  margin-top: 4px;
+}
+
+.assetTabGrid {
+  align-content: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.assetFactsPanel p {
+  color: #4f606b;
+  margin-top: 0;
+}
+
+.assetFactGrid {
+  display: grid;
+  gap: 10px 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.assetFactGrid span {
+  border-top: 1px solid #edf1f3;
+  padding-top: 8px;
+}
+
+.assetFactGrid dt {
+  color: #60717c;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.assetFactGrid dd {
+  margin: 2px 0 0;
+}
+
+.assetMetricGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.assetMetric {
+  background: #f7f9fa;
+  border: 1px solid #dce5ea;
+  border-radius: 6px;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.assetMetric small {
+  color: #60717c;
+  font-weight: 800;
+}
+
+.assetMetric strong {
+  font-size: 1.7rem;
+}
+
+.assetMetric em {
+  color: #174f58;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.assetMetric p {
+  color: #4f606b;
+  margin: 0;
+}
+
+.assetSubsystemList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.assetSubsystemList li {
+  border-bottom: 1px solid #edf1f3;
+  display: grid;
+  gap: 4px;
+  padding-bottom: 10px;
+}
+
+.assetSubsystemList span {
+  color: #60717c;
+}
+
+.assetSubsystemList p {
+  margin: 0;
+}
+
+.maintenanceEventTable,
+.assetsTable {
+  border: 1px solid #e1e7eb;
+  overflow-x: auto;
+}
+
+.maintenanceEventHead,
+.maintenanceEventRow,
+.assetsTableHead,
+.assetsTableRow {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.maintenanceEventHead,
+.assetsTableHead {
+  background: #d7d9db;
+  color: #25323b;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.maintenanceEventRow,
+.assetsTableRow {
+  background: #ffffff;
+  border-top: 1px solid #edf1f3;
+  color: #394956;
+  font-size: 0.82rem;
+}
+
+.maintenanceEventHead,
+.maintenanceEventRow {
+  grid-template-columns: minmax(120px, 0.8fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(180px, 1.15fr) minmax(70px, 0.4fr);
+}
+
+.assetsTableHead,
+.assetsTableRow {
+  align-items: center;
+  grid-template-columns: minmax(160px, 1.35fr) minmax(105px, 0.8fr) minmax(120px, 0.95fr) minmax(54px, 0.45fr) minmax(54px, 0.45fr) minmax(70px, 0.55fr) minmax(58px, 0.45fr) minmax(112px, 0.85fr);
+}
+
+.assetsTableRow small,
+.assetsTableRow button small {
+  color: #60717c;
+  display: block;
+}
+
+.assetDocumentList {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.assetDocument {
+  background: #f7f9fa;
+  border: 1px solid #dce5ea;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.assetDocument h3 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.assetDocument p {
+  color: #4f606b;
+  margin: 0;
+}
+
+.predictionSummary {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.predictionSummary strong {
+  font-size: 1.2rem;
+}
+
+.providerLine {
+  align-items: center;
+  color: #60717c;
+  display: inline-flex;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .workOrderLayout {
@@ -1595,11 +2180,18 @@ h3 {
   .dashboardKpiBand,
   .dashboardMainGrid,
   .assetDetailGrid,
+  .assetSummaryGrid,
+  .assetTabGrid,
+  .assetMetricGrid,
+  .assetDocumentList,
   .workOrderLayout,
   .assistantSplit,
   .split,
   .ingestionGrid,
   .jsonIngest,
+  .learningToolbar,
+  .learningStats,
+  .learningGrid,
   .userCreateGrid,
   .userRow {
     grid-template-columns: 1fr;
@@ -1621,7 +2213,6 @@ h3 {
   .queuePanel,
   .chartPanel,
   .assetVisual,
-  .assistantPanelWide,
   .neoResultPanel {
     grid-column: auto;
   }

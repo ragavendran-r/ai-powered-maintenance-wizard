@@ -43,6 +43,20 @@ class Settings(BaseSettings):
     nats_max_deliver: int = Field(default=3, ge=1, alias="NATS_MAX_DELIVER")
     nats_reconnect_time_wait_seconds: float = Field(default=2.0, ge=0.1, alias="NATS_RECONNECT_TIME_WAIT_SECONDS")
     nats_max_reconnect_attempts: int = Field(default=60, ge=0, alias="NATS_MAX_RECONNECT_ATTEMPTS")
+    learning_async_enabled: bool = Field(default=True, alias="LEARNING_ASYNC_ENABLED")
+    learning_nats_stream: str = Field(default="MW_LEARNING", alias="LEARNING_NATS_STREAM")
+    learning_nats_consumer: str = Field(default="maintenance-wizard-learning-worker", alias="LEARNING_NATS_CONSUMER")
+    learning_nats_subject_prefix: str = Field(default="maintenance.learning", alias="LEARNING_NATS_SUBJECT_PREFIX")
+    learning_nats_dlq_subject: str = Field(default="maintenance.learning.dlq", alias="LEARNING_NATS_DLQ_SUBJECT")
+    learning_artifact_dir: Path = Field(
+        default=Path(__file__).resolve().parents[2] / "data" / "learning_artifacts",
+        alias="LEARNING_ARTIFACT_DIR",
+    )
+    rag_vector_store: str = Field(default="qdrant", alias="RAG_VECTOR_STORE")
+    rag_qdrant_url: str = Field(default="http://localhost:6333", alias="RAG_QDRANT_URL")
+    rag_qdrant_collection: str = Field(default="maintenance_wizard_documents", alias="RAG_QDRANT_COLLECTION")
+    rag_qdrant_api_key: Optional[str] = Field(default=None, alias="RAG_QDRANT_API_KEY")
+    rag_vector_timeout_seconds: float = Field(default=2.0, ge=0.1, alias="RAG_VECTOR_TIMEOUT_SECONDS")
     data_dir: Path = Field(
         default=Path(__file__).resolve().parents[3] / "assets" / "sample_data",
         alias="DATA_DIR",

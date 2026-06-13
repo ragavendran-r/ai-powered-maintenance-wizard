@@ -63,12 +63,12 @@ def health_summary(equipment_id: str, include_anomaly_context: bool = True) -> H
     )
 
 
-def predict_failure(equipment_id: str) -> PredictionResponse:
+def prediction_features(equipment_id: str, include_training_signals: bool = True) -> PredictionResponse:
     summary = health_summary(equipment_id, include_anomaly_context=False)
     event_count = len(repository.list_maintenance_events(equipment_id))
     anomalies = analyze_anomalies(equipment_id, include_context=False)
     feedback_records = repository.list_feedback(equipment_id)
-    training_signals = training_signal_summary(equipment_id)
+    training_signals = training_signal_summary(equipment_id) if include_training_signals else []
     critical_alerts = len([a for a in summary.active_alerts if a.severity in {"high", "critical"}])
     severe_anomalies = len([item for item in anomalies if item.risk_level in {"high", "critical"}])
     spare_blockers = len([s for s in summary.top_spares_constraints if s.available_qty == 0])
@@ -106,16 +106,20 @@ def predict_failure(equipment_id: str) -> PredictionResponse:
             drivers.append(f"Engineer-confirmed root cause: {record['actual_root_cause']}.")
         if record.get("outcome"):
             drivers.append(f"Recorded maintenance outcome: {record['outcome']}.")
-    explanation = explain_reasoning(
-        "prediction",
-        f"Failure probability {round(probability, 2)} with estimated RUL {rul} days.",
-        drivers,
-    )
     return PredictionResponse(
         equipment_id=equipment_id,
         risk_level=summary.risk_level,
         failure_probability=round(probability, 2),
         remaining_useful_life_days=rul,
         drivers=drivers,
-        reasoning_explanation=explanation,
     )
+
+
+def predict_failure(equipment_id: str) -> PredictionResponse:
+    prediction = prediction_features(equipment_id)
+    explanation = explain_reasoning(
+        "prediction",
+        f"Failure probability {prediction.failure_probability} with estimated RUL {prediction.remaining_useful_life_days} days.",
+        prediction.drivers,
+    )
+    return prediction.model_copy(update={"reasoning_explanation": explanation})
