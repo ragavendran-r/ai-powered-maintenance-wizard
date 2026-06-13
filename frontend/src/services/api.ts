@@ -595,6 +595,33 @@ export interface LearningEvaluationRun {
   created_at: string
 }
 
+export interface LearningModelPromotion {
+  id: string
+  model_version_id: string
+  previous_active_model_id?: string | null
+  evaluation_run_id: string
+  dataset_id: string
+  prompt_version_id: string
+  action: 'promote' | 'rollback'
+  reviewer_email: string
+  notes?: string | null
+  created_at: string
+}
+
+export interface LearningServingModel {
+  provider: string
+  openai_model: string
+  ollama_model: string
+  openai_base_url: string
+  ollama_base_url: string
+  source: string
+  active_model_version_id?: string | null
+  adapter_path?: string | null
+  base_model?: string | null
+  status: string
+  warning?: string | null
+}
+
 export interface LearningJob {
   id: string
   job_type: string
@@ -629,6 +656,10 @@ export interface LearningSummary {
   evaluation_runs: LearningEvaluationRun[]
   recent_jobs: LearningJob[]
   recent_artifacts: LearningArtifact[]
+  recent_promotions: LearningModelPromotion[]
+  serving_model: LearningServingModel
+  artifact_store: Record<string, unknown>
+  peft_trainer: Record<string, unknown>
   vector_store: {
     store?: string
     enabled?: boolean
@@ -891,6 +922,17 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   learningEvaluations: () => request<LearningEvaluationRun[]>('/api/learning/evaluations'),
+  promoteLearningModelVersion: (payload: { model_version_id: string; evaluation_run_id: string; notes?: string }) =>
+    request<LearningModelPromotion>('/api/learning/model-versions/promote', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  rollbackLearningModelVersion: (payload: { target_model_version_id: string; evaluation_run_id: string; notes?: string }) =>
+    request<LearningModelPromotion>('/api/learning/model-versions/rollback', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  learningModelPromotions: () => request<LearningModelPromotion[]>('/api/learning/model-promotions'),
   learningJobs: () => request<LearningJob[]>('/api/learning/jobs'),
   queueLearningPeftJob: (payload: {
     dataset_id: string

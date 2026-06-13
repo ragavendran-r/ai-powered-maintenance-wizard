@@ -2,6 +2,8 @@
 
 This project can use LM Studio through the OpenAI-compatible backend adapter. The adapter requests JSON Schema structured output so LM Studio can return Pydantic-validated responses for recommendations, document intelligence, anomaly context, retrieval reranking, and work-order assistants.
 
+If `LLM_USE_ACTIVE_LEARNING_MODEL=true`, Learning Review promotions update the model id the backend sends to the LM Studio OpenAI-compatible endpoint. LM Studio must already have that promoted model or adapter-backed model loaded under the registered `model_name`; otherwise the app falls back deterministically after the configured timeout.
+
 ## Recommended Setup
 
 - Runtime: LM Studio for macOS.

@@ -23,6 +23,8 @@ from app.services.iot_streaming import (
 from app.services.retrieval import retrieve_evidence
 from app.services.document_intelligence import document_intelligence
 from app.services.maintenance_labeling import stored_labels
+from app.services.ai_client import active_llm_serving_config
+from app.services.artifact_store import artifact_store_status, store_learning_artifact_file
 from app.services.vector_store import VectorStoreHit
 from app.services.learning_worker import process_learning_job_message
 
@@ -1193,6 +1195,10 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl():
     assert any(example["judge_score"] > 0 for example in summary["recent_examples"])
     assert "recent_jobs" in summary
     assert summary["vector_store"]["store"] == "sqlite"
+    assert summary["artifact_store"]["store"] == "filesystem"
+    assert summary["artifact_store"]["state"] == "ready"
+    assert summary["peft_trainer"]["mode"] == "prepared_artifacts"
+    assert summary["peft_trainer"]["configured"] is False
 
     dataset_response = client.post(
         "/api/learning/datasets",
@@ -1247,6 +1253,52 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl():
     evaluations_response = client.get("/api/learning/evaluations", headers=headers)
     assert evaluations_response.status_code == 200
     assert any(item["id"] == evaluation["id"] for item in evaluations_response.json())
+
+    promotion_response = client.post(
+        "/api/learning/model-versions/promote",
+        json={
+            "model_version_id": model["id"],
+            "evaluation_run_id": evaluation["id"],
+            "notes": "Promote after passed local evaluation.",
+        },
+        headers=headers,
+    )
+    assert promotion_response.status_code == 200
+    promotion = promotion_response.json()
+    assert promotion["model_version_id"] == model["id"]
+    assert promotion["action"] == "promote"
+
+    serving = active_llm_serving_config(
+        SimpleNamespace(
+            llm_provider="openai",
+            openai_model="env-model",
+            openai_api_key="unused",
+            openai_base_url="http://localhost:1234/v1",
+            ollama_model="env-ollama",
+            ollama_base_url="http://localhost:11434",
+            llm_use_active_learning_model=True,
+        )
+    )
+    assert serving.source == "learning_active_model"
+    assert serving.provider == "openai"
+    assert serving.openai_model == model["model_name"]
+    assert serving.active_model_version_id == model["id"]
+    assert serving.adapter_path == model["adapter_path"]
+
+    mock_serving = active_llm_serving_config(
+        SimpleNamespace(
+            llm_provider="mock",
+            openai_model="env-model",
+            openai_api_key=None,
+            openai_base_url="http://localhost:1234/v1",
+            ollama_model="env-ollama",
+            ollama_base_url="http://localhost:11434",
+            llm_use_active_learning_model=True,
+        )
+    )
+    assert mock_serving.source == "environment"
+    assert mock_serving.provider == "mock"
+    assert "disabled for mock provider" in mock_serving.warning
 
     peft_job_response = client.post(
         "/api/learning/jobs/peft",
@@ -1387,6 +1439,159 @@ def test_learning_worker_prepares_peft_artifacts(monkeypatch, tmp_path):
     for artifact in artifacts:
         assert artifact["content_hash"]
         assert artifact["uri"].startswith(str(tmp_path))
+        assert artifact["metadata"]["storage_backend"] == "filesystem"
+        assert artifact["metadata"]["content_hash_algorithm"] == "sha256"
+
+
+def test_learning_worker_runs_configured_peft_trainer_and_registers_candidate(monkeypatch, tmp_path):
+    headers = auth_headers("reliability@plant.local")
+    client.post("/api/learning/examples/refresh", headers=headers)
+    dataset = client.post(
+        "/api/learning/datasets",
+        json={"name": "trainer-learning-snapshot", "approved_only": True, "min_judge_score": 0.65},
+        headers=headers,
+    ).json()
+    model = client.post(
+        "/api/learning/model-versions",
+        json={
+            "provider": "openai",
+            "model_name": "qwen2.5-7b-instruct-trainer-source",
+            "base_model": "qwen2.5-7b-instruct",
+            "adapter_path": None,
+            "status": "candidate",
+        },
+        headers=headers,
+    ).json()
+    peft_job = client.post(
+        "/api/learning/jobs/peft",
+        json={
+            "dataset_id": dataset["id"],
+            "model_version_id": model["id"],
+            "prompt_version_id": "prompt-neo-default",
+            "adapter_name": "maintenance-wizard-external-lora",
+            "training_config": {"method": "lora", "epochs": 1},
+        },
+        headers=headers,
+    ).json()
+
+    def fake_trainer_run(command_args, cwd, env, text, capture_output, timeout, check):
+        assert command_args == ["fake-peft-trainer"]
+        assert text is True
+        assert capture_output is True
+        assert check is False
+        assert timeout == 45
+        assert env["MW_PEFT_ADAPTER_NAME"] == "maintenance-wizard-external-lora"
+        assert env["MW_PEFT_BASE_MODEL"] == "qwen2.5-7b-instruct"
+        assert os.path.exists(env["MW_PEFT_DATASET_PATH"])
+        assert os.path.exists(env["MW_PEFT_MANIFEST_PATH"])
+        output_dir = env["MW_PEFT_OUTPUT_DIR"]
+        os.makedirs(output_dir, exist_ok=True)
+        manifest_path = os.path.join(output_dir, "adapter_manifest.json")
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "provider": "openai",
+                    "model_name": "maintenance-wizard-qwen-peft-trained",
+                    "base_model": "qwen2.5-7b-instruct",
+                    "adapter_path": "file:///models/maintenance-wizard-qwen-peft-trained",
+                    "notes": "Fake trainer completed for regression coverage.",
+                },
+                handle,
+            )
+        return SimpleNamespace(returncode=0, stdout="trainer completed", stderr="")
+
+    monkeypatch.setattr(
+        "app.services.learning.get_settings",
+        lambda: SimpleNamespace(
+            learning_artifact_dir=tmp_path / "artifacts",
+            learning_peft_trainer_command="fake-peft-trainer",
+            learning_peft_trainer_timeout_seconds=45,
+            learning_peft_output_dir=tmp_path / "adapters",
+        ),
+    )
+    monkeypatch.setattr("app.services.learning.subprocess.run", fake_trainer_run)
+
+    processed = process_learning_job_message(
+        {
+            "schema_version": "1",
+            "job_id": peft_job["id"],
+            "job_type": "peft_tuning",
+            "requested_by": "reliability@plant.local",
+            "correlation_id": peft_job["correlation_id"],
+            "input_refs": peft_job["input_refs"],
+        },
+        peft_job["subject"],
+    )
+
+    assert processed.status == "completed"
+    completed_job = repository.get_learning_job(peft_job["id"])
+    assert completed_job["output_refs"]["trainer_mode"] == "external_command"
+    assert completed_job["output_refs"]["training_status"] == "adapter_candidate_registered"
+    registered_model = repository.get_learning_model_version(completed_job["output_refs"]["registered_model_version_id"])
+    assert registered_model
+    assert registered_model["status"] == "candidate"
+    assert registered_model["model_name"] == "maintenance-wizard-qwen-peft-trained"
+    assert registered_model["adapter_path"] == "file:///models/maintenance-wizard-qwen-peft-trained"
+    artifacts = repository.list_learning_artifacts(job_id=peft_job["id"])
+    assert {artifact["artifact_type"] for artifact in artifacts} == {
+        "peft_dataset_jsonl",
+        "peft_training_manifest",
+        "peft_training_log",
+        "peft_adapter_registry",
+        "peft_adapter_manifest",
+    }
+
+
+def test_learning_artifact_store_supports_s3_uri_registration(monkeypatch, tmp_path):
+    artifact_path = tmp_path / "dataset.jsonl"
+    artifact_path.write_text('{"messages":[]}\n', encoding="utf-8")
+    uploads = []
+
+    class FakeS3Client:
+        def upload_file(self, filename, bucket, key, ExtraArgs=None):
+            uploads.append(
+                {
+                    "filename": filename,
+                    "bucket": bucket,
+                    "key": key,
+                    "extra_args": ExtraArgs or {},
+                }
+            )
+
+    settings = SimpleNamespace(
+        learning_artifact_store="s3",
+        learning_artifact_dir=tmp_path,
+        learning_artifact_s3_bucket="mw-learning",
+        learning_artifact_s3_prefix="peft",
+        learning_artifact_s3_endpoint_url="http://minio:9000",
+        learning_artifact_s3_region="us-east-1",
+    )
+    monkeypatch.setattr("app.services.artifact_store._s3_client", lambda _: FakeS3Client())
+
+    status = artifact_store_status(settings)
+    stored = store_learning_artifact_file(
+        job_id="LJOB-S3",
+        artifact_type="peft_dataset_jsonl",
+        path=artifact_path,
+        content_hash="abc123",
+        metadata={"dataset_id": "LDS-1"},
+        settings=settings,
+    )
+
+    assert status["state"] == "configured"
+    assert stored.uri == "s3://mw-learning/peft/LJOB-S3/peft_dataset_jsonl/dataset.jsonl"
+    assert stored.metadata["storage_backend"] == "s3"
+    assert stored.metadata["bucket"] == "mw-learning"
+    assert stored.metadata["object_key"] == "peft/LJOB-S3/peft_dataset_jsonl/dataset.jsonl"
+    assert stored.metadata["local_retained"] is True
+    assert uploads == [
+        {
+            "filename": str(artifact_path),
+            "bucket": "mw-learning",
+            "key": "peft/LJOB-S3/peft_dataset_jsonl/dataset.jsonl",
+            "extra_args": {"Metadata": {"job-id": "LJOB-S3", "artifact-type": "peft_dataset_jsonl", "sha256": "abc123"}},
+        }
+    ]
 
 
 def test_learning_example_can_be_scored_by_judge_endpoint():

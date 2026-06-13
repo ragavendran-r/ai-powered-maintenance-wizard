@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     llm_stream_timeout_seconds: float = Field(default=60.0, ge=1.0, alias="LLM_STREAM_TIMEOUT_SECONDS")
     llm_structured_max_tokens: int = Field(default=300, ge=64, le=2048, alias="LLM_STRUCTURED_MAX_TOKENS")
     llm_text_max_tokens: int = Field(default=600, ge=64, le=2048, alias="LLM_TEXT_MAX_TOKENS")
+    llm_use_active_learning_model: bool = Field(default=True, alias="LLM_USE_ACTIVE_LEARNING_MODEL")
     auth_enabled: bool = Field(default=True, alias="AUTH_ENABLED")
     jwt_secret_key: str = Field(
         default="maintenance-wizard-local-dev-secret-change-me",
@@ -51,6 +52,17 @@ class Settings(BaseSettings):
     learning_artifact_dir: Path = Field(
         default=Path(__file__).resolve().parents[2] / "data" / "learning_artifacts",
         alias="LEARNING_ARTIFACT_DIR",
+    )
+    learning_artifact_store: str = Field(default="filesystem", alias="LEARNING_ARTIFACT_STORE")
+    learning_artifact_s3_bucket: Optional[str] = Field(default=None, alias="LEARNING_ARTIFACT_S3_BUCKET")
+    learning_artifact_s3_prefix: str = Field(default="maintenance-wizard/learning", alias="LEARNING_ARTIFACT_S3_PREFIX")
+    learning_artifact_s3_endpoint_url: Optional[str] = Field(default=None, alias="LEARNING_ARTIFACT_S3_ENDPOINT_URL")
+    learning_artifact_s3_region: str = Field(default="us-east-1", alias="LEARNING_ARTIFACT_S3_REGION")
+    learning_peft_trainer_command: Optional[str] = Field(default=None, alias="LEARNING_PEFT_TRAINER_COMMAND")
+    learning_peft_trainer_timeout_seconds: int = Field(default=900, ge=1, alias="LEARNING_PEFT_TRAINER_TIMEOUT_SECONDS")
+    learning_peft_output_dir: Path = Field(
+        default=Path(__file__).resolve().parents[2] / "data" / "learning_adapters",
+        alias="LEARNING_PEFT_OUTPUT_DIR",
     )
     rag_vector_store: str = Field(default="qdrant", alias="RAG_VECTOR_STORE")
     rag_qdrant_url: str = Field(default="http://localhost:6333", alias="RAG_QDRANT_URL")

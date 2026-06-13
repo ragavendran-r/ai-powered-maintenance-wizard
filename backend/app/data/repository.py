@@ -1078,6 +1078,18 @@ def list_learning_model_versions() -> list[dict[str, Any]]:
     return _fetch_all("SELECT * FROM learning_model_versions ORDER BY created_at DESC")
 
 
+def get_active_learning_model_version() -> Optional[dict[str, Any]]:
+    row = _fetch_one(
+        """
+        SELECT * FROM learning_model_versions
+        WHERE status = 'active'
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+    )
+    return dict(row) if row else None
+
+
 def get_learning_model_version(model_id: str) -> Optional[dict[str, Any]]:
     row = _fetch_one("SELECT * FROM learning_model_versions WHERE id = ?", (model_id,))
     return dict(row) if row else None

@@ -795,7 +795,10 @@ h3 {
   font-size: 1.7rem;
 }
 
-.vectorStoreStatus {
+.vectorStoreStatus,
+.servingModelStatus,
+.artifactStoreStatus,
+.peftTrainerStatus {
   align-items: center;
   background: #f7fafb;
   border: 1px solid #dce6eb;
@@ -807,14 +810,33 @@ h3 {
   padding: 10px 12px;
 }
 
-.vectorStoreStatus span {
+.vectorStoreStatus span,
+.servingModelStatus span,
+.artifactStoreStatus span,
+.peftTrainerStatus span {
   display: grid;
   gap: 2px;
 }
 
-.vectorStoreStatus small {
+.vectorStoreStatus small,
+.servingModelStatus small,
+.artifactStoreStatus small,
+.peftTrainerStatus small {
   color: #60717c;
   font-weight: 700;
+}
+
+.servingModelStatus,
+.artifactStoreStatus,
+.peftTrainerStatus {
+  align-items: start;
+  justify-content: start;
+}
+
+.servingModelStatus strong,
+.artifactStoreStatus strong,
+.peftTrainerStatus strong {
+  overflow-wrap: anywhere;
 }
 
 .learningGrid {
@@ -837,6 +859,7 @@ h3 {
 
 .learningExamples,
 .versionList,
+.promotionList,
 .datasetList,
 .evaluationList,
 .jobList,
@@ -847,6 +870,7 @@ h3 {
 
 .learningExample,
 .versionRow,
+.promotionRow,
 .datasetRow,
 .evaluationRow,
 .jobRow,
@@ -865,6 +889,7 @@ h3 {
 
 .learningExample small,
 .versionRow small,
+.promotionRow small,
 .datasetRow small,
 .jobRow small,
 .artifactRow small {
@@ -876,6 +901,7 @@ h3 {
 
 .learningExample p,
 .versionRow p,
+.promotionRow p,
 .evaluationRow p,
 .jobRow p,
 .artifactRow p {
@@ -934,6 +960,32 @@ h3 {
 .datasetRow {
   align-items: center;
   grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.versionActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.promotionRow {
+  background: #fbfcfd;
+  border-left: 4px solid #7ca7b4;
+}
+
+.promotionRow.promote {
+  border-left-color: #2d8f5f;
+}
+
+.promotionRow.rollback {
+  border-left-color: #d5aa24;
+}
+
+.promotionRow > span {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
 }
 
 .learningAdapterGrid {
