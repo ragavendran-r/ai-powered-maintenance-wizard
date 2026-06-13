@@ -44,6 +44,8 @@ from app.models.schemas import (
     LearningExampleUpdateRequest,
     LearningJob,
     LearningModelPromotion,
+    LearningModelDeployment,
+    LearningModelDeploymentCreateRequest,
     LearningModelPromotionRequest,
     LearningModelRollbackRequest,
     LearningModelVersion,
@@ -80,6 +82,7 @@ from app.services.learning import (
     create_dataset_snapshot,
     learning_summary,
     promote_model_version,
+    queue_adapter_deployment_job,
     queue_peft_tuning_job,
     record_learning_job,
     record_assistant_interaction,
@@ -775,6 +778,31 @@ def rollback_learning_model_version(
 )
 def list_learning_model_promotions():
     return repository.list_learning_model_promotions(limit=50)
+
+
+@app.get(
+    "/api/learning/model-deployments",
+    response_model=list[LearningModelDeployment],
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_model_deployments():
+    return repository.list_learning_model_deployments(limit=50)
+
+
+@app.post(
+    "/api/learning/model-versions/{model_version_id}/deploy",
+    response_model=LearningJob,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def deploy_learning_model_version(
+    model_version_id: str,
+    request: LearningModelDeploymentCreateRequest,
+    current_user: UserPublic = Depends(get_current_user),
+):
+    try:
+        return queue_adapter_deployment_job(model_version_id, request, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post(

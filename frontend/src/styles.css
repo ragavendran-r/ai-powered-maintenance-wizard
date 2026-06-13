@@ -860,6 +860,7 @@ h3 {
 .learningExamples,
 .versionList,
 .promotionList,
+.deploymentList,
 .datasetList,
 .evaluationList,
 .jobList,
@@ -871,6 +872,7 @@ h3 {
 .learningExample,
 .versionRow,
 .promotionRow,
+.deploymentRow,
 .datasetRow,
 .evaluationRow,
 .jobRow,
@@ -890,6 +892,7 @@ h3 {
 .learningExample small,
 .versionRow small,
 .promotionRow small,
+.deploymentRow small,
 .datasetRow small,
 .jobRow small,
 .artifactRow small {
@@ -902,6 +905,7 @@ h3 {
 .learningExample p,
 .versionRow p,
 .promotionRow p,
+.deploymentRow p,
 .evaluationRow p,
 .jobRow p,
 .artifactRow p {
@@ -986,6 +990,65 @@ h3 {
   display: flex;
   gap: 10px;
   justify-content: space-between;
+}
+
+.deploymentRow {
+  background: #fbfcfd;
+  border-left: 4px solid #7ca7b4;
+}
+
+.deploymentRow.healthy,
+.deploymentRow.verified,
+.deploymentRow.ready {
+  background: #f0f8f5;
+  border-left-color: #2d8f5f;
+}
+
+.deploymentRow.failed,
+.deploymentRow.error,
+.deploymentRow.unhealthy {
+  background: #fff4f4;
+  border-left-color: #ba3944;
+}
+
+.deploymentRow > span {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.deploymentBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.deploymentBadge {
+  background: #edf6f8;
+  border: 1px solid #b9d7de;
+  border-radius: 999px;
+  color: #174f58;
+  font-size: 0.76rem;
+  font-weight: 800;
+  padding: 4px 8px;
+  text-transform: capitalize;
+}
+
+.deploymentBadge.healthy,
+.deploymentBadge.verified,
+.deploymentBadge.ready {
+  background: #dcefe5;
+  border-color: #b9dbc9;
+  color: #17643e;
+}
+
+.deploymentBadge.failed,
+.deploymentBadge.error,
+.deploymentBadge.unhealthy {
+  background: #f4d7d8;
+  border-color: #e2afb3;
+  color: #a3202b;
 }
 
 .learningAdapterGrid {

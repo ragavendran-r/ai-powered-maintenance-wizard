@@ -430,9 +430,31 @@ SCHEMA_STATEMENTS = [
         FOREIGN KEY (evaluation_run_id) REFERENCES learning_evaluation_runs(id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS learning_model_deployments (
+        id TEXT PRIMARY KEY,
+        model_version_id TEXT NOT NULL,
+        job_id TEXT,
+        runtime_provider TEXT NOT NULL,
+        serving_provider TEXT NOT NULL,
+        served_model_name TEXT NOT NULL,
+        base_url TEXT,
+        artifact_uri TEXT,
+        artifact_hash TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        health_status TEXT,
+        health_checked_at TEXT,
+        metadata TEXT NOT NULL DEFAULT '{}',
+        error TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (model_version_id) REFERENCES learning_model_versions(id),
+        FOREIGN KEY (job_id) REFERENCES learning_jobs(id)
+    )
+    """,
 ]
 
-SCHEMA_VERSION = "12"
+SCHEMA_VERSION = "13"
 
 
 def get_database_path() -> Path:
@@ -465,6 +487,8 @@ def initialize_database(seed: bool = True) -> None:
         _ensure_column(connection, "learning_examples", "judged_at", "TEXT")
         _ensure_column(connection, "learning_jobs", "output_refs", "TEXT NOT NULL DEFAULT '{}'")
         _ensure_column(connection, "learning_jobs", "retry_count", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "learning_model_deployments", "metadata", "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(connection, "learning_model_deployments", "error", "TEXT")
         connection.execute(
             """
             INSERT INTO schema_metadata (key, value)

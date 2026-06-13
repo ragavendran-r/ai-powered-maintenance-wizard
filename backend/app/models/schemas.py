@@ -556,8 +556,36 @@ class LearningModelVersionCreateRequest(BaseModel):
     model_name: str
     base_model: Optional[str] = None
     adapter_path: Optional[str] = None
-    status: Literal["candidate", "active", "retired"] = "candidate"
+    status: Literal["candidate"] = "candidate"
     notes: Optional[str] = None
+
+
+class LearningModelDeploymentCreateRequest(BaseModel):
+    runtime_provider: str = "manual"
+    served_model_name: Optional[str] = None
+    base_url: Optional[str] = None
+    artifact_uri: Optional[str] = None
+    artifact_hash: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class LearningModelDeployment(BaseModel):
+    id: str
+    model_version_id: str
+    job_id: Optional[str] = None
+    runtime_provider: str
+    serving_provider: str
+    served_model_name: str
+    base_url: Optional[str] = None
+    artifact_uri: Optional[str] = None
+    artifact_hash: Optional[str] = None
+    status: str
+    health_status: Optional[str] = None
+    health_checked_at: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    error: Optional[str] = None
+    created_at: str
+    updated_at: str
 
 
 class LearningModelPromotionRequest(BaseModel):
@@ -610,6 +638,7 @@ LearningJobType = Literal[
     "dataset_snapshot",
     "evaluation",
     "peft_tuning",
+    "adapter_deployment",
     "adapter_registered",
     "model_promotion",
     "rag_reindex",
@@ -662,6 +691,7 @@ class LearningSummary(BaseModel):
     recent_jobs: list[LearningJob] = []
     recent_artifacts: list[LearningArtifact] = []
     recent_promotions: list[LearningModelPromotion] = []
+    recent_deployments: list[LearningModelDeployment] = []
     serving_model: dict[str, Any] = Field(default_factory=dict)
     artifact_store: dict[str, Any] = Field(default_factory=dict)
     peft_trainer: dict[str, Any] = Field(default_factory=dict)

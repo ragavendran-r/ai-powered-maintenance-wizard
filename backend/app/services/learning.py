@@ -18,6 +18,7 @@ from app.models.schemas import (
     LearningEvaluationCreateRequest,
     LearningJudgeResult,
     LearningJob,
+    LearningModelDeploymentCreateRequest,
     LearningModelPromotionRequest,
     LearningModelRollbackRequest,
     LearningModelVersionCreateRequest,
@@ -39,6 +40,7 @@ LEARNING_JOB_SUBJECTS = {
     "dataset_snapshot": "dataset.requested",
     "evaluation": "evaluation.requested",
     "peft_tuning": "peft.requested",
+    "adapter_deployment": "adapter.deployment.requested",
     "adapter_registered": "adapter.registered",
     "model_promotion": "adapter.promoted",
     "rag_reindex": "rag.reindex.requested",
@@ -160,6 +162,7 @@ def learning_summary() -> LearningSummary:
         recent_jobs=repository.list_learning_jobs(limit=10),
         recent_artifacts=repository.list_learning_artifacts(limit=10),
         recent_promotions=repository.list_learning_model_promotions(limit=10),
+        recent_deployments=repository.list_learning_model_deployments(limit=10),
         serving_model=active_llm_serving_config().public_dict(),
         artifact_store=artifact_store_status(),
         peft_trainer=peft_trainer_status(),
@@ -262,6 +265,7 @@ def promote_model_version(request: LearningModelPromotionRequest, current_user: 
         request.evaluation_run_id,
         request.model_version_id,
     )
+    deployment = _validated_runtime_deployment(model)
     previous_active = next(
         (item for item in repository.list_learning_model_versions() if item["status"] == "active" and item["id"] != model["id"]),
         None,
@@ -300,6 +304,7 @@ def promote_model_version(request: LearningModelPromotionRequest, current_user: 
         },
         output_refs={
             "promotion_id": promotion["id"],
+            "deployment_id": deployment["id"] if deployment else None,
             "active_model_version_id": promoted["id"] if promoted else model["id"],
             "previous_active_model_id": previous_active["id"] if previous_active else None,
         },
@@ -316,6 +321,7 @@ def rollback_model_version(request: LearningModelRollbackRequest, current_user: 
         request.evaluation_run_id,
         request.target_model_version_id,
     )
+    deployment = _validated_runtime_deployment(model)
     previous_active = next(
         (item for item in repository.list_learning_model_versions() if item["status"] == "active" and item["id"] != model["id"]),
         None,
@@ -354,12 +360,69 @@ def rollback_model_version(request: LearningModelRollbackRequest, current_user: 
         },
         output_refs={
             "promotion_id": promotion["id"],
+            "deployment_id": deployment["id"] if deployment else None,
             "active_model_version_id": restored["id"] if restored else model["id"],
             "previous_active_model_id": previous_active["id"] if previous_active else None,
         },
         status="completed",
     )
     return promotion
+
+
+def queue_adapter_deployment_job(
+    model_version_id: str,
+    request: LearningModelDeploymentCreateRequest,
+    current_user: UserPublic,
+) -> LearningJob:
+    model = repository.get_learning_model_version(model_version_id)
+    if not model:
+        raise ValueError("Learning model version not found")
+    if model.get("status") == "active":
+        raise ValueError("Active model versions are already serving and cannot be deployed as candidates")
+    input_refs = {
+        "model_version_id": model["id"],
+        "runtime_provider": request.runtime_provider,
+        "served_model_name": request.served_model_name or model.get("model_name"),
+        "base_url": request.base_url,
+        "artifact_uri": request.artifact_uri or model.get("adapter_path"),
+        "artifact_hash": request.artifact_hash,
+        "notes": request.notes,
+    }
+    job = repository.save_learning_job(
+        {
+            "job_type": "adapter_deployment",
+            "subject": _learning_subject("adapter_deployment"),
+            "status": "queued",
+            "requested_by": current_user.email,
+            "input_refs": input_refs,
+        }
+    )
+    settings = get_settings()
+    if not settings.learning_async_enabled:
+        job = repository.update_learning_job_status(
+            job["id"],
+            "queued",
+            output_refs={
+                "dispatch": "disabled",
+                "message": "Set LEARNING_ASYNC_ENABLED=true to publish this deployment job to NATS JetStream.",
+            },
+        ) or job
+        return LearningJob(**job)
+    try:
+        asyncio.run(_publish_learning_job(job))
+    except Exception as exc:
+        failed_job = repository.update_learning_job_status(job["id"], "failed", error=str(exc))
+        return LearningJob(**(failed_job or job))
+    published_job = repository.update_learning_job_status(
+        job["id"],
+        "published",
+        output_refs={
+            "dispatch": "published",
+            "stream": settings.learning_nats_stream,
+            "subject": job["subject"],
+        },
+    )
+    return LearningJob(**(published_job or job))
 
 
 def _validated_promotable_model(model_version_id: str) -> dict[str, Any]:
@@ -371,6 +434,26 @@ def _validated_promotable_model(model_version_id: str) -> dict[str, Any]:
     if not model.get("adapter_path"):
         raise ValueError("Adapter promotion requires an adapter_path or registered adapter artifact URI")
     return model
+
+
+def _validated_runtime_deployment(model: dict[str, Any]) -> Optional[dict[str, Any]]:
+    if not get_settings().learning_runtime_deployment_required:
+        return repository.get_verified_learning_model_deployment(model["id"])
+    if not model.get("adapter_path"):
+        return None
+    deployment = repository.get_verified_learning_model_deployment(model["id"])
+    if not deployment:
+        raise ValueError("Adapter promotion requires a verified runtime deployment for this model version")
+    artifact_uri = deployment.get("artifact_uri")
+    if artifact_uri and artifact_uri != model.get("adapter_path"):
+        raise ValueError("Verified runtime deployment artifact URI does not match the model adapter path")
+    artifact_hash = deployment.get("artifact_hash")
+    if artifact_hash:
+        artifacts = repository.list_learning_artifacts(limit=100)
+        known_hashes = {artifact.get("content_hash") for artifact in artifacts if artifact.get("content_hash")}
+        if known_hashes and artifact_hash not in known_hashes:
+            raise ValueError("Verified runtime deployment artifact hash does not match a persisted learning artifact")
+    return deployment
 
 
 def _validated_promotion_evaluation(evaluation_run_id: str, model_version_id: str) -> dict[str, Any]:

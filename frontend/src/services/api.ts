@@ -574,6 +574,34 @@ export interface LearningModelVersion {
   created_at: string
 }
 
+export interface LearningModelDeployment {
+  id: string
+  model_version_id: string
+  job_id?: string | null
+  runtime_provider: string
+  serving_provider: string
+  served_model_name: string
+  base_url?: string | null
+  artifact_uri?: string | null
+  artifact_hash?: string | null
+  status: string
+  health_status?: string | null
+  health_checked_at?: string | null
+  metadata: Record<string, unknown>
+  error?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface LearningModelDeploymentRequest {
+  runtime_provider?: string
+  served_model_name?: string
+  base_url?: string
+  artifact_uri?: string
+  artifact_hash?: string
+  notes?: string
+}
+
 export interface LearningPromptVersion {
   id: string
   assistant: string
@@ -618,6 +646,10 @@ export interface LearningServingModel {
   active_model_version_id?: string | null
   adapter_path?: string | null
   base_model?: string | null
+  deployment_id?: string | null
+  runtime_provider?: string | null
+  served_model_name?: string | null
+  health_status?: string | null
   status: string
   warning?: string | null
 }
@@ -657,6 +689,7 @@ export interface LearningSummary {
   recent_jobs: LearningJob[]
   recent_artifacts: LearningArtifact[]
   recent_promotions: LearningModelPromotion[]
+  recent_deployments: LearningModelDeployment[]
   serving_model: LearningServingModel
   artifact_store: Record<string, unknown>
   peft_trainer: Record<string, unknown>
@@ -937,6 +970,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   learningModelPromotions: () => request<LearningModelPromotion[]>('/api/learning/model-promotions'),
+  learningModelDeployments: () => request<LearningModelDeployment[]>('/api/learning/model-deployments'),
+  deployLearningModelVersion: (modelId: string, payload: LearningModelDeploymentRequest) =>
+    request<LearningJob>(`/api/learning/model-versions/${modelId}/deploy`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   learningJobs: () => request<LearningJob[]>('/api/learning/jobs'),
   reindexLearningRag: () =>
     request<LearningJob>('/api/learning/rag/reindex', {

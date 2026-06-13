@@ -66,6 +66,9 @@ class Settings(BaseSettings):
         default=Path(__file__).resolve().parents[2] / "data" / "learning_adapters",
         alias="LEARNING_PEFT_OUTPUT_DIR",
     )
+    learning_runtime_deployment_required: bool = Field(default=True, alias="LEARNING_RUNTIME_DEPLOYMENT_REQUIRED")
+    learning_runtime_deployer_default: str = Field(default="manual", alias="LEARNING_RUNTIME_DEPLOYER_DEFAULT")
+    learning_runtime_deployment_timeout_seconds: float = Field(default=15.0, ge=1.0, alias="LEARNING_RUNTIME_DEPLOYMENT_TIMEOUT_SECONDS")
     rag_vector_store: str = Field(default="qdrant", alias="RAG_VECTOR_STORE")
     rag_qdrant_url: str = Field(default="http://localhost:6333", alias="RAG_QDRANT_URL")
     rag_qdrant_collection: str = Field(default="maintenance_wizard_documents", alias="RAG_QDRANT_COLLECTION")
