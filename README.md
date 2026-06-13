@@ -4,6 +4,16 @@ Working prototype for an AI-powered maintenance decision-support system for stee
 
 The app helps maintenance engineers review plant health, diagnose equipment issues, inspect evidence, prioritize actions, ingest new maintenance context, export structured reports, and capture feedback that improves future recommendations.
 
+## AI Capabilities
+
+The AI layer is an audited maintenance copilot layered after deterministic backend controls. Raw IoT ingestion, anomaly scoring, risk calculation, role permissions, and persisted work-order updates stay in deterministic flows; AI explains, retrieves evidence, guides role-specific work, and helps turn reviewed outcomes into reusable learning material.
+
+- Role-aware assistants: Neo adapts dashboard and work-order assistance for operators, technicians, supervisors, engineers, reliability engineers, and admins. Morpheus supports diagnosis and recommendation generation, while Smith explains degradation, risk, and remaining-useful-life drivers.
+- Evidence-grounded RAG: Production retrieval uses Qdrant for document chunks and approved learning examples, with SQLite-local vector scoring only as a fallback. Prompts can include asset state, alerts, risk/RUL drivers, spares, work history, manuals, SOPs, logs, feedback, and approved assistant interactions.
+- Learning gates: Learning Review combines human approval with an LLM-as-a-Judge rubric before feedback, labels, work-order outcomes, documents, or assistant interactions can be reused for RAG or tuning. Reviewer controls also cover embedding profiles, Qdrant reindexing, and migration checks.
+- PEFT tuning path: Approved, judge-qualified examples can become JSONL snapshots for parameter-efficient fine-tuning. NATS-backed learning jobs write dataset and manifest artifacts with hashes, can invoke the optional bundled Qwen/SLM LoRA or QLoRA trainer template or another external trainer, and register adapter candidates only after training artifacts exist.
+- Practical impact: RAG improves recommendations immediately by grounding answers in current plant evidence. PEFT can later specialize a smaller local model on steel-maintenance terminology, status transitions, failure modes, and approved action patterns, with evaluation, deployment verification, promotion, and rollback remaining reviewer-controlled.
+
 ## Current Capabilities
 
 - FastAPI backend with health, dashboard, asset list/detail section loading, equipment health, alert, chat, diagnosis, prediction, work order, assistant, report, feedback, and learning-review endpoints.
@@ -20,7 +30,7 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 - Production RAG backed by Qdrant vector database, with local SQLite vector scoring only as a fallback.
 - Engineer feedback capture with equipment-linked root cause, action, outcome, and notes normalized into reusable maintenance labels for later recommendations, prediction drivers, and LLM-as-a-Judge training-example review.
 - Learning Review workflow for admin/engineer reviewers to score feedback, labels, completed work orders, approved assistant interactions, and ingested documents with an LLM-as-a-Judge rubric before approving them for RAG reuse or local PEFT tuning snapshots.
-- Durable NATS learning worker for queued judge/dataset/evaluation/PEFT jobs, including local PEFT dataset and training-manifest artifacts with content hashes.
+- Durable NATS learning worker for queued judge/dataset/evaluation/PEFT jobs, including local PEFT dataset and training-manifest artifacts with content hashes, optional external trainer handoff, and a bundled Qwen/SLM LoRA or QLoRA trainer template.
 - Local login and role-based authorization for steel-plant users with admin, engineer, technician, supervisor, planner, operator, and API-only service roles.
 - Role-specific technician and supervisor LLM assistant flows for live work-order directions, problem-code suggestions, completion summaries, follow-up review, and draft follow-up work.
 - Backend and frontend tests for core prototype behavior.
@@ -54,6 +64,7 @@ Important docs:
 - `docs/progress.md`: session-level progress notes and verification history.
 - `docs/demo_script.md`: suggested demo walkthrough.
 - `docs/local-llm-lm-studio.md`: LM Studio setup for local OpenAI-compatible LLM inference.
+- `docs/peft-training.md`: optional Qwen/SLM LoRA or QLoRA trainer template setup and worker contract.
 - `docs/rag-peft-nats-learning-architecture.md`: production design for RAG, PEFT adapter tuning, and NATS-backed async learning jobs.
 - `docs/submission-guide.md`: hackathon packaging guide.
 - `docs/production-hardening.md`: production-readiness gaps and next steps.

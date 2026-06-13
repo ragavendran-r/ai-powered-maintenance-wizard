@@ -24,6 +24,10 @@ Implement a working AI-powered Maintenance Wizard prototype in `/Users/ragaven/w
 
 ## Latest Session Update
 
+- Merged PR #54 (`codex/role-responsive-playwright`) into `main`, fetched the merged `origin/main`, and created `codex/readme-ai-capabilities-merged-main` from that updated base before starting the README work.
+- Added and refined a top-level README `AI Capabilities` section above `Current Capabilities`, covering role-aware assistants, evidence-grounded Qdrant RAG, Learning Review gates, PEFT tuning handoff, and how RAG plus PEFT improve short-term and long-term maintenance AI behavior.
+- Reviewed the README AI content against the latest app implementation and architecture docs, then trimmed redundant wording so the top section is a concise overview while detailed configuration remains in `LLM And Learning Behavior`. Updated the current capabilities/docs list to mention the bundled Qwen/SLM LoRA or QLoRA trainer template and `docs/peft-training.md`.
+
 - Added Playwright role coverage for operator, maintenance technician, maintenance supervisor, maintenance engineer, reliability engineer, and admin using a shared mocked maintenance API fixture. Added responsive Playwright checks for dashboard, asset detail, work orders, ingestion, and learning review across desktop, tablet, and mobile viewports.
 - Made the existing assistant stream E2E independent of a live backend by reusing the mocked auth/bootstrap fixture. Fixed responsive CSS regressions exposed by the new coverage: non-dashboard routes now collapse `.workArea.ingestionMode` at the tablet/mobile breakpoint, asset-detail summary panels reset grid placement, learning RAG controls collapse cleanly, file inputs clip safely, and mobile asset tabs/title wrap instead of causing document overflow.
 - Verification passed for this slice with frontend unit tests, frontend build, full Playwright E2E coverage with 24 passing tests, and `git diff --check`.
