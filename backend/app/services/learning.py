@@ -34,7 +34,11 @@ from app.models.schemas import (
 from app.services.ai_client import active_llm_serving_config, configured_llm_client
 from app.services.artifact_store import artifact_store_status, store_learning_artifact_file
 from app.services.embeddings import current_embedding_profile, embedding_profile_id, supported_embedding_provider
-from app.services.vector_store import plan_qdrant_migration, vector_store_status
+from app.services.vector_store import (
+    plan_qdrant_migration,
+    sync_learning_examples_index,
+    vector_store_status,
+)
 
 
 APPROVED_FEEDBACK_STATUSES = {"accepted", "corrected"}
@@ -104,6 +108,7 @@ def refresh_learning_examples(*, include_documents: bool = True, include_interac
         examples.extend(_examples_from_documents())
     if include_interactions:
         examples.extend(_examples_from_approved_interactions())
+    sync_learning_examples_index(examples, min_judge_score=TRAINING_WORTHY_SCORE)
     return examples
 
 
@@ -678,10 +683,20 @@ def migrate_rag_vectors(request: RagMigrationRequest, current_user: UserPublic) 
             repository.activate_rag_embedding_profile(previous_active["id"])
         raise
     index_result = result.get("index_result", {})
-    if index_result.get("state") == "fallback":
+    learning_index_result = result.get("learning_index_result", {})
+    if (
+        index_result.get("state") == "fallback"
+        or learning_index_result.get("state") == "fallback"
+    ):
         if previous_active:
             repository.activate_rag_embedding_profile(previous_active["id"])
-        raise ValueError(str(index_result.get("error") or "RAG migration failed during vector indexing"))
+        raise ValueError(
+            str(
+                index_result.get("error")
+                or learning_index_result.get("error")
+                or "RAG migration failed during vector indexing"
+            )
+        )
     job = record_learning_job(
         "rag_migration",
         current_user,
@@ -1064,7 +1079,10 @@ def _job_message(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def set_example_approval(example_id: str, approved: bool) -> Optional[dict[str, Any]]:
-    return repository.set_learning_example_approval(example_id, approved)
+    example = repository.set_learning_example_approval(example_id, approved)
+    if example:
+        sync_learning_examples_index([example], min_judge_score=TRAINING_WORTHY_SCORE)
+    return example
 
 
 def rejudge_learning_example(example_id: str) -> Optional[dict[str, Any]]:
@@ -1072,7 +1090,7 @@ def rejudge_learning_example(example_id: str) -> Optional[dict[str, Any]]:
     if not example:
         return None
     judgement = judge_learning_example(example)
-    return repository.update_learning_example_judgement(
+    updated = repository.update_learning_example_judgement(
         example_id,
         judgement.score,
         judgement.label,
@@ -1080,6 +1098,9 @@ def rejudge_learning_example(example_id: str) -> Optional[dict[str, Any]]:
         judgement.provider,
         judgement.used_live_provider,
     )
+    if updated:
+        sync_learning_examples_index([updated], min_judge_score=TRAINING_WORTHY_SCORE)
+    return updated
 
 
 def judge_learning_example(example: dict[str, Any]) -> LearningJudgeResult:

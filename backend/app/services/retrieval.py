@@ -7,7 +7,7 @@ from app.models.schemas import Evidence
 from app.services.learning import TRAINING_WORTHY_SCORE
 from app.services.ai_client import configured_llm_client
 from app.services.vector_index import cosine_similarity, decode_embedding, embed_text, tokenize
-from app.services.vector_store import configured_vector_store_name, search_document_chunks
+from app.services.vector_store import configured_vector_store_name, search_document_chunks, search_learning_examples
 
 
 class RetrievalRerankResult(BaseModel):
@@ -47,6 +47,25 @@ def retrieve_evidence(
                     excerpt=hit.content[:260],
                     equipment_id=hit.equipment_id,
                     relevance_reason=f"Matched by {vector_store_name} vector search.",
+                ),
+            )
+        )
+
+    learning_vector_hits = search_learning_examples(query, equipment_id, max(limit * 2, limit))
+    for hit in learning_vector_hits:
+        if not hit.content or hit.source_id in seen_sources:
+            continue
+        seen_sources.add(hit.source_id)
+        scored.append(
+            (
+                hit.score * 3 + 2.2 + (0.2 if equipment_id and hit.equipment_id == equipment_id else 0),
+                Evidence(
+                    source_type="learning_example",
+                    source_id=hit.source_id,
+                    title=hit.title,
+                    excerpt=hit.content[:260],
+                    equipment_id=hit.equipment_id,
+                    relevance_reason=f"Matched by {vector_store_name} approved learning example search.",
                 ),
             )
         )
@@ -100,6 +119,8 @@ def retrieve_evidence(
         min_judge_score=TRAINING_WORTHY_SCORE,
         limit=25,
     ):
+        if example["id"] in seen_sources:
+            continue
         text = f"{example['instruction']} {example['input_text']} {example['expected_output']}"
         lexical_score = _score(text, terms)
         score = lexical_score * 0.12
