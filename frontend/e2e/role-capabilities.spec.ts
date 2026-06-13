@@ -1,0 +1,109 @@
+import { expect, test, type Page } from '@playwright/test'
+import {
+  openAssetDetail,
+  primaryNavButton,
+  roleUsers,
+  signInAs,
+  type RoleKey,
+} from './maintenance-fixtures'
+
+async function expectPrimaryNav(page: Page, visible: string[], hidden: string[]) {
+  for (const label of visible) {
+    await expect(primaryNavButton(page, label)).toBeVisible()
+  }
+  for (const label of hidden) {
+    await expect(primaryNavButton(page, label)).toHaveCount(0)
+  }
+}
+
+test.describe('role capability rendering', () => {
+  test('operator keeps read-only navigation and hides action surfaces', async ({ page }) => {
+    await signInAs(page, 'operator')
+
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning', 'Users'])
+    await expect(page.getByRole('button', { name: 'Create work order' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Review follow-ups' })).toHaveCount(0)
+
+    await primaryNavButton(page, 'Work Orders').click()
+    await expect(page.getByText('Neo is available to technician and supervisor accounts.')).toBeVisible()
+    await expect(page.getByLabel('Technician execution workflow')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^Approve WO-/ })).toHaveCount(0)
+  })
+
+  test('technician sees assigned execution workflow and technician assistant only', async ({ page }) => {
+    await signInAs(page, 'technician')
+
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning', 'Users'])
+    await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Review follow-ups' })).toHaveCount(0)
+
+    await primaryNavButton(page, 'Work Orders').click()
+    await expect(page.getByLabel('Technician execution workflow')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Technician Execution' })).toBeVisible()
+    await expect(page.getByLabel('Technician observation')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Start work' })).toBeEnabled()
+    await expect(page.getByLabel('Supervisor question')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^Approve WO-/ })).toHaveCount(0)
+  })
+
+  test('supervisor sees review, assignment, and approval controls', async ({ page }) => {
+    await signInAs(page, 'supervisor')
+
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning', 'Users'])
+    await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Review follow-ups' })).toBeVisible()
+
+    await primaryNavButton(page, 'Work Orders').click()
+    await expect(page.getByLabel('Supervisor question')).toBeVisible()
+    await expect(page.getByLabel('Technician observation')).toHaveCount(0)
+    await expect(page.getByLabel('Assign WO-8304')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Approve WO-8311' })).toBeVisible()
+    await expect(page.getByLabel('Technician execution workflow')).toHaveCount(0)
+  })
+
+  test('engineer sees decision support and learning review without ingestion or users', async ({ page }) => {
+    await signInAs(page, 'engineer')
+
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders', 'Learning'], ['Ingestion', 'Users'])
+    await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
+
+    await openAssetDetail(page)
+    await expect(page.getByRole('button', { name: 'Run Morpheus' })).toBeVisible()
+    await expect(page.locator('.summaryActions').getByRole('button', { name: 'Create work order' })).toBeVisible()
+  })
+
+  test('reliability engineer sees ingestion, streaming, decision support, and learning review', async ({ page }) => {
+    await signInAs(page, 'reliability')
+
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders', 'Ingestion', 'Learning'], ['Users'])
+    await openAssetDetail(page)
+    await expect(page.getByRole('button', { name: 'Run Morpheus' })).toBeVisible()
+
+    await primaryNavButton(page, 'Ingestion').click()
+    await expect(page.getByRole('heading', { name: 'Ingestion' })).toBeVisible()
+    await expect(page.getByText('IoT Stream')).toBeVisible()
+    await expect(page.getByText('connected')).toBeVisible()
+  })
+
+  test('admin sees administration surfaces and global review routes', async ({ page }) => {
+    await signInAs(page, 'admin')
+
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders', 'Ingestion', 'Learning', 'Users'], [])
+    await primaryNavButton(page, 'Users').click()
+    await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible()
+    await expect(page.getByLabel('Application users')).toContainText(roleUsers.operator.display_name)
+    await expect(page.getByTitle('Create user')).toBeVisible()
+  })
+
+  test('covers all requested role personas', async () => {
+    const requestedRoles: RoleKey[] = ['operator', 'technician', 'supervisor', 'engineer', 'reliability', 'admin']
+    expect(requestedRoles.map((role) => roleUsers[role].role)).toEqual([
+      'operator',
+      'maintenance_technician',
+      'maintenance_supervisor',
+      'maintenance_engineer',
+      'reliability_engineer',
+      'admin',
+    ])
+  })
+})

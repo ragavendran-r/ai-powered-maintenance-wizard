@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { installMaintenanceApi } from './maintenance-fixtures'
 
 const repeatedResponse = [
   '### Assessment',
@@ -23,7 +24,7 @@ async function signIn(page: Page) {
     await page.getByRole('button', { name: 'Sign In' }).click()
   }
   await expect(page.getByRole('heading', { name: 'Maintenance Wizard' })).toBeVisible()
-  await expect(page.getByText('Plant Admin')).toBeVisible()
+  await expect(page.locator('.userPill strong', { hasText: 'Plant Admin' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible()
 }
 
@@ -49,6 +50,8 @@ async function expectPinnedToBottom(page: Page, selector: string) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await installMaintenanceApi(page)
+
   await page.route('**/api/neo/chat/stream', async (route) => {
     const answer = longAnswer('Neo')
     await route.fulfill({
@@ -80,7 +83,7 @@ test.beforeEach(async ({ page }) => {
           type: 'done',
           recommendation: {
             id: 'PW-MORPHEUS',
-            equipment_id: 'BF-BLOWER-02',
+            equipment_id: 'RM-DRIVE-01',
             diagnosis: 'Playwright diagnosis stream completed.',
             probable_root_causes: ['Validation stream'],
             risk_level: 'high',
@@ -102,7 +105,7 @@ test.beforeEach(async ({ page }) => {
     })
   })
 
-  await page.route('**/api/assets/BF-BLOWER-02/reliability/stream', async (route) => {
+  await page.route('**/api/assets/RM-DRIVE-01/reliability/stream', async (route) => {
     const answer = longAnswer('Smith')
     await route.fulfill({
       contentType: 'text/event-stream',
@@ -113,7 +116,7 @@ test.beforeEach(async ({ page }) => {
           type: 'done',
           answer,
           prediction: {
-            equipment_id: 'BF-BLOWER-02',
+            equipment_id: 'RM-DRIVE-01',
             risk_level: 'high',
             failure_probability: 0.72,
             remaining_useful_life_days: 18,
@@ -131,12 +134,12 @@ test.beforeEach(async ({ page }) => {
 test('keeps Neo, Morpheus, and Smith streams pinned while the page follows them', async ({ page }) => {
   await signIn(page)
 
-  await page.getByLabel('Ask Neo').fill('how to inspect blast furnace combustion air blower')
+  await page.getByLabel('Ask Neo').fill('how to inspect hot strip mill main drive motor')
   await page.getByRole('button', { name: /^Send$/ }).click()
   await expect(page.getByLabel('Neo chat transcript')).toContainText('Neo validation chunk 14')
   await expectPinnedToBottom(page, '.neoTranscript')
 
-  await page.getByRole('button', { name: /Blast Furnace Combustion Air Blower/ }).first().click()
+  await page.getByRole('button', { name: /Hot Strip Mill Main Drive Motor/ }).first().click()
   await page.getByRole('button', { name: 'Run Morpheus' }).click()
   await expect(page.locator('.morpheusProgress')).toContainText('Morpheus validation chunk 14')
   await expectPinnedToBottom(page, '.morpheusProgress')

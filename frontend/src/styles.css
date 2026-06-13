@@ -2568,6 +2568,7 @@ h3 {
 @media (max-width: 1100px) {
   .metricsGrid,
   .workArea,
+  .workArea.ingestionMode,
   .dashboardWithNeo,
   .dashboardKpiBand,
   .dashboardMainGrid,
@@ -2584,6 +2585,9 @@ h3 {
   .learningToolbar,
   .learningStats,
   .learningGrid,
+  .vectorStoreFacts,
+  .migrationPreview,
+  .ragControls,
   .userCreateGrid,
   .userRow {
     grid-template-columns: 1fr;
@@ -2602,10 +2606,32 @@ h3 {
     grid-column: auto;
   }
 
+  .pageHeader {
+    min-width: 0;
+  }
+
+  .pageHeader h1 {
+    overflow-wrap: anywhere;
+  }
+
+  .tabRow {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .tabRow button {
+    flex: 1 1 120px;
+  }
+
   .queuePanel,
   .chartPanel,
   .assetVisual,
-  .neoResultPanel {
+  .neoResultPanel,
+  .summarySubsystems,
+  .summaryHealthStack,
+  .summaryProfile,
+  .summaryInsight,
+  .summaryActions {
     grid-column: auto;
   }
 
@@ -2622,6 +2648,20 @@ h3 {
 
   .workOrderDetail {
     position: static;
+  }
+
+  .ragControls {
+    align-items: stretch;
+  }
+
+  .ragControls button {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .fileField input {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .workOrderHead,

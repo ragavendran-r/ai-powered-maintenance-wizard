@@ -24,6 +24,10 @@ Implement a working AI-powered Maintenance Wizard prototype in `/Users/ragaven/w
 
 ## Latest Session Update
 
+- Added Playwright role coverage for operator, maintenance technician, maintenance supervisor, maintenance engineer, reliability engineer, and admin using a shared mocked maintenance API fixture. Added responsive Playwright checks for dashboard, asset detail, work orders, ingestion, and learning review across desktop, tablet, and mobile viewports.
+- Made the existing assistant stream E2E independent of a live backend by reusing the mocked auth/bootstrap fixture. Fixed responsive CSS regressions exposed by the new coverage: non-dashboard routes now collapse `.workArea.ingestionMode` at the tablet/mobile breakpoint, asset-detail summary panels reset grid placement, learning RAG controls collapse cleanly, file inputs clip safely, and mobile asset tabs/title wrap instead of causing document overflow.
+- Verification passed for this slice with frontend unit tests, frontend build, full Playwright E2E coverage with 24 passing tests, and `git diff --check`.
+
 - Continued G-016 on `codex/qdrant-learning-examples-isolated`: approved, judge-qualified learning examples are now synchronized into Qdrant as first-class RAG entries during learning refresh, reviewer approval changes, rejudge, and full RAG reindex flows. Retrieval now queries Qdrant for both document chunks and approved learning examples, keeps them separated by RAG kind, deduplicates sources, and retains SQLite/local-vector fallback for disconnected or test use.
 - Added regression coverage for Qdrant learning-example retrieval hits and reviewer reindex syncing of approved learning examples. Updated README, RAG+PEFT+NATS design notes, goal tracker, rules, hooks, and `AGENTS.md` to reflect Qdrant-backed learning-example reuse, completion ETA updates, and close-after-use subagent handling.
 - Verification passed for the Qdrant learning-example slice with backend compile, focused backend tests covering Qdrant learning-example retrieval/reindex sync, full backend API tests with 93 passing tests, and `git diff --check`.
