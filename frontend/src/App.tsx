@@ -3378,9 +3378,6 @@ export function App() {
           <h1>Maintenance Wizard</h1>
         </div>
         <div className="statusCluster">
-          <div className={`statusPill ${apiState}`}>
-            {apiState === 'connected' ? 'API connected' : 'Sample view'}
-          </div>
           <div className="userPill">
             <strong>{currentUser?.display_name}</strong>
             <span>{currentUser ? roleLabels[currentUser.role] : ''}</span>

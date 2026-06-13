@@ -899,7 +899,7 @@ async function signIn(email = 'admin@plant.local') {
     fireEvent.change(await screen.findByLabelText('Email'), { target: { value: email } })
   }
   fireEvent.click(await screen.findByRole('button', { name: /sign in/i }))
-  await screen.findByText('API connected')
+  await screen.findByRole('button', { name: 'Logout' })
 }
 
 beforeEach(() => {
@@ -1437,7 +1437,7 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn()
 
-    expect(await screen.findByText('API connected')).toBeInTheDocument()
+    expect(screen.queryByText('API connected')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Assets at risk' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Work queues' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Equipment efficiency' })).toBeInTheDocument()
