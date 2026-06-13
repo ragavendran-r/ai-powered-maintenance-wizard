@@ -3,11 +3,11 @@ from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from app.core.config import get_settings
 from app.data import repository
 from app.models.schemas import Evidence, NeoAction, NeoChatRequest, NeoChatResponse, NeoTable, UserPublic, UserRole
+from app.services.ai_client import configured_llm_client
 from app.services.learning import record_assistant_interaction
-from app.services.llm import LLMTextResponse, build_llm_client
+from app.services.llm import LLMTextResponse
 from app.services.retrieval import retrieve_evidence
 
 
@@ -402,19 +402,7 @@ def _fallback_answer(
 
 
 def _neo_llm_client():
-    settings = get_settings()
-    return build_llm_client(
-        settings.llm_provider,
-        settings.openai_api_key,
-        settings.ollama_base_url,
-        settings.ollama_model,
-        settings.openai_model,
-        settings.openai_base_url,
-        settings.llm_timeout_seconds,
-        settings.llm_structured_max_tokens,
-        settings.llm_text_max_tokens,
-        settings.llm_stream_timeout_seconds,
-    )
+    return configured_llm_client()
 
 
 def _general_evidence_for_message(message: str) -> list[Evidence]:

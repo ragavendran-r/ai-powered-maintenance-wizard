@@ -23,6 +23,7 @@ from app.services.iot_streaming import (
 from app.services.retrieval import retrieve_evidence
 from app.services.document_intelligence import document_intelligence
 from app.services.maintenance_labeling import stored_labels
+from app.services.ai_client import active_llm_serving_config
 from app.services.vector_store import VectorStoreHit
 from app.services.learning_worker import process_learning_job_message
 
@@ -1247,6 +1248,52 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl():
     evaluations_response = client.get("/api/learning/evaluations", headers=headers)
     assert evaluations_response.status_code == 200
     assert any(item["id"] == evaluation["id"] for item in evaluations_response.json())
+
+    promotion_response = client.post(
+        "/api/learning/model-versions/promote",
+        json={
+            "model_version_id": model["id"],
+            "evaluation_run_id": evaluation["id"],
+            "notes": "Promote after passed local evaluation.",
+        },
+        headers=headers,
+    )
+    assert promotion_response.status_code == 200
+    promotion = promotion_response.json()
+    assert promotion["model_version_id"] == model["id"]
+    assert promotion["action"] == "promote"
+
+    serving = active_llm_serving_config(
+        SimpleNamespace(
+            llm_provider="openai",
+            openai_model="env-model",
+            openai_api_key="unused",
+            openai_base_url="http://localhost:1234/v1",
+            ollama_model="env-ollama",
+            ollama_base_url="http://localhost:11434",
+            llm_use_active_learning_model=True,
+        )
+    )
+    assert serving.source == "learning_active_model"
+    assert serving.provider == "openai"
+    assert serving.openai_model == model["model_name"]
+    assert serving.active_model_version_id == model["id"]
+    assert serving.adapter_path == model["adapter_path"]
+
+    mock_serving = active_llm_serving_config(
+        SimpleNamespace(
+            llm_provider="mock",
+            openai_model="env-model",
+            openai_api_key=None,
+            openai_base_url="http://localhost:1234/v1",
+            ollama_model="env-ollama",
+            ollama_base_url="http://localhost:11434",
+            llm_use_active_learning_model=True,
+        )
+    )
+    assert mock_serving.source == "environment"
+    assert mock_serving.provider == "mock"
+    assert "disabled for mock provider" in mock_serving.warning
 
     peft_job_response = client.post(
         "/api/learning/jobs/peft",

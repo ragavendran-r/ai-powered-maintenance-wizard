@@ -661,6 +661,7 @@ class LearningSummary(BaseModel):
     recent_jobs: list[LearningJob] = []
     recent_artifacts: list[LearningArtifact] = []
     recent_promotions: list[LearningModelPromotion] = []
+    serving_model: dict[str, Any] = Field(default_factory=dict)
     vector_store: dict[str, Any] = Field(default_factory=dict)
 
 

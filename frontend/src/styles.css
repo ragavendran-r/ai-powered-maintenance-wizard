@@ -795,7 +795,8 @@ h3 {
   font-size: 1.7rem;
 }
 
-.vectorStoreStatus {
+.vectorStoreStatus,
+.servingModelStatus {
   align-items: center;
   background: #f7fafb;
   border: 1px solid #dce6eb;
@@ -807,14 +808,25 @@ h3 {
   padding: 10px 12px;
 }
 
-.vectorStoreStatus span {
+.vectorStoreStatus span,
+.servingModelStatus span {
   display: grid;
   gap: 2px;
 }
 
-.vectorStoreStatus small {
+.vectorStoreStatus small,
+.servingModelStatus small {
   color: #60717c;
   font-weight: 700;
+}
+
+.servingModelStatus {
+  align-items: start;
+  justify-content: start;
+}
+
+.servingModelStatus strong {
+  overflow-wrap: anywhere;
 }
 
 .learningGrid {

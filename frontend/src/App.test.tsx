@@ -676,6 +676,19 @@ function learningSummaryPayload(
     recent_jobs: jobs,
     recent_artifacts: artifacts,
     recent_promotions: promotions,
+    serving_model: {
+      provider: 'openai',
+      openai_model: 'qwen2.5-7b-instruct',
+      ollama_model: 'llama3.1',
+      openai_base_url: 'http://localhost:1234/v1',
+      ollama_base_url: 'http://localhost:11434',
+      source: 'learning_active_model',
+      active_model_version_id: 'model-local-qwen2.5-current',
+      adapter_path: null,
+      base_model: 'Qwen2.5',
+      status: 'active',
+      warning: null,
+    },
     vector_store: {
       store: 'qdrant',
       enabled: true,
@@ -1543,6 +1556,9 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText(/Review approved human feedback/)).toBeInTheDocument()
     expect(screen.getByText('RAG vector DB')).toBeInTheDocument()
     expect(screen.getByText('qdrant · ready')).toBeInTheDocument()
+    expect(screen.getByText('Serving LLM')).toBeInTheDocument()
+    expect(screen.getByText('learning active model · openai')).toBeInTheDocument()
+    expect(screen.getByText('model-local-qwen2.5-current')).toBeInTheDocument()
     expect(screen.getByText('82% · training worthy')).toBeInTheDocument()
     expect(screen.getByText('Live LLM judge · openai')).toBeInTheDocument()
     expect(screen.getByText(/Specific, outcome-backed feedback/)).toBeInTheDocument()

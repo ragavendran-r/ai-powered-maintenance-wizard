@@ -608,6 +608,20 @@ export interface LearningModelPromotion {
   created_at: string
 }
 
+export interface LearningServingModel {
+  provider: string
+  openai_model: string
+  ollama_model: string
+  openai_base_url: string
+  ollama_base_url: string
+  source: string
+  active_model_version_id?: string | null
+  adapter_path?: string | null
+  base_model?: string | null
+  status: string
+  warning?: string | null
+}
+
 export interface LearningJob {
   id: string
   job_type: string
@@ -643,6 +657,7 @@ export interface LearningSummary {
   recent_jobs: LearningJob[]
   recent_artifacts: LearningArtifact[]
   recent_promotions: LearningModelPromotion[]
+  serving_model: LearningServingModel
   vector_store: {
     store?: string
     enabled?: boolean

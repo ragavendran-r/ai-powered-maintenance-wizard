@@ -22,7 +22,7 @@ from app.models.schemas import (
     LearningSummary,
     UserPublic,
 )
-from app.services.ai_client import configured_llm_client
+from app.services.ai_client import active_llm_serving_config, configured_llm_client
 from app.services.vector_store import vector_store_status
 
 
@@ -155,6 +155,7 @@ def learning_summary() -> LearningSummary:
         recent_jobs=repository.list_learning_jobs(limit=10),
         recent_artifacts=repository.list_learning_artifacts(limit=10),
         recent_promotions=repository.list_learning_model_promotions(limit=10),
+        serving_model=active_llm_serving_config().public_dict(),
         vector_store=vector_store_status(),
     )
 

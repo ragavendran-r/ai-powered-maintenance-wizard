@@ -2507,6 +2507,40 @@ export function App() {
           <strong>{learningSummary?.vector_store?.collection ?? 'local fallback'}</strong>
         </span>
       </div>
+      <div className="servingModelStatus">
+        <span>
+          <strong>Serving LLM</strong>
+          <small>
+            {learningSummary?.serving_model?.source?.replace(/_/g, ' ') ?? 'unknown'} · {learningSummary?.serving_model?.provider ?? 'unknown'}
+          </small>
+        </span>
+        <span>
+          <small>Model</small>
+          <strong>
+            {learningSummary?.serving_model?.provider === 'ollama'
+              ? learningSummary?.serving_model?.ollama_model
+              : learningSummary?.serving_model?.openai_model}
+          </strong>
+        </span>
+        {learningSummary?.serving_model?.active_model_version_id && (
+          <span>
+            <small>Active version</small>
+            <strong>{learningSummary.serving_model.active_model_version_id}</strong>
+          </span>
+        )}
+        {learningSummary?.serving_model?.adapter_path && (
+          <span>
+            <small>Adapter</small>
+            <strong>{learningSummary.serving_model.adapter_path}</strong>
+          </span>
+        )}
+        {learningSummary?.serving_model?.warning && (
+          <span>
+            <small>Status</small>
+            <strong>{learningSummary.serving_model.warning}</strong>
+          </span>
+        )}
+      </div>
       <div className="learningGrid">
         <section className="learningPanel">
           <h3>Approved Controls</h3>

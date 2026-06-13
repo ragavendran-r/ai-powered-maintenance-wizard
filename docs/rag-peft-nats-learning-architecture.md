@@ -81,6 +81,8 @@ Adapter promotion requires:
 - Evaluation run passing quality and regression thresholds.
 - Authorized reviewer approval.
 
+After promotion, real LLM providers resolve the active `learning_model_versions` record before constructing the serving client. This makes Neo, Morpheus, Smith, recommendation, labeling, reranking, and document-intelligence calls use the promoted model id while keeping the `mock` provider deterministic for tests. External adapter registry/runtime deployment is still required to make a newly trained adapter artifact available to LM Studio, Ollama, or another serving runtime.
+
 ## NATS Subjects
 
 Use separate subjects from IoT ingestion so learning jobs can be scaled and secured independently.
@@ -212,5 +214,5 @@ Production should track:
 4. Run the learning worker process against NATS JetStream.
 5. Move large JSONL/model artifacts to object storage.
 6. Add PEFT worker integration for local Qwen/SLM LoRA jobs.
-7. Add production registry integration so promoted adapters can be activated by the serving runtime without manual path changes.
+7. Add production registry integration so PEFT adapter outputs are deployed into the serving runtime without manual path changes.
 8. Move prototype SQLite learning state to Postgres for multi-worker production use.
