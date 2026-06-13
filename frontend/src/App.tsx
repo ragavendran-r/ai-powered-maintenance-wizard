@@ -829,7 +829,18 @@ export function App() {
       const summary = await api.learningSummary()
       setLearningSummary(summary)
       const chunkCount = Number(job.output_refs?.chunk_count ?? 0)
-      setLearningMessage(`Reindexed ${chunkCount} RAG chunk${chunkCount === 1 ? '' : 's'} with status ${job.status}`)
+      const learningIndexResult = (job.output_refs?.learning_index_result ?? null) as Record<string, unknown> | null
+      const rawLearningIndexed = Number(learningIndexResult?.indexed ?? 0)
+      const learningIndexed = Number.isFinite(rawLearningIndexed) ? rawLearningIndexed : 0
+      const learningEligible = Number(learningIndexResult?.eligible ?? learningIndexed)
+      const learningDetail = learningIndexResult
+        ? [
+            ` and synced ${learningIndexed} approved learning example${learningIndexed === 1 ? '' : 's'}`,
+            learningIndexResult.state ? ` (${String(learningIndexResult.state)})` : '',
+            Number.isFinite(learningEligible) && learningEligible !== learningIndexed ? ` from ${learningEligible} eligible` : '',
+          ].join('')
+        : ''
+      setLearningMessage(`Reindexed ${chunkCount} RAG chunk${chunkCount === 1 ? '' : 's'}${learningDetail} with status ${job.status}`)
     } catch {
       setLearningMessage('RAG vector reindex could not be completed')
     } finally {

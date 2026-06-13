@@ -1170,6 +1170,15 @@ beforeEach(() => {
                   indexed: 14,
                   state: 'indexed',
                 },
+                learning_example_count: 1,
+                learning_index_result: {
+                  store: 'qdrant',
+                  collection: 'maintenance_wizard_documents',
+                  eligible: 1,
+                  indexed: 1,
+                  deleted: 0,
+                  state: 'synced',
+                },
               },
             }),
             { status: 200 },
@@ -1878,7 +1887,9 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Migration preview')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Reindex current profile' }))
-    expect(await screen.findByText('Reindexed 14 RAG chunks with status completed')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Reindexed 14 RAG chunks and synced 1 approved learning example (synced) with status completed'),
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Promote adapter' }))
     expect(await screen.findByText('Promoted adapter qwen2.5-7b-instruct-lora-candidate with audit record LPROMO-NEW')).toBeInTheDocument()
