@@ -24,6 +24,7 @@ Implement a working AI-powered Maintenance Wizard prototype in `/Users/ragaven/w
 
 ## Latest Session Update
 
+- Expanded the README `AI Capabilities` section with supported `mock`, `openai`, and `ollama` LLM provider modes; specific Neo, Morpheus, and Smith responsibilities; the local LM Studio + Qwen2.5 7B Instruct runtime path; the exact OpenAI-compatible application configuration; active learning model handoff; and the low-latency settings that matter for local operation. Shortened the later configuration note to avoid duplicating the same content.
 - Merged PR #54 (`codex/role-responsive-playwright`) into `main`, fetched the merged `origin/main`, and created `codex/readme-ai-capabilities-merged-main` from that updated base before starting the README work.
 - Added and refined a top-level README `AI Capabilities` section above `Current Capabilities`, covering role-aware assistants, evidence-grounded Qdrant RAG, Learning Review gates, PEFT tuning handoff, and how RAG plus PEFT improve short-term and long-term maintenance AI behavior.
 - Removed the redundant README `LLM And Learning Behavior` section after reviewing the AI content again, leaving the top-level `AI Capabilities` section as the single README summary for role-aware assistants, RAG, Learning Review gates, and PEFT tuning. The detailed implementation notes remain in linked architecture/training docs instead of a second README AI section.
