@@ -23,6 +23,7 @@ from app.models.schemas import (
     UserPublic,
 )
 from app.services.ai_client import active_llm_serving_config, configured_llm_client
+from app.services.artifact_store import artifact_store_status, store_learning_artifact_file
 from app.services.vector_store import vector_store_status
 
 
@@ -156,6 +157,7 @@ def learning_summary() -> LearningSummary:
         recent_artifacts=repository.list_learning_artifacts(limit=10),
         recent_promotions=repository.list_learning_model_promotions(limit=10),
         serving_model=active_llm_serving_config().public_dict(),
+        artifact_store=artifact_store_status(),
         vector_store=vector_store_status(),
     )
 
@@ -568,13 +570,20 @@ def _register_file_artifact(
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
     content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    stored = store_learning_artifact_file(
+        job_id=job_id,
+        artifact_type=artifact_type,
+        path=path,
+        content_hash=content_hash,
+        metadata=metadata,
+    )
     return repository.save_learning_artifact(
         {
             "job_id": job_id,
             "artifact_type": artifact_type,
-            "uri": str(path),
+            "uri": stored.uri,
             "content_hash": content_hash,
-            "metadata": metadata,
+            "metadata": stored.metadata,
         }
     )
 

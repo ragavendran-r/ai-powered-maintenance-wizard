@@ -97,8 +97,8 @@ flowchart LR
 - Risk service: deterministic alert severity, asset criticality, spares constraints, and event-history scoring.
 - Anomaly service: rolling-baseline and z-score analysis over persisted sensor readings, plus optional LLM/SLM context classification and inspection steps.
 - Maintenance labeling service: optional LLM/SLM normalization of maintenance history and feedback into failure-mode, component, root-cause, action-class, outcome, and signal-hint labels.
-- Learning service: captures assistant interactions, converts feedback/labels/work-order outcomes/documents into candidate examples, scores them with an LLM-as-a-Judge rubric, preserves human approval state, exports judge-qualified JSONL snapshots for local adapter tuning, and provides reviewer controls for model versions and evaluation runs.
-- Async learning workers: NATS JetStream subjects under `maintenance.learning.*` drive judge, dataset, evaluation, and PEFT preparation jobs outside the FastAPI request path with retries, DLQ handling, persisted job status, and artifact registration.
+- Learning service: captures assistant interactions, converts feedback/labels/work-order outcomes/documents into candidate examples, scores them with an LLM-as-a-Judge rubric, preserves human approval state, exports judge-qualified JSONL snapshots for local adapter tuning, and provides reviewer controls for model versions, evaluation runs, and artifact storage.
+- Async learning workers: NATS JetStream subjects under `maintenance.learning.*` drive judge, dataset, evaluation, and PEFT preparation jobs outside the FastAPI request path with retries, DLQ handling, persisted job status, and filesystem or S3-compatible artifact registration.
 - Recommendation service: combines retrieved evidence, approved judge-qualified learning examples, risk scoring, prediction, normalized labels, prior engineer feedback, reasoning explanations, and optional LLM-adapter context.
 - Work-order assistant service: combines persisted work-order state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM output to suggest live directions, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work. Neo has role-aware work-order modes: technician mode is restricted to `maintenance_technician`, and supervisor mode is restricted to `maintenance_supervisor`; both use the shared LLM provider, model, token-limit, and streaming configuration. Dashboard Neo starts with a deterministic role-aware welcome and attention table, then routes deterministic role-aware commands for asset section summaries, assigned-work next steps, work-order creation/status updates, and admin user management through backend repository functions. Chat panels consume streaming SSE responses and apply final structured events for app-owned fields.
 - Report service: formats recommendations as structured Markdown for supervisor handoff or demo export, including learning notes.
@@ -151,7 +151,7 @@ flowchart LR
   - `POST /api/learning/evaluations` records an evaluation run for a dataset/model/prompt combination.
   - `GET /api/learning/evaluations` lists recent evaluation runs.
   - `GET /api/learning/jobs` lists recent persisted learning jobs.
-  - `POST /api/learning/jobs/peft` queues a PEFT tuning job for a dataset/model/prompt combination and publishes it to NATS when async learning is enabled. The learning worker prepares JSONL dataset and training-manifest artifacts and records their hashes.
+  - `POST /api/learning/jobs/peft` queues a PEFT tuning job for a dataset/model/prompt combination and publishes it to NATS when async learning is enabled. The learning worker prepares JSONL dataset and training-manifest artifacts, stores them through the configured artifact backend, and records their hashes and URIs.
 
 ## Data Flow
 
@@ -170,7 +170,7 @@ flowchart LR
 13. Feedback is stored in SQLite, normalized into labels, and reused in future recommendation prompts, deterministic action/root-cause ranking, learning notes, reports, and prediction drivers.
 14. Candidate training examples are built from feedback, labels, completed work orders, approved assistant interactions, and ingested documents, then scored by LLM-as-a-Judge with deterministic fallback.
 15. Approved examples with judge scores at or above the configured threshold feed retrieval/prompt context immediately and can be exported as JSONL snapshots for offline PEFT/LoRA tuning.
-16. Production learning jobs publish to NATS JetStream for asynchronous judge, dataset, evaluation, and PEFT workers; workers persist job status, artifacts, metrics, and candidate model versions before any adapter is promoted. The current PEFT worker stage prepares audited local artifacts for an external trainer instead of claiming adapter training is complete.
+16. Production learning jobs publish to NATS JetStream for asynchronous judge, dataset, evaluation, and PEFT workers; workers persist job status, artifacts, metrics, and candidate model versions before any adapter is promoted. The current PEFT worker stage prepares audited filesystem or S3-compatible artifacts for an external trainer instead of claiming adapter training is complete.
 
 ## LLM Boundaries
 
@@ -193,11 +193,11 @@ Engineer feedback is persisted with equipment context and then reused through a 
 - Approved examples above the default `0.65` judge threshold are available to retrieval and recommendation prompts as high-quality learning context; production retrieval uses Qdrant so approved knowledge can scale beyond SQLite scans.
 - The same approved, judge-qualified examples can be exported as JSONL for offline local PEFT/LoRA adapter tuning.
 - Persisted `learning_jobs` records provide an audit trail for refresh, judge, dataset, evaluation, adapter registration, and PEFT tuning requests.
-- NATS JetStream is the production async backbone for large judge, dataset, evaluation, and PEFT jobs. PEFT queue requests publish to NATS when `LEARNING_ASYNC_ENABLED=true`; the worker consumes those jobs and prepares durable artifacts while synchronous reviewer actions remain available only for small local/demo reviewer flows.
+- NATS JetStream is the production async backbone for large judge, dataset, evaluation, and PEFT jobs. PEFT queue requests publish to NATS when `LEARNING_ASYNC_ENABLED=true`; the worker consumes those jobs and prepares durable filesystem or S3-compatible artifacts while synchronous reviewer actions remain available only for small local/demo reviewer flows.
 - Learning notes appear in recommendations and Markdown reports.
 - Prediction drivers include feedback count, confirmed root causes, outcomes, normalized maintenance labels, and bounded risk adjustments.
 
-This is not automated online self-training. The prototype supports auditable RAG reuse, PEFT-ready dataset preparation, persisted learning jobs, NATS worker execution, local PEFT artifact preparation, artifact hashes, and PEFT job queueing; production training remains an explicit NATS-backed offline/admin-controlled workflow with external trainer execution, object storage, evaluation, and promotion gates.
+This is not automated online self-training. The prototype supports auditable RAG reuse, PEFT-ready dataset preparation, persisted learning jobs, NATS worker execution, local or S3-compatible PEFT artifact storage, artifact hashes, and PEFT job queueing; production training remains an explicit NATS-backed offline/admin-controlled workflow with external trainer execution, object bucket lifecycle controls, evaluation, and promotion gates.
 
 ## Current Prototype Limits
 

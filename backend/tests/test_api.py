@@ -24,6 +24,7 @@ from app.services.retrieval import retrieve_evidence
 from app.services.document_intelligence import document_intelligence
 from app.services.maintenance_labeling import stored_labels
 from app.services.ai_client import active_llm_serving_config
+from app.services.artifact_store import artifact_store_status, store_learning_artifact_file
 from app.services.vector_store import VectorStoreHit
 from app.services.learning_worker import process_learning_job_message
 
@@ -1194,6 +1195,8 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl():
     assert any(example["judge_score"] > 0 for example in summary["recent_examples"])
     assert "recent_jobs" in summary
     assert summary["vector_store"]["store"] == "sqlite"
+    assert summary["artifact_store"]["store"] == "filesystem"
+    assert summary["artifact_store"]["state"] == "ready"
 
     dataset_response = client.post(
         "/api/learning/datasets",
@@ -1434,6 +1437,60 @@ def test_learning_worker_prepares_peft_artifacts(monkeypatch, tmp_path):
     for artifact in artifacts:
         assert artifact["content_hash"]
         assert artifact["uri"].startswith(str(tmp_path))
+        assert artifact["metadata"]["storage_backend"] == "filesystem"
+        assert artifact["metadata"]["content_hash_algorithm"] == "sha256"
+
+
+def test_learning_artifact_store_supports_s3_uri_registration(monkeypatch, tmp_path):
+    artifact_path = tmp_path / "dataset.jsonl"
+    artifact_path.write_text('{"messages":[]}\n', encoding="utf-8")
+    uploads = []
+
+    class FakeS3Client:
+        def upload_file(self, filename, bucket, key, ExtraArgs=None):
+            uploads.append(
+                {
+                    "filename": filename,
+                    "bucket": bucket,
+                    "key": key,
+                    "extra_args": ExtraArgs or {},
+                }
+            )
+
+    settings = SimpleNamespace(
+        learning_artifact_store="s3",
+        learning_artifact_dir=tmp_path,
+        learning_artifact_s3_bucket="mw-learning",
+        learning_artifact_s3_prefix="peft",
+        learning_artifact_s3_endpoint_url="http://minio:9000",
+        learning_artifact_s3_region="us-east-1",
+    )
+    monkeypatch.setattr("app.services.artifact_store._s3_client", lambda _: FakeS3Client())
+
+    status = artifact_store_status(settings)
+    stored = store_learning_artifact_file(
+        job_id="LJOB-S3",
+        artifact_type="peft_dataset_jsonl",
+        path=artifact_path,
+        content_hash="abc123",
+        metadata={"dataset_id": "LDS-1"},
+        settings=settings,
+    )
+
+    assert status["state"] == "configured"
+    assert stored.uri == "s3://mw-learning/peft/LJOB-S3/peft_dataset_jsonl/dataset.jsonl"
+    assert stored.metadata["storage_backend"] == "s3"
+    assert stored.metadata["bucket"] == "mw-learning"
+    assert stored.metadata["object_key"] == "peft/LJOB-S3/peft_dataset_jsonl/dataset.jsonl"
+    assert stored.metadata["local_retained"] is True
+    assert uploads == [
+        {
+            "filename": str(artifact_path),
+            "bucket": "mw-learning",
+            "key": "peft/LJOB-S3/peft_dataset_jsonl/dataset.jsonl",
+            "extra_args": {"Metadata": {"job-id": "LJOB-S3", "artifact-type": "peft_dataset_jsonl", "sha256": "abc123"}},
+        }
+    ]
 
 
 def test_learning_example_can_be_scored_by_judge_endpoint():

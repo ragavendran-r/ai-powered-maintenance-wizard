@@ -796,7 +796,8 @@ h3 {
 }
 
 .vectorStoreStatus,
-.servingModelStatus {
+.servingModelStatus,
+.artifactStoreStatus {
   align-items: center;
   background: #f7fafb;
   border: 1px solid #dce6eb;
@@ -809,23 +810,27 @@ h3 {
 }
 
 .vectorStoreStatus span,
-.servingModelStatus span {
+.servingModelStatus span,
+.artifactStoreStatus span {
   display: grid;
   gap: 2px;
 }
 
 .vectorStoreStatus small,
-.servingModelStatus small {
+.servingModelStatus small,
+.artifactStoreStatus small {
   color: #60717c;
   font-weight: 700;
 }
 
-.servingModelStatus {
+.servingModelStatus,
+.artifactStoreStatus {
   align-items: start;
   justify-content: start;
 }
 
-.servingModelStatus strong {
+.servingModelStatus strong,
+.artifactStoreStatus strong {
   overflow-wrap: anywhere;
 }
 

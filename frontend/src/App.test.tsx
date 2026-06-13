@@ -689,6 +689,11 @@ function learningSummaryPayload(
       status: 'active',
       warning: null,
     },
+    artifact_store: {
+      store: 'filesystem',
+      local_dir: 'backend/data/learning_artifacts',
+      state: 'ready',
+    },
     vector_store: {
       store: 'qdrant',
       enabled: true,
@@ -1559,6 +1564,8 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Serving LLM')).toBeInTheDocument()
     expect(screen.getByText('learning active model · openai')).toBeInTheDocument()
     expect(screen.getByText('model-local-qwen2.5-current')).toBeInTheDocument()
+    expect(screen.getByText('Artifact store')).toBeInTheDocument()
+    expect(screen.getByText('filesystem · ready')).toBeInTheDocument()
     expect(screen.getByText('82% · training worthy')).toBeInTheDocument()
     expect(screen.getByText('Live LLM judge · openai')).toBeInTheDocument()
     expect(screen.getByText(/Specific, outcome-backed feedback/)).toBeInTheDocument()

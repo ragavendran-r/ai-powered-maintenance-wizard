@@ -53,6 +53,11 @@ class Settings(BaseSettings):
         default=Path(__file__).resolve().parents[2] / "data" / "learning_artifacts",
         alias="LEARNING_ARTIFACT_DIR",
     )
+    learning_artifact_store: str = Field(default="filesystem", alias="LEARNING_ARTIFACT_STORE")
+    learning_artifact_s3_bucket: Optional[str] = Field(default=None, alias="LEARNING_ARTIFACT_S3_BUCKET")
+    learning_artifact_s3_prefix: str = Field(default="maintenance-wizard/learning", alias="LEARNING_ARTIFACT_S3_PREFIX")
+    learning_artifact_s3_endpoint_url: Optional[str] = Field(default=None, alias="LEARNING_ARTIFACT_S3_ENDPOINT_URL")
+    learning_artifact_s3_region: str = Field(default="us-east-1", alias="LEARNING_ARTIFACT_S3_REGION")
     rag_vector_store: str = Field(default="qdrant", alias="RAG_VECTOR_STORE")
     rag_qdrant_url: str = Field(default="http://localhost:6333", alias="RAG_QDRANT_URL")
     rag_qdrant_collection: str = Field(default="maintenance_wizard_documents", alias="RAG_QDRANT_COLLECTION")

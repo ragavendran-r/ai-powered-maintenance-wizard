@@ -115,7 +115,7 @@ Current implementation:
 - `LEARNING_ASYNC_ENABLED=true` is the production default. The API ensures the `MW_LEARNING` stream and publishes the job envelope to NATS.
 - `LEARNING_ASYNC_ENABLED=false` is allowed only for deterministic tests, disconnected development, or emergency fallback; PEFT jobs remain persisted as queued local jobs in that mode.
 - `python -m app.learning_worker` runs the durable worker process. The local stack starts it automatically, and the local Kubernetes runner deploys it as a backend sidecar for shared local SQLite state.
-- Worker-executed PEFT jobs currently prepare a JSONL dataset artifact and training manifest, persist `learning_artifacts` rows with content hashes, and mark the job completed with `training_status=awaiting_external_peft_trainer`.
+- Worker-executed PEFT jobs currently prepare a JSONL dataset artifact and training manifest, persist `learning_artifacts` rows with content hashes, and mark the job completed with `training_status=awaiting_external_peft_trainer`. Artifacts can be stored on the local filesystem for offline runs or uploaded to S3-compatible object storage such as MinIO by setting `LEARNING_ARTIFACT_STORE=s3`.
 
 ## Vector Store
 
@@ -150,7 +150,7 @@ The local stack starts Qdrant with NATS and the app. The local Kubernetes runner
 
 - Selects approved judge-qualified examples.
 - Creates immutable JSONL snapshots.
-- Writes large artifacts to object storage.
+- Writes large artifacts to filesystem or S3-compatible object storage.
 - Stores metadata and content hash.
 
 **Evaluation worker**
@@ -212,7 +212,7 @@ Production should track:
 2. Keep Qdrant and NATS enabled in dev, local Kubernetes, and production-like runs.
 3. Keep `learning_jobs`, `learning_artifacts`, and NATS publishing enabled for production-like runs.
 4. Run the learning worker process against NATS JetStream.
-5. Move large JSONL/model artifacts to object storage.
+5. Configure S3-compatible artifact storage for production-like runs and add bucket retention/access policies.
 6. Add PEFT worker integration for local Qwen/SLM LoRA jobs.
 7. Add production registry integration so PEFT adapter outputs are deployed into the serving runtime without manual path changes.
 8. Move prototype SQLite learning state to Postgres for multi-worker production use.

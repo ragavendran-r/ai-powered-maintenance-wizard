@@ -2541,6 +2541,30 @@ export function App() {
           </span>
         )}
       </div>
+      <div className="artifactStoreStatus">
+        <span>
+          <strong>Artifact store</strong>
+          <small>
+            {String(learningSummary?.artifact_store?.store ?? 'unknown')} · {String(learningSummary?.artifact_store?.state ?? 'not checked')}
+          </small>
+        </span>
+        <span>
+          <small>Location</small>
+          <strong>
+            {String(
+              learningSummary?.artifact_store?.store === 's3'
+                ? learningSummary?.artifact_store?.bucket ?? 'bucket not configured'
+                : learningSummary?.artifact_store?.local_dir ?? 'local dir not configured',
+            )}
+          </strong>
+        </span>
+        {Boolean(learningSummary?.artifact_store?.prefix) && (
+          <span>
+            <small>Prefix</small>
+            <strong>{String(learningSummary?.artifact_store?.prefix)}</strong>
+          </span>
+        )}
+      </div>
       <div className="learningGrid">
         <section className="learningPanel">
           <h3>Approved Controls</h3>
