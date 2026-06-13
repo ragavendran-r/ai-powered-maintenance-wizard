@@ -12,6 +12,7 @@ Use this file for durable product and engineering rules. Use `docs/hooks.md` for
 
 ## Verification
 
+- For sizable tasks, spawn independent agents in parallel whenever the tool is available and the work can be split safely. Keep the main thread responsible for integrating, testing, documenting, and resolving conflicts from agent output.
 - Backend changes require:
   - `PYTHONPYCACHEPREFIX=.pycache python3 -m compileall backend/app`
   - `cd backend && .venv/bin/pytest`

@@ -117,6 +117,7 @@ Current implementation:
 - `python -m app.learning_worker` runs the durable worker process. The local stack starts it automatically, and the local Kubernetes runner deploys it as a backend sidecar for shared local SQLite state.
 - Worker-executed PEFT jobs prepare a JSONL dataset artifact and training manifest, persist `learning_artifacts` rows with content hashes, and mark the job as awaiting a trainer when no trainer command is configured. Artifacts can be stored on the local filesystem for offline runs or uploaded to S3-compatible object storage such as MinIO by setting `LEARNING_ARTIFACT_STORE=s3`.
 - When `LEARNING_PEFT_TRAINER_COMMAND` is configured, the worker invokes the command without a shell, passes dataset/manifest/output paths through environment variables, enforces `LEARNING_PEFT_TRAINER_TIMEOUT_SECONDS`, stores trainer logs and adapter manifests, and registers the result as a `candidate` model version. The promotion gate still requires a passing evaluation and human reviewer action.
+- The bundled `scripts/peft/train_qwen_lora.py` template provides an optional local Qwen/SLM LoRA or QLoRA path. It consumes the worker-provided `MW_PEFT_DATASET_PATH`, `MW_PEFT_MANIFEST_PATH`, `MW_PEFT_OUTPUT_DIR`, `MW_PEFT_ADAPTER_NAME`, and `MW_PEFT_BASE_MODEL` variables, imports heavy trainer dependencies only during real training, and writes `adapter_manifest.json` in the registration format the backend consumes.
 
 ## Vector Store
 
@@ -165,7 +166,7 @@ The local stack starts Qdrant with NATS and the app. The local Kubernetes runner
 - Runs configured external LoRA/QLoRA training outside the web request path.
 - Stores adapter artifacts and training logs.
 - Registers the adapter as `candidate`, never automatically `active`.
-- Current implementation provides the safe external-command orchestration hook and adapter registration path; bundled Qwen/SLM LoRA/QLoRA trainer templates remain a follow-up stage.
+- Current implementation provides the safe external-command orchestration hook, adapter registration path, and a bundled optional Qwen/SLM LoRA/QLoRA trainer template documented in `docs/peft-training.md`.
 
 ## Persistence
 
@@ -214,6 +215,6 @@ Production should track:
 3. Keep `learning_jobs`, `learning_artifacts`, and NATS publishing enabled for production-like runs.
 4. Run the learning worker process against NATS JetStream.
 5. Configure S3-compatible artifact storage for production-like runs and add bucket retention/access policies.
-6. Add bundled PEFT worker templates for local Qwen/SLM LoRA jobs.
+6. Validate the bundled PEFT trainer template on the target CUDA or LoRA training host before enabling it in shared environments.
 7. Add production registry integration so PEFT adapter outputs are deployed into the serving runtime without manual path changes.
 8. Move prototype SQLite learning state to Postgres for multi-worker production use.

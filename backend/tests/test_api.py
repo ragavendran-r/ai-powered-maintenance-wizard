@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -24,8 +25,14 @@ from app.services.retrieval import retrieve_evidence
 from app.services.document_intelligence import document_intelligence
 from app.services.maintenance_labeling import stored_labels
 from app.services.ai_client import active_llm_serving_config
-from app.services.artifact_store import artifact_store_status, store_learning_artifact_file
-from app.services.vector_store import VectorStoreHit
+from app.services.artifact_store import (
+    cleanup_expired_filesystem_artifacts,
+    find_expired_filesystem_artifacts,
+    artifact_store_status,
+    store_learning_artifact_file,
+    validate_learning_artifact_lifecycle_config,
+)
+from app.services.vector_store import VectorStoreHit, embedding_profile_status
 from app.services.learning_worker import process_learning_job_message
 
 
@@ -1177,7 +1184,9 @@ def test_retrieval_uses_vector_store_hits(monkeypatch):
     assert evidence[0].relevance_reason == "Matched by qdrant vector search."
 
 
-def test_learning_review_endpoints_are_role_gated_and_export_jsonl():
+def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
+    monkeypatch.setenv("LEARNING_ARTIFACT_RETENTION_DAYS", "0")
+    monkeypatch.setenv("LEARNING_ARTIFACT_CLEANUP_ENABLED", "false")
     operator_response = client.get("/api/learning/summary", headers=auth_headers("operator@plant.local"))
     assert operator_response.status_code == 403
 
@@ -1195,8 +1204,20 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl():
     assert any(example["judge_score"] > 0 for example in summary["recent_examples"])
     assert "recent_jobs" in summary
     assert summary["vector_store"]["store"] == "sqlite"
+    assert summary["vector_store"]["embedding_profile"]["model"] == "maintenance-hash-v1"
+    assert summary["vector_store"]["embedding_profile"]["version"] == "1"
+    assert summary["vector_store"]["migration_required"] is False
     assert summary["artifact_store"]["store"] == "filesystem"
     assert summary["artifact_store"]["state"] == "ready"
+    assert summary["artifact_store"]["retention"] == {
+        "state": "disabled",
+        "enabled": False,
+        "retention_days": 0,
+        "cleanup_enabled": False,
+        "dry_run_default": True,
+        "scope": "local_filesystem",
+        "errors": [],
+    }
     assert summary["peft_trainer"]["mode"] == "prepared_artifacts"
     assert summary["peft_trainer"]["configured"] is False
 
@@ -1325,6 +1346,47 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl():
     jobs = jobs_response.json()
     assert any(job["id"] == peft_job["id"] for job in jobs)
     assert any(job["job_type"] == "dataset_snapshot" and job["status"] == "completed" for job in jobs)
+
+
+def test_learning_review_can_reindex_rag_vectors():
+    operator_response = client.post("/api/learning/rag/reindex", headers=auth_headers("operator@plant.local"))
+    assert operator_response.status_code == 403
+
+    headers = auth_headers("reliability@plant.local")
+    response = client.post("/api/learning/rag/reindex", headers=headers)
+    assert response.status_code == 200
+    job = response.json()
+    assert job["job_type"] == "rag_reindex"
+    assert job["status"] == "completed"
+    assert job["output_refs"]["document_count"] >= 1
+    assert job["output_refs"]["chunk_count"] >= 1
+    assert job["output_refs"]["index_result"]["store"] == "sqlite"
+
+
+def test_embedding_profile_reports_unsupported_provider_and_dimension_mismatch():
+    unsupported = embedding_profile_status(
+        SimpleNamespace(
+            rag_embedding_provider="bge",
+            rag_embedding_model="bge-small-en-v1.5",
+            rag_embedding_version="2026-06",
+            rag_embedding_dimensions=384,
+            rag_embedding_distance="Cosine",
+        )
+    )
+    mismatch = embedding_profile_status(
+        SimpleNamespace(
+            rag_embedding_provider="deterministic_hash",
+            rag_embedding_model="maintenance-hash-v1",
+            rag_embedding_version="2",
+            rag_embedding_dimensions=128,
+            rag_embedding_distance="Cosine",
+        )
+    )
+
+    assert unsupported["state"] == "unsupported_provider_fallback"
+    assert "external embedding worker" in unsupported["warning"]
+    assert mismatch["state"] == "dimension_mismatch"
+    assert "Configured dimensions 128" in mismatch["warning"]
 
 
 def test_peft_learning_job_publishes_when_async_learning_is_enabled(monkeypatch):
@@ -1592,6 +1654,69 @@ def test_learning_artifact_store_supports_s3_uri_registration(monkeypatch, tmp_p
             "extra_args": {"Metadata": {"job-id": "LJOB-S3", "artifact-type": "peft_dataset_jsonl", "sha256": "abc123"}},
         }
     ]
+
+
+def test_learning_artifact_lifecycle_finds_expired_files_without_deleting_by_default(tmp_path):
+    reference_time = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
+    old_artifact = tmp_path / "LJOB-OLD" / "dataset.jsonl"
+    fresh_artifact = tmp_path / "LJOB-FRESH" / "dataset.jsonl"
+    old_artifact.parent.mkdir(parents=True)
+    fresh_artifact.parent.mkdir(parents=True)
+    old_artifact.write_text('{"messages":["old"]}\n', encoding="utf-8")
+    fresh_artifact.write_text('{"messages":["fresh"]}\n', encoding="utf-8")
+    old_time = (reference_time - timedelta(days=10)).timestamp()
+    fresh_time = (reference_time - timedelta(days=2)).timestamp()
+    os.utime(old_artifact, (old_time, old_time))
+    os.utime(fresh_artifact, (fresh_time, fresh_time))
+    settings = SimpleNamespace(
+        learning_artifact_store="filesystem",
+        learning_artifact_dir=tmp_path,
+        learning_artifact_retention_days=7,
+        learning_artifact_cleanup_enabled=False,
+    )
+
+    status = artifact_store_status(settings)
+    expired = find_expired_filesystem_artifacts(settings=settings, reference_time=reference_time)
+    cleanup = cleanup_expired_filesystem_artifacts(settings=settings, reference_time=reference_time)
+    delete_requested = cleanup_expired_filesystem_artifacts(
+        settings=settings,
+        reference_time=reference_time,
+        dry_run=False,
+    )
+
+    assert status["retention"]["state"] == "ready"
+    assert status["retention"]["retention_days"] == 7
+    assert status["retention"]["cleanup_enabled"] is False
+    assert [candidate["relative_path"] for candidate in expired] == ["LJOB-OLD/dataset.jsonl"]
+    assert expired[0]["age_days"] == 10
+    assert cleanup["dry_run"] is True
+    assert cleanup["expired_count"] == 1
+    assert cleanup["deleted_count"] == 0
+    assert delete_requested["dry_run"] is False
+    assert delete_requested["deletion_allowed"] is False
+    assert delete_requested["deleted_count"] == 0
+    assert old_artifact.exists()
+    assert fresh_artifact.exists()
+
+
+def test_learning_artifact_lifecycle_reports_invalid_config(tmp_path):
+    settings = SimpleNamespace(
+        learning_artifact_store="filesystem",
+        learning_artifact_dir=tmp_path,
+        learning_artifact_retention_days="forever",
+        learning_artifact_cleanup_enabled="sometimes",
+    )
+
+    status = artifact_store_status(settings)
+
+    assert status["retention"]["state"] == "invalid_config"
+    assert status["retention"]["enabled"] is False
+    assert validate_learning_artifact_lifecycle_config(settings) == [
+        "LEARNING_ARTIFACT_RETENTION_DAYS must be an integer number of days",
+        "LEARNING_ARTIFACT_CLEANUP_ENABLED must be a boolean value",
+    ]
+    with pytest.raises(ValueError, match="Invalid learning artifact lifecycle config"):
+        find_expired_filesystem_artifacts(settings=settings)
 
 
 def test_learning_example_can_be_scored_by_judge_endpoint():

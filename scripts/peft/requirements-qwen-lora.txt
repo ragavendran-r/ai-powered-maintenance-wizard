@@ -1,0 +1,12 @@
+# Optional dependencies for scripts/peft/train_qwen_lora.py.
+# Keep these in a dedicated trainer environment so normal app tests stay light.
+accelerate>=0.30
+datasets>=2.19
+peft>=0.11
+safetensors>=0.4
+torch>=2.2
+transformers>=4.43
+
+# bitsandbytes is needed only for MW_PEFT_QUANTIZATION=4bit or 8bit QLoRA.
+# On non-CUDA hosts, set MW_PEFT_QUANTIZATION=none for regular LoRA.
+bitsandbytes>=0.43; platform_system == "Linux"

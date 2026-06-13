@@ -151,6 +151,7 @@ flowchart LR
   - `POST /api/learning/evaluations` records an evaluation run for a dataset/model/prompt combination.
   - `GET /api/learning/evaluations` lists recent evaluation runs.
   - `GET /api/learning/jobs` lists recent persisted learning jobs.
+  - `POST /api/learning/rag/reindex` rebuilds document chunks and reindexes them into the configured RAG vector store for reviewer roles.
   - `POST /api/learning/jobs/peft` queues a PEFT tuning job for a dataset/model/prompt combination and publishes it to NATS when async learning is enabled. The learning worker prepares JSONL dataset and training-manifest artifacts, stores them through the configured artifact backend, and records their hashes and URIs.
 
 ## Data Flow
@@ -162,7 +163,7 @@ flowchart LR
 5. API endpoints read and write typed records through the repository layer.
 6. Auth/RBAC guards validate JWTs and role permissions before maintenance data or actions are served.
 7. Dashboard and equipment endpoints expose plant health, the full priority-sorted asset list, asset risk, anomaly findings, alert context, and spares constraints.
-8. Chat or diagnosis requests trigger Qdrant-backed vector retrieval over persisted document chunks plus matching maintenance history, with SQLite/local-vector fallback, optional LLM/SLM reranking, and relevance reasons.
+8. Chat or diagnosis requests trigger Qdrant-backed vector retrieval over persisted document chunks plus matching maintenance history, with SQLite/local-vector fallback, embedding profile/version metadata, optional LLM/SLM reranking, and relevance reasons.
 9. Anomaly service evaluates sensor readings by signal using rolling baseline, z-score, threshold breach, and trend delta, then classifies context and inspection steps when enrichment is enabled.
 10. Risk and prediction services combine alerts, anomaly findings, asset criticality, spares constraints, maintenance history, normalized labels, and feedback signals to compute health score, risk level, failure probability, and estimated RUL.
 11. Recommendation service requests structured LLM context when configured, validates it, merges safe suggestions with deterministic fallback actions and prior engineer feedback, and returns diagnosis, root causes, actions, spares strategy, learning notes, reasoning explanation, confidence, and evidence.

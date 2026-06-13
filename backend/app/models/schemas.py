@@ -612,6 +612,7 @@ LearningJobType = Literal[
     "peft_tuning",
     "adapter_registered",
     "model_promotion",
+    "rag_reindex",
 ]
 LearningJobStatus = Literal["queued", "published", "running", "completed", "failed"]
 

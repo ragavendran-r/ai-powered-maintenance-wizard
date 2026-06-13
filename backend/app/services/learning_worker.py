@@ -282,6 +282,8 @@ def _execute_learning_job(job: dict[str, Any], payload: dict[str, Any]) -> dict[
         return prepare_peft_artifacts(job)
     if job_type == "adapter_registered":
         return {"message": "Adapter registration is already persisted by the API path."}
+    if job_type == "rag_reindex":
+        return repository.rebuild_all_document_chunks()
     raise ValueError(f"Unsupported learning job type: {job_type}")
 
 
