@@ -781,6 +781,22 @@ export function App() {
     }
   }
 
+  async function reindexLearningRag() {
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const job = await api.reindexLearningRag()
+      const summary = await api.learningSummary()
+      setLearningSummary(summary)
+      const chunkCount = Number(job.output_refs?.chunk_count ?? 0)
+      setLearningMessage(`Reindexed ${chunkCount} RAG chunk${chunkCount === 1 ? '' : 's'} with status ${job.status}`)
+    } catch {
+      setLearningMessage('RAG vector reindex could not be completed')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
+
   function loadTechnicians() {
     return api
       .technicians()
@@ -2506,6 +2522,21 @@ export function App() {
           <small>Collection</small>
           <strong>{learningSummary?.vector_store?.collection ?? 'local fallback'}</strong>
         </span>
+        <span>
+          <small>Embedding</small>
+          <strong>
+            {String(learningSummary?.vector_store?.embedding_profile?.model ?? 'unknown')} · v
+            {String(learningSummary?.vector_store?.embedding_profile?.version ?? 'unknown')}
+          </strong>
+        </span>
+        <span>
+          <small>Migration</small>
+          <strong>{learningSummary?.vector_store?.migration_required ? 'Required' : 'Current'}</strong>
+        </span>
+        <button className="textButton" onClick={reindexLearningRag} disabled={learningLoading}>
+          {learningLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Database size={16} />}
+          Reindex RAG
+        </button>
       </div>
       <div className="servingModelStatus">
         <span>

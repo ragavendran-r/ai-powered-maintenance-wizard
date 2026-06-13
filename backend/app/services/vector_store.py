@@ -24,14 +24,41 @@ def configured_vector_store_name() -> str:
     return get_settings().rag_vector_store.strip().lower()
 
 
+def embedding_profile_status(settings: Optional[Any] = None) -> dict[str, Any]:
+    settings = settings or get_settings()
+    provider = str(getattr(settings, "rag_embedding_provider", "deterministic_hash") or "deterministic_hash")
+    configured_dimensions = int(getattr(settings, "rag_embedding_dimensions", VECTOR_DIMENSIONS) or VECTOR_DIMENSIONS)
+    profile = {
+        "provider": provider,
+        "model": getattr(settings, "rag_embedding_model", "maintenance-hash-v1"),
+        "version": getattr(settings, "rag_embedding_version", "1"),
+        "dimensions": VECTOR_DIMENSIONS,
+        "configured_dimensions": configured_dimensions,
+        "distance": getattr(settings, "rag_embedding_distance", "Cosine"),
+        "state": "ready",
+    }
+    if provider != "deterministic_hash":
+        profile["state"] = "unsupported_provider_fallback"
+        profile["warning"] = "Only deterministic_hash embeddings are implemented in-app; configure an external embedding worker before switching providers."
+    elif configured_dimensions != VECTOR_DIMENSIONS:
+        profile["state"] = "dimension_mismatch"
+        profile["warning"] = f"Configured dimensions {configured_dimensions} do not match active dimensions {VECTOR_DIMENSIONS}."
+    return profile
+
+
 def vector_store_status() -> dict[str, Any]:
     settings = get_settings()
     store = configured_vector_store_name()
+    embedding_profile = embedding_profile_status(settings)
     status = {
         "store": store,
         "enabled": store == "qdrant",
         "collection": settings.rag_qdrant_collection,
         "url": settings.rag_qdrant_url,
+        "embedding_profile": embedding_profile,
+        "points_count": None,
+        "collection_vector_size": None,
+        "migration_required": embedding_profile["state"] != "ready",
         "state": "fallback",
         "error": None,
     }
@@ -44,6 +71,14 @@ def vector_store_status() -> dict[str, Any]:
             status["state"] = "missing_collection"
         else:
             response.raise_for_status()
+            collection = response.json().get("result") or {}
+            status["points_count"] = collection.get("points_count")
+            if status["points_count"] is None:
+                status["points_count"] = collection.get("vectors_count")
+            vector_size = _collection_vector_size(collection)
+            status["collection_vector_size"] = vector_size
+            if vector_size is not None and vector_size != VECTOR_DIMENSIONS:
+                status["migration_required"] = True
             status["state"] = "ready"
     except Exception as exc:
         status["state"] = "unavailable"
@@ -53,7 +88,12 @@ def vector_store_status() -> dict[str, Any]:
 
 def index_document_chunks(chunks: list[dict[str, Any]]) -> dict[str, Any]:
     if configured_vector_store_name() != "qdrant" or not chunks:
-        return {"store": configured_vector_store_name(), "indexed": 0, "state": "skipped"}
+        return {
+            "store": configured_vector_store_name(),
+            "collection": get_settings().rag_qdrant_collection,
+            "indexed": 0,
+            "state": "skipped",
+        }
     try:
         _ensure_qdrant_collection()
         points = [_chunk_to_point(chunk) for chunk in chunks]
@@ -64,9 +104,20 @@ def index_document_chunks(chunks: list[dict[str, Any]]) -> dict[str, Any]:
                 json={"points": points},
             )
         response.raise_for_status()
-        return {"store": "qdrant", "indexed": len(points), "state": "indexed"}
+        return {
+            "store": "qdrant",
+            "collection": get_settings().rag_qdrant_collection,
+            "indexed": len(points),
+            "state": "indexed",
+        }
     except Exception as exc:
-        return {"store": "qdrant", "indexed": 0, "state": "fallback", "error": str(exc)}
+        return {
+            "store": "qdrant",
+            "collection": get_settings().rag_qdrant_collection,
+            "indexed": 0,
+            "state": "fallback",
+            "error": str(exc),
+        }
 
 
 def search_document_chunks(query: str, equipment_id: Optional[str], limit: int) -> list[VectorStoreHit]:
@@ -137,7 +188,7 @@ def _ensure_qdrant_collection() -> None:
             json={
                 "vectors": {
                     "size": VECTOR_DIMENSIONS,
-                    "distance": "Cosine",
+                    "distance": settings.rag_embedding_distance,
                 }
             },
         )
@@ -145,6 +196,7 @@ def _ensure_qdrant_collection() -> None:
 
 
 def _chunk_to_point(chunk: dict[str, Any]) -> dict[str, Any]:
+    settings = get_settings()
     return {
         "id": str(uuid.uuid5(uuid.NAMESPACE_URL, chunk["id"])),
         "vector": decode_embedding(chunk["embedding"]),
@@ -156,5 +208,20 @@ def _chunk_to_point(chunk: dict[str, Any]) -> dict[str, Any]:
             "equipment_id": chunk.get("equipment_id"),
             "title": chunk["title"],
             "content": chunk["content"],
+            "embedding_provider": settings.rag_embedding_provider,
+            "embedding_model": settings.rag_embedding_model,
+            "embedding_version": settings.rag_embedding_version,
+            "embedding_dimensions": VECTOR_DIMENSIONS,
         },
     }
+
+
+def _collection_vector_size(collection: dict[str, Any]) -> Optional[int]:
+    vectors = (((collection.get("config") or {}).get("params") or {}).get("vectors") or {})
+    if isinstance(vectors, dict) and "size" in vectors:
+        return int(vectors["size"])
+    if isinstance(vectors, dict):
+        for value in vectors.values():
+            if isinstance(value, dict) and "size" in value:
+                return int(value["size"])
+    return None

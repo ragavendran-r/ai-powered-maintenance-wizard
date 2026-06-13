@@ -319,6 +319,20 @@ def list_document_chunks(equipment_id: Optional[str] = None) -> list[dict[str, A
     return _fetch_all("SELECT * FROM document_chunks ORDER BY source_type, title, chunk_index")
 
 
+def rebuild_all_document_chunks() -> dict[str, Any]:
+    ensure_ready()
+    with connect() as connection:
+        documents = [dict(row) for row in connection.execute("SELECT * FROM documents ORDER BY source_type, title").fetchall()]
+        connection.execute("DELETE FROM document_chunks")
+        chunk_rows = upsert_document_chunks(connection, documents)
+    index_result = index_document_chunks(chunk_rows)
+    return {
+        "document_count": len(documents),
+        "chunk_count": len(chunk_rows),
+        "index_result": index_result,
+    }
+
+
 def add_documents(documents: list[dict[str, Any]]) -> int:
     ensure_ready()
     if not documents:

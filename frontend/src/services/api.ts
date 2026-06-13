@@ -665,6 +665,10 @@ export interface LearningSummary {
     enabled?: boolean
     collection?: string
     url?: string
+    embedding_profile?: Record<string, unknown>
+    points_count?: number | null
+    collection_vector_size?: number | null
+    migration_required?: boolean
     state?: string
     error?: string | null
   }
@@ -934,6 +938,10 @@ export const api = {
     }),
   learningModelPromotions: () => request<LearningModelPromotion[]>('/api/learning/model-promotions'),
   learningJobs: () => request<LearningJob[]>('/api/learning/jobs'),
+  reindexLearningRag: () =>
+    request<LearningJob>('/api/learning/rag/reindex', {
+      method: 'POST',
+    }),
   queueLearningPeftJob: (payload: {
     dataset_id: string
     model_version_id: string

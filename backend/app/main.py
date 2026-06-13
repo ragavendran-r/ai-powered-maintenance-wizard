@@ -83,6 +83,7 @@ from app.services.learning import (
     queue_peft_tuning_job,
     record_learning_job,
     record_assistant_interaction,
+    reindex_rag_vectors,
     refresh_learning_examples,
     register_model_version,
     rejudge_learning_example,
@@ -807,6 +808,17 @@ def list_learning_evaluations():
 )
 def list_learning_jobs():
     return repository.list_learning_jobs(limit=50)
+
+
+@app.post(
+    "/api/learning/rag/reindex",
+    response_model=LearningJob,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def reindex_learning_rag_vectors(
+    current_user: UserPublic = Depends(get_current_user),
+):
+    return reindex_rag_vectors(current_user)
 
 
 @app.post(

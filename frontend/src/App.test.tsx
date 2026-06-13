@@ -705,6 +705,18 @@ function learningSummaryPayload(
       enabled: true,
       collection: 'maintenance_wizard_documents',
       url: 'http://localhost:6333',
+      embedding_profile: {
+        provider: 'deterministic_hash',
+        model: 'maintenance-hash-v1',
+        version: '1',
+        dimensions: 64,
+        configured_dimensions: 64,
+        distance: 'Cosine',
+        state: 'ready',
+      },
+      points_count: 42,
+      collection_vector_size: 64,
+      migration_required: false,
       state: 'ready',
       error: null,
     },
@@ -943,6 +955,30 @@ beforeEach(() => {
               subject: 'maintenance.learning.peft.requested',
               status: 'queued',
               output_refs: { dispatch: 'disabled' },
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.endsWith('/api/learning/rag/reindex')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...learningJob,
+              id: 'LJOB-RAG-1',
+              job_type: 'rag_reindex',
+              subject: 'maintenance.learning.rag.reindex.requested',
+              status: 'completed',
+              output_refs: {
+                document_count: 6,
+                chunk_count: 14,
+                index_result: {
+                  store: 'qdrant',
+                  collection: 'maintenance_wizard_documents',
+                  indexed: 14,
+                  state: 'indexed',
+                },
+              },
             }),
             { status: 200 },
           ),
@@ -1567,6 +1603,10 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText(/Review approved human feedback/)).toBeInTheDocument()
     expect(screen.getByText('RAG vector DB')).toBeInTheDocument()
     expect(screen.getByText('qdrant · ready')).toBeInTheDocument()
+    expect(screen.getByText('Embedding')).toBeInTheDocument()
+    expect(screen.getByText('maintenance-hash-v1 · v1')).toBeInTheDocument()
+    expect(screen.getByText('Migration')).toBeInTheDocument()
+    expect(screen.getByText('Current')).toBeInTheDocument()
     expect(screen.getByText('Serving LLM')).toBeInTheDocument()
     expect(screen.getByText('learning active model · openai')).toBeInTheDocument()
     expect(screen.getByText('model-local-qwen2.5-current')).toBeInTheDocument()
@@ -1609,6 +1649,9 @@ describe('Maintenance Wizard dashboard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Queue PEFT tuning job' }))
     expect(await screen.findByText('Queued PEFT tuning job LJOB-PEFT-1 with status queued')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reindex RAG' }))
+    expect(await screen.findByText('Reindexed 14 RAG chunks with status completed')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Promote adapter' }))
     expect(await screen.findByText('Promoted adapter qwen2.5-7b-instruct-lora-candidate with audit record LPROMO-NEW')).toBeInTheDocument()

@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     learning_artifact_s3_prefix: str = Field(default="maintenance-wizard/learning", alias="LEARNING_ARTIFACT_S3_PREFIX")
     learning_artifact_s3_endpoint_url: Optional[str] = Field(default=None, alias="LEARNING_ARTIFACT_S3_ENDPOINT_URL")
     learning_artifact_s3_region: str = Field(default="us-east-1", alias="LEARNING_ARTIFACT_S3_REGION")
+    learning_artifact_retention_days: int = Field(default=0, ge=0, alias="LEARNING_ARTIFACT_RETENTION_DAYS")
+    learning_artifact_cleanup_enabled: bool = Field(default=False, alias="LEARNING_ARTIFACT_CLEANUP_ENABLED")
     learning_peft_trainer_command: Optional[str] = Field(default=None, alias="LEARNING_PEFT_TRAINER_COMMAND")
     learning_peft_trainer_timeout_seconds: int = Field(default=900, ge=1, alias="LEARNING_PEFT_TRAINER_TIMEOUT_SECONDS")
     learning_peft_output_dir: Path = Field(
@@ -69,6 +71,11 @@ class Settings(BaseSettings):
     rag_qdrant_collection: str = Field(default="maintenance_wizard_documents", alias="RAG_QDRANT_COLLECTION")
     rag_qdrant_api_key: Optional[str] = Field(default=None, alias="RAG_QDRANT_API_KEY")
     rag_vector_timeout_seconds: float = Field(default=2.0, ge=0.1, alias="RAG_VECTOR_TIMEOUT_SECONDS")
+    rag_embedding_provider: str = Field(default="deterministic_hash", alias="RAG_EMBEDDING_PROVIDER")
+    rag_embedding_model: str = Field(default="maintenance-hash-v1", alias="RAG_EMBEDDING_MODEL")
+    rag_embedding_version: str = Field(default="1", alias="RAG_EMBEDDING_VERSION")
+    rag_embedding_dimensions: int = Field(default=64, ge=1, alias="RAG_EMBEDDING_DIMENSIONS")
+    rag_embedding_distance: str = Field(default="Cosine", alias="RAG_EMBEDDING_DISTANCE")
     data_dir: Path = Field(
         default=Path(__file__).resolve().parents[3] / "assets" / "sample_data",
         alias="DATA_DIR",

@@ -41,6 +41,7 @@ LEARNING_JOB_SUBJECTS = {
     "peft_tuning": "peft.requested",
     "adapter_registered": "adapter.registered",
     "model_promotion": "adapter.promoted",
+    "rag_reindex": "rag.reindex.requested",
 }
 
 
@@ -458,6 +459,22 @@ def queue_peft_tuning_job(request: LearningPeftJobCreateRequest, current_user: U
         },
     )
     return LearningJob(**(published_job or job))
+
+
+def reindex_rag_vectors(current_user: UserPublic) -> LearningJob:
+    result = repository.rebuild_all_document_chunks()
+    job = record_learning_job(
+        "rag_reindex",
+        current_user,
+        input_refs={
+            "reason": "manual_reindex",
+            "vector_store": result["index_result"].get("store"),
+            "collection": result["index_result"].get("collection"),
+        },
+        output_refs=result,
+        status="completed",
+    )
+    return LearningJob(**job)
 
 
 def prepare_peft_artifacts(job: dict[str, Any]) -> dict[str, Any]:
