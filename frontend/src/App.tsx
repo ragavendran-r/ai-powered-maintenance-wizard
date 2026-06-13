@@ -46,6 +46,7 @@ import {
   type LearningExample,
   type LearningArtifact,
   type LearningJob,
+  type LearningModelDeployment,
   type LearningModelPromotion,
   type LearningModelVersion,
   type LearningSummary,
@@ -420,6 +421,7 @@ export function App() {
   const [learningSummary, setLearningSummary] = useState<LearningSummary | null>(null)
   const [learningExamples, setLearningExamples] = useState<LearningExample[]>([])
   const [learningDatasets, setLearningDatasets] = useState<LearningDatasetSnapshot[]>([])
+  const [learningDeployments, setLearningDeployments] = useState<LearningModelDeployment[]>([])
   const [learningMessage, setLearningMessage] = useState('')
   const [learningLoading, setLearningLoading] = useState(false)
   const [learningDatasetName, setLearningDatasetName] = useState('maintenance-wizard-learning-snapshot')
@@ -429,6 +431,8 @@ export function App() {
   const [adapterBaseModel, setAdapterBaseModel] = useState('qwen2.5-7b-instruct')
   const [adapterPath, setAdapterPath] = useState('')
   const [adapterNotes, setAdapterNotes] = useState('Offline PEFT adapter candidate trained from approved judge-qualified examples.')
+  const [deploymentRuntimeProvider, setDeploymentRuntimeProvider] = useState('lm_studio')
+  const [deploymentBaseUrl, setDeploymentBaseUrl] = useState('http://localhost:1234/v1')
   const [peftAdapterName, setPeftAdapterName] = useState('maintenance-wizard-qwen-lora')
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserName, setNewUserName] = useState('')
@@ -481,6 +485,7 @@ export function App() {
     setLearningSummary(null)
     setLearningExamples([])
     setLearningDatasets([])
+    setLearningDeployments([])
     setLearningMessage('')
     setLearningLoading(false)
     setAdapterProvider('openai')
@@ -488,6 +493,8 @@ export function App() {
     setAdapterBaseModel('qwen2.5-7b-instruct')
     setAdapterPath('')
     setAdapterNotes('Offline PEFT adapter candidate trained from approved judge-qualified examples.')
+    setDeploymentRuntimeProvider('lm_studio')
+    setDeploymentBaseUrl('http://localhost:1234/v1')
     setPeftAdapterName('maintenance-wizard-qwen-lora')
     setNeoMessages([
       {
@@ -606,11 +613,17 @@ export function App() {
   function loadLearning() {
     setLearningLoading(true)
     setLearningMessage('')
-    return Promise.all([api.learningSummary(), api.learningExamples(), api.learningDatasets()])
-      .then(([summary, examples, datasets]) => {
+    return Promise.all([
+      api.learningSummary(),
+      api.learningExamples(),
+      api.learningDatasets(),
+      api.learningModelDeployments().catch((): LearningModelDeployment[] => []),
+    ])
+      .then(([summary, examples, datasets, deployments]) => {
         setLearningSummary(summary)
         setLearningExamples(examples)
         setLearningDatasets(datasets)
+        setLearningDeployments(deployments)
         setApiState('connected')
       })
       .catch(() => {
@@ -2425,6 +2438,11 @@ export function App() {
   const learningJobs: LearningJob[] = learningSummary?.recent_jobs ?? []
   const learningArtifacts: LearningArtifact[] = learningSummary?.recent_artifacts ?? []
   const learningPromotions: LearningModelPromotion[] = learningSummary?.recent_promotions ?? []
+  const learningDeploymentRecords = mergeLearningDeployments(learningDeployments, learningSummary?.recent_deployments ?? [])
+  const latestDeploymentForModel = (modelId: string) =>
+    learningDeploymentRecords.find((deployment) => deployment.model_version_id === modelId)
+  const latestVerifiedDeploymentForModel = (modelId: string) =>
+    learningDeploymentRecords.find((deployment) => deployment.model_version_id === modelId && isVerifiedDeployment(deployment))
   const passedEvaluationForModel = (modelId: string) =>
     learningEvaluations.find((run) => run.model_version_id === modelId && run.passed)
 
@@ -2476,6 +2494,31 @@ export function App() {
     }
   }
 
+  async function deployLearningAdapter(model: LearningModelVersion) {
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const job = await api.deployLearningModelVersion(model.id, {
+        runtime_provider: deploymentRuntimeProvider.trim() || undefined,
+        served_model_name: model.model_name,
+        base_url: deploymentBaseUrl.trim() || undefined,
+        artifact_uri: model.adapter_path?.trim() || undefined,
+        notes: `Deploy requested from Learning Review by ${currentUser?.email ?? 'reviewer'}.`,
+      })
+      const [summary, deployments] = await Promise.all([
+        api.learningSummary(),
+        api.learningModelDeployments().catch((): LearningModelDeployment[] => []),
+      ])
+      setLearningSummary(summary)
+      setLearningDeployments(deployments)
+      setLearningMessage(`Deployment job ${job.id} requested with status ${job.status}`)
+    } catch {
+      setLearningMessage('Adapter deployment could not be queued')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
+
   const learningView = (
     <section className="detailPanel learningView">
       <div className="sectionHeader">
@@ -2504,7 +2547,7 @@ export function App() {
         </button>
       </div>
       <div className="learningStats">
-        {(['interactions', 'examples', 'approved_examples', 'snapshots', 'artifacts', 'promotions'] as const).map((key) => (
+        {(['interactions', 'examples', 'approved_examples', 'snapshots', 'artifacts', 'promotions', 'deployments'] as const).map((key) => (
           <span className="learningStat" key={key}>
             <small>{key.replace(/_/g, ' ')}</small>
             <strong>{learningSummary?.counts[key] ?? 0}</strong>
@@ -2563,6 +2606,20 @@ export function App() {
           <span>
             <small>Adapter</small>
             <strong>{learningSummary.serving_model.adapter_path}</strong>
+          </span>
+        )}
+        {learningSummary?.serving_model?.deployment_id && (
+          <span>
+            <small>Runtime deployment</small>
+            <strong>
+              {learningSummary.serving_model.deployment_id} · {learningSummary.serving_model.health_status ?? 'not checked'}
+            </strong>
+          </span>
+        )}
+        {learningSummary?.serving_model?.served_model_name && (
+          <span>
+            <small>Served model</small>
+            <strong>{learningSummary.serving_model.served_model_name}</strong>
           </span>
         )}
         {learningSummary?.serving_model?.warning && (
@@ -2650,21 +2707,44 @@ export function App() {
           <div className="versionList">
             {learningModels.map((model) => {
               const promotionEvaluation = passedEvaluationForModel(model.id)
+              const latestDeployment = latestDeploymentForModel(model.id)
+              const latestVerifiedDeployment = latestVerifiedDeploymentForModel(model.id)
               const canPromoteModel = model.status !== 'active' && Boolean(promotionEvaluation)
               const canRollbackModel = model.status === 'retired' && Boolean(promotionEvaluation)
+              const canDeployModel = model.status === 'candidate' && Boolean(model.adapter_path)
               return (
                 <div className="versionRow" key={model.id}>
                   <strong>{model.model_name}</strong>
                   <small>{model.provider} · {model.status}</small>
                   {model.adapter_path && <small>Adapter {model.adapter_path}</small>}
+                  {latestDeployment && (
+                    <small>
+                      Latest deployment {latestDeployment.runtime_provider} · {latestDeployment.status} · health{' '}
+                      {latestDeployment.health_status ?? 'not checked'}
+                    </small>
+                  )}
+                  {latestVerifiedDeployment ? (
+                    <small>
+                      Verified deployment {latestVerifiedDeployment.served_model_name} · {latestVerifiedDeployment.serving_provider} ·{' '}
+                      {formatDate(deploymentDisplayDate(latestVerifiedDeployment))}
+                    </small>
+                  ) : (
+                    <small>No verified deployment recorded for this model.</small>
+                  )}
                   {promotionEvaluation ? (
                     <small>Promotion gate passed by evaluation {promotionEvaluation.id}</small>
                   ) : model.status !== 'active' ? (
                     <small>Promotion gate requires a passing evaluation for this model.</small>
                   ) : null}
                   {model.notes && <p>{model.notes}</p>}
-                  {(canPromoteModel || canRollbackModel) && (
+                  {(canPromoteModel || canRollbackModel || canDeployModel) && (
                     <div className="versionActions">
+                      {canDeployModel && (
+                        <button className="textButton" onClick={() => deployLearningAdapter(model)} disabled={learningLoading}>
+                          <Upload size={16} />
+                          Deploy adapter
+                        </button>
+                      )}
                       {canPromoteModel && (
                         <button className="textButton" onClick={() => promoteLearningAdapter(model)} disabled={learningLoading}>
                           <CheckCircle2 size={16} />
@@ -2704,6 +2784,39 @@ export function App() {
               </div>
             )) : (
               <p className="emptyState">Adapter promotions and rollbacks will appear after a reviewer activates a passed model.</p>
+            )}
+          </div>
+          <h3>Adapter Runtime Deployments</h3>
+          <div className="learningAdapterGrid">
+            <label className="field">
+              <span>Runtime provider</span>
+              <input value={deploymentRuntimeProvider} onChange={(event) => setDeploymentRuntimeProvider(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Runtime base URL</span>
+              <input value={deploymentBaseUrl} onChange={(event) => setDeploymentBaseUrl(event.target.value)} placeholder="optional runtime endpoint" />
+            </label>
+          </div>
+          <div className="deploymentList">
+            {learningDeploymentRecords.length ? learningDeploymentRecords.map((deployment) => (
+              <div className={`deploymentRow ${deploymentStatusClass(deployment.status)} ${deploymentStatusClass(deployment.health_status)}`} key={deployment.id}>
+                <span>
+                  <strong>{deployment.served_model_name}</strong>
+                  <small>{deployment.runtime_provider} · {deployment.serving_provider}</small>
+                </span>
+                <div className="deploymentBadges">
+                  <span className={`deploymentBadge ${deploymentStatusClass(deployment.status)}`}>{deployment.status.replace(/_/g, ' ')}</span>
+                  <span className={`deploymentBadge ${deploymentStatusClass(deployment.health_status)}`}>
+                    health {deployment.health_status?.replace(/_/g, ' ') ?? 'not checked'}
+                  </span>
+                </div>
+                <small>Model version {deployment.model_version_id} · {formatDate(deploymentDisplayDate(deployment))}</small>
+                {deployment.base_url && <small>Base URL {deployment.base_url}</small>}
+                {deployment.artifact_uri && <small>Artifact {deployment.artifact_uri}</small>}
+                {deployment.error && <p>{deployment.error}</p>}
+              </div>
+            )) : (
+              <p className="emptyState">Adapter runtime deployments will appear after a candidate deployment is queued.</p>
             )}
           </div>
           <h3>Adapter Candidate</h3>
@@ -3630,6 +3743,35 @@ function formatDate(value: string) {
   } catch {
     return value
   }
+}
+
+function deploymentDisplayDate(deployment: LearningModelDeployment) {
+  return deployment.health_checked_at ?? deployment.updated_at ?? deployment.created_at
+}
+
+function deploymentTimestamp(deployment: LearningModelDeployment) {
+  const parsed = new Date(deploymentDisplayDate(deployment)).getTime()
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function mergeLearningDeployments(
+  deployments: LearningModelDeployment[],
+  summaryDeployments: LearningModelDeployment[],
+) {
+  const records = new Map<string, LearningModelDeployment>()
+  summaryDeployments.forEach((deployment) => records.set(deployment.id, deployment))
+  deployments.forEach((deployment) => records.set(deployment.id, deployment))
+  return [...records.values()].sort((left, right) => deploymentTimestamp(right) - deploymentTimestamp(left))
+}
+
+function isVerifiedDeployment(deployment: LearningModelDeployment) {
+  const status = deployment.status.toLowerCase()
+  const healthStatus = (deployment.health_status ?? '').toLowerCase()
+  return ['healthy', 'ok', 'ready', 'verified'].includes(healthStatus) || ['healthy', 'verified'].includes(status)
+}
+
+function deploymentStatusClass(value?: string | null) {
+  return (value?.trim() || 'unknown').toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
 }
 
 function metricValue(value: unknown) {

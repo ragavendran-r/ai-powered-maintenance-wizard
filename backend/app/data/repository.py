@@ -1279,6 +1279,115 @@ def list_learning_model_promotions(limit: int = 20) -> list[dict[str, Any]]:
     )
 
 
+def save_learning_model_deployment(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    deployment_id = payload.get("id") or f"LDEP-{uuid.uuid4().hex[:12].upper()}"
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO learning_model_deployments (
+                id,
+                model_version_id,
+                job_id,
+                runtime_provider,
+                serving_provider,
+                served_model_name,
+                base_url,
+                artifact_uri,
+                artifact_hash,
+                status,
+                health_status,
+                health_checked_at,
+                metadata,
+                error
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                model_version_id=excluded.model_version_id,
+                job_id=excluded.job_id,
+                runtime_provider=excluded.runtime_provider,
+                serving_provider=excluded.serving_provider,
+                served_model_name=excluded.served_model_name,
+                base_url=excluded.base_url,
+                artifact_uri=excluded.artifact_uri,
+                artifact_hash=excluded.artifact_hash,
+                status=excluded.status,
+                health_status=excluded.health_status,
+                health_checked_at=excluded.health_checked_at,
+                metadata=excluded.metadata,
+                error=excluded.error,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                deployment_id,
+                payload["model_version_id"],
+                payload.get("job_id"),
+                payload["runtime_provider"],
+                payload["serving_provider"],
+                payload["served_model_name"],
+                payload.get("base_url"),
+                payload.get("artifact_uri"),
+                payload.get("artifact_hash"),
+                payload.get("status") or "pending",
+                payload.get("health_status"),
+                payload.get("health_checked_at"),
+                _json_dump_any(payload.get("metadata", {})),
+                payload.get("error"),
+            ),
+        )
+    deployment = get_learning_model_deployment(deployment_id)
+    if not deployment:
+        raise RuntimeError("Learning model deployment was not persisted")
+    return deployment
+
+
+def get_learning_model_deployment(deployment_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM learning_model_deployments WHERE id = ?", (deployment_id,))
+    return _decode_learning_model_deployment(row) if row else None
+
+
+def list_learning_model_deployments(
+    *,
+    model_version_id: Optional[str] = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    if model_version_id:
+        rows = _fetch_all(
+            """
+            SELECT * FROM learning_model_deployments
+            WHERE model_version_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (model_version_id, limit),
+        )
+    else:
+        rows = _fetch_all(
+            """
+            SELECT * FROM learning_model_deployments
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+    return [_decode_learning_model_deployment(row) for row in rows]
+
+
+def get_verified_learning_model_deployment(model_version_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one(
+        """
+        SELECT * FROM learning_model_deployments
+        WHERE model_version_id = ?
+          AND status = 'verified'
+          AND health_status IN ('healthy', 'manual_verified')
+        ORDER BY health_checked_at DESC, created_at DESC
+        LIMIT 1
+        """,
+        (model_version_id,),
+    )
+    return _decode_learning_model_deployment(row) if row else None
+
+
 def save_learning_job(payload: dict[str, Any]) -> dict[str, Any]:
     ensure_ready()
     job_id = payload.get("id") or f"LJOB-{uuid.uuid4().hex[:12].upper()}"
@@ -1482,6 +1591,8 @@ def learning_counts() -> dict[str, int]:
         UNION ALL
         SELECT 'artifacts' AS name, COUNT(*) AS count FROM learning_artifacts
         UNION ALL
+        SELECT 'deployments' AS name, COUNT(*) AS count FROM learning_model_deployments
+        UNION ALL
         SELECT 'promotions' AS name, COUNT(*) AS count FROM learning_model_promotions
         """
     )
@@ -1598,6 +1709,12 @@ def _decode_learning_job(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _decode_learning_artifact(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["metadata"] = _json_load_dict(decoded.get("metadata"))
+    return decoded
+
+
+def _decode_learning_model_deployment(row: dict[str, Any]) -> dict[str, Any]:
     decoded = dict(row)
     decoded["metadata"] = _json_load_dict(decoded.get("metadata"))
     return decoded

@@ -82,7 +82,7 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "12"
+    assert status["schema_version"] == "13"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["asset_profiles"] == 5
     assert status["counts"]["asset_metric_snapshots"] == 15
@@ -1184,6 +1184,23 @@ def test_retrieval_uses_vector_store_hits(monkeypatch):
     assert evidence[0].relevance_reason == "Matched by qdrant vector search."
 
 
+def test_learning_model_registration_rejects_active_status():
+    headers = auth_headers("reliability@plant.local")
+    response = client.post(
+        "/api/learning/model-versions",
+        json={
+            "provider": "openai",
+            "model_name": "qwen2.5-7b-instruct-unsafe-active",
+            "base_model": "qwen2.5-7b-instruct",
+            "adapter_path": "file:///models/unsafe-active",
+            "status": "active",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
 def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
     monkeypatch.setenv("LEARNING_ARTIFACT_RETENTION_DAYS", "0")
     monkeypatch.setenv("LEARNING_ARTIFACT_CLEANUP_ENABLED", "false")
@@ -1284,6 +1301,59 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
         },
         headers=headers,
     )
+    assert promotion_response.status_code == 400
+    assert "verified runtime deployment" in promotion_response.json()["detail"]
+
+    deployment_response = client.post(
+        f"/api/learning/model-versions/{model['id']}/deploy",
+        json={
+            "runtime_provider": "manual",
+            "served_model_name": "qwen2.5-7b-instruct-lora-served",
+            "base_url": "http://localhost:1234/v1",
+            "artifact_uri": model["adapter_path"],
+            "notes": "Manual LM Studio deployment verified by reviewer.",
+        },
+        headers=headers,
+    )
+    assert deployment_response.status_code == 200
+    deployment_job = deployment_response.json()
+    assert deployment_job["job_type"] == "adapter_deployment"
+    assert deployment_job["subject"] == "maintenance.learning.adapter.deployment.requested"
+    assert deployment_job["status"] == "queued"
+    assert deployment_job["output_refs"]["dispatch"] == "disabled"
+
+    processed_deployment_job = process_learning_job_message(
+        {
+            "schema_version": "1",
+            "job_id": deployment_job["id"],
+            "job_type": "adapter_deployment",
+            "requested_by": "reliability@plant.local",
+            "correlation_id": deployment_job["correlation_id"],
+            "input_refs": deployment_job["input_refs"],
+        },
+        deployment_job["subject"],
+    )
+    assert processed_deployment_job.status == "completed"
+
+    deployments_response = client.get("/api/learning/model-deployments", headers=headers)
+    assert deployments_response.status_code == 200
+    deployments = deployments_response.json()
+    deployment = next(item for item in deployments if item["model_version_id"] == model["id"])
+    assert deployment["status"] == "verified"
+    assert deployment["health_status"] == "manual_verified"
+    assert deployment["served_model_name"] == "qwen2.5-7b-instruct-lora-served"
+    assert deployment["base_url"] == "http://localhost:1234/v1"
+    assert deployment["artifact_uri"] == model["adapter_path"]
+
+    promotion_response = client.post(
+        "/api/learning/model-versions/promote",
+        json={
+            "model_version_id": model["id"],
+            "evaluation_run_id": evaluation["id"],
+            "notes": "Promote after passed local evaluation.",
+        },
+        headers=headers,
+    )
     assert promotion_response.status_code == 200
     promotion = promotion_response.json()
     assert promotion["model_version_id"] == model["id"]
@@ -1298,12 +1368,17 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
             ollama_model="env-ollama",
             ollama_base_url="http://localhost:11434",
             llm_use_active_learning_model=True,
+            learning_runtime_deployment_required=True,
         )
     )
-    assert serving.source == "learning_active_model"
+    assert serving.source == "learning_verified_deployment"
     assert serving.provider == "openai"
-    assert serving.openai_model == model["model_name"]
+    assert serving.openai_model == deployment["served_model_name"]
+    assert serving.openai_base_url == deployment["base_url"]
     assert serving.active_model_version_id == model["id"]
+    assert serving.deployment_id == deployment["id"]
+    assert serving.runtime_provider == "manual"
+    assert serving.health_status == "manual_verified"
     assert serving.adapter_path == model["adapter_path"]
 
     mock_serving = active_llm_serving_config(
@@ -1315,6 +1390,7 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
             ollama_model="env-ollama",
             ollama_base_url="http://localhost:11434",
             llm_use_active_learning_model=True,
+            learning_runtime_deployment_required=True,
         )
     )
     assert mock_serving.source == "environment"

@@ -615,6 +615,27 @@ const learningArtifact = {
   created_at: '2026-06-13T09:11:00+05:30',
 }
 
+const learningDeployment = {
+  id: 'LDEPLOY-1',
+  model_version_id: 'model-adapter-candidate',
+  job_id: 'LJOB-DEPLOY-0',
+  runtime_provider: 'lm_studio',
+  serving_provider: 'openai',
+  served_model_name: 'qwen2.5-7b-instruct-lora-candidate',
+  base_url: 'http://localhost:1234/v1',
+  artifact_uri: 'file:///models/qwen2.5-lora',
+  artifact_hash: 'abcdef1234567890',
+  status: 'verified',
+  health_status: 'healthy',
+  health_checked_at: '2026-06-13T09:25:00+05:30',
+  metadata: { source: 'learning-review' },
+  error: null,
+  created_at: '2026-06-13T09:22:00+05:30',
+  updated_at: '2026-06-13T09:25:00+05:30',
+}
+
+let learningDeploymentResponses = [learningDeployment]
+
 function learningSummaryPayload(
   examples = [learningExample],
   datasets = [learningDataset],
@@ -622,6 +643,7 @@ function learningSummaryPayload(
   jobs = [learningJob],
   artifacts = [learningArtifact],
   promotions = [learningPromotion],
+  deployments = learningDeploymentResponses,
 ) {
   return {
     counts: {
@@ -636,6 +658,7 @@ function learningSummaryPayload(
       queued_jobs: jobs.filter((job) => ['queued', 'published', 'running'].includes(job.status)).length,
       artifacts: artifacts.length,
       promotions: promotions.length,
+      deployments: deployments.length,
     },
     recent_examples: examples,
     recent_snapshots: datasets,
@@ -676,6 +699,7 @@ function learningSummaryPayload(
     recent_jobs: jobs,
     recent_artifacts: artifacts,
     recent_promotions: promotions,
+    recent_deployments: deployments,
     serving_model: {
       provider: 'openai',
       openai_model: 'qwen2.5-7b-instruct',
@@ -831,6 +855,7 @@ async function signIn(email = 'admin@plant.local') {
 beforeEach(() => {
   neoResponseDelayMs = 0
   assistantResponseDelayMs = 0
+  learningDeploymentResponses = [learningDeployment]
   window.sessionStorage.clear()
   api.setSession(null)
   api.onUnauthorized(null)
@@ -909,6 +934,42 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/learning/examples')) {
         return Promise.resolve(new Response(JSON.stringify([learningExample]), { status: 200 }))
+      }
+      if (url.endsWith('/api/learning/model-deployments')) {
+        return Promise.resolve(new Response(JSON.stringify(learningDeploymentResponses), { status: 200 }))
+      }
+      if (url.includes('/api/learning/model-versions/') && url.endsWith('/deploy')) {
+        const body = JSON.parse((init?.body as string) ?? '{}')
+        const nextDeployment = {
+          ...learningDeployment,
+          id: 'LDEPLOY-NEW',
+          job_id: 'LJOB-DEPLOY-1',
+          runtime_provider: body.runtime_provider ?? 'lm_studio',
+          served_model_name: body.served_model_name,
+          base_url: body.base_url ?? null,
+          artifact_uri: body.artifact_uri ?? null,
+          artifact_hash: body.artifact_hash ?? null,
+          status: 'deploying',
+          health_status: 'pending',
+          health_checked_at: null,
+          error: null,
+          updated_at: '2026-06-13T09:30:00+05:30',
+        }
+        learningDeploymentResponses = [nextDeployment, ...learningDeploymentResponses]
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...learningJob,
+              id: 'LJOB-DEPLOY-1',
+              job_type: 'adapter_deployment',
+              subject: 'maintenance.learning.adapter.deployment.requested',
+              status: 'queued',
+              input_refs: body,
+              output_refs: { deployment_id: nextDeployment.id },
+            }),
+            { status: 200 },
+          ),
+        )
       }
       if (url.endsWith('/api/learning/model-versions')) {
         const body = JSON.parse((init?.body as string) ?? '{}')
@@ -1626,6 +1687,10 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Promotion Audit')).toBeInTheDocument()
     expect(screen.getByText('Adapter promoted')).toBeInTheDocument()
     expect(screen.getByText(/Promotion gate passed by evaluation LEVAL-1/)).toBeInTheDocument()
+    expect(screen.getByText(/Verified deployment qwen2\.5-7b-instruct-lora-candidate · openai/)).toBeInTheDocument()
+    expect(screen.getByText('Adapter Runtime Deployments')).toBeInTheDocument()
+    expect(screen.getByText('verified')).toBeInTheDocument()
+    expect(screen.getByText('health healthy')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Judge' }))
     expect(await screen.findByText('Judge scored feedback at 91%')).toBeInTheDocument()
@@ -1649,6 +1714,22 @@ describe('Maintenance Wizard dashboard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Queue PEFT tuning job' }))
     expect(await screen.findByText('Queued PEFT tuning job LJOB-PEFT-1 with status queued')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Runtime provider'), { target: { value: 'vllm' } })
+    fireEvent.change(screen.getByLabelText('Runtime base URL'), { target: { value: 'http://localhost:8001/v1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Deploy adapter' }))
+    expect(await screen.findByText('Deployment job LJOB-DEPLOY-1 requested with status queued')).toBeInTheDocument()
+    expect(await screen.findByText('deploying')).toBeInTheDocument()
+    expect(screen.getByText('health pending')).toBeInTheDocument()
+    const deployCall = [...vi.mocked(fetch).mock.calls]
+      .reverse()
+      .find(([url]) => url.toString().endsWith('/api/learning/model-versions/model-adapter-candidate/deploy'))
+    expect(JSON.parse((deployCall?.[1]?.body as string) ?? '{}')).toMatchObject({
+      runtime_provider: 'vllm',
+      served_model_name: 'qwen2.5-7b-instruct-lora-candidate',
+      base_url: 'http://localhost:8001/v1',
+      artifact_uri: 'file:///models/qwen2.5-lora',
+    })
 
     fireEvent.click(screen.getByRole('button', { name: 'Reindex RAG' }))
     expect(await screen.findByText('Reindexed 14 RAG chunks with status completed')).toBeInTheDocument()

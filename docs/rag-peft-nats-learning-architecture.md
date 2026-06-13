@@ -81,7 +81,7 @@ Adapter promotion requires:
 - Evaluation run passing quality and regression thresholds.
 - Authorized reviewer approval.
 
-After promotion, real LLM providers resolve the active `learning_model_versions` record before constructing the serving client. This makes Neo, Morpheus, Smith, recommendation, labeling, reranking, and document-intelligence calls use the promoted model id while keeping the `mock` provider deterministic for tests. External adapter registry/runtime deployment is still required to make a newly trained adapter artifact available to LM Studio, Ollama, or another serving runtime.
+After promotion, real LLM providers resolve the active `learning_model_versions` record and its verified runtime deployment before constructing the serving client. This makes Neo, Morpheus, Smith, recommendation, labeling, reranking, and document-intelligence calls use the promoted served model id while keeping the `mock` provider deterministic for tests. Adapter runtime deployment records and gates track whether the approved adapter is deployable for the selected serving target. Each environment still owns the concrete LM Studio, Ollama, or hosted-runtime loading step.
 
 ## NATS Subjects
 
@@ -94,6 +94,7 @@ Use separate subjects from IoT ingestion so learning jobs can be scaled and secu
 | `maintenance.learning.dataset.requested` | Build an immutable approved JSONL snapshot. |
 | `maintenance.learning.evaluation.requested` | Evaluate a dataset/model/prompt combination. |
 | `maintenance.learning.peft.requested` | Launch offline/local adapter tuning. |
+| `maintenance.learning.adapter.deployment.requested` | Verify a candidate adapter is deployable in the selected serving runtime. |
 | `maintenance.learning.adapter.registered` | Register a completed adapter artifact as a candidate model version. |
 | `maintenance.learning.dlq` | Invalid, exhausted, or poison learning jobs. |
 
@@ -166,6 +167,7 @@ The local stack starts Qdrant with NATS and the app. The local Kubernetes runner
 - Runs configured external LoRA/QLoRA training outside the web request path.
 - Stores adapter artifacts and training logs.
 - Registers the adapter as `candidate`, never automatically `active`.
+- Records adapter runtime deployment status and health-gate outcomes before an adapter can be treated as deployable for serving.
 - Current implementation provides the safe external-command orchestration hook, adapter registration path, and a bundled optional Qwen/SLM LoRA/QLoRA trainer template documented in `docs/peft-training.md`.
 
 ## Persistence
@@ -216,5 +218,5 @@ Production should track:
 4. Run the learning worker process against NATS JetStream.
 5. Configure S3-compatible artifact storage for production-like runs and add bucket retention/access policies.
 6. Validate the bundled PEFT trainer template on the target CUDA or LoRA training host before enabling it in shared environments.
-7. Add production registry integration so PEFT adapter outputs are deployed into the serving runtime without manual path changes.
+7. Configure the environment-specific adapter loader for LM Studio, Ollama, or the hosted serving runtime, using the app's adapter deployment records and gates as the audit/control plane.
 8. Move prototype SQLite learning state to Postgres for multi-worker production use.

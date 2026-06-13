@@ -16,6 +16,7 @@ from app.services.learning import (
     rejudge_learning_example,
     run_learning_evaluation,
 )
+from app.services.adapter_runtime import execute_adapter_deployment
 
 
 RawLearningJobMessage = Union[bytes, str, dict[str, Any]]
@@ -280,6 +281,8 @@ def _execute_learning_job(job: dict[str, Any], payload: dict[str, Any]) -> dict[
         }
     if job_type == "peft_tuning":
         return prepare_peft_artifacts(job)
+    if job_type == "adapter_deployment":
+        return execute_adapter_deployment(job)
     if job_type == "adapter_registered":
         return {"message": "Adapter registration is already persisted by the API path."}
     if job_type == "rag_reindex":

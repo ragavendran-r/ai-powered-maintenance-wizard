@@ -24,13 +24,15 @@ Implement a working AI-powered Maintenance Wizard prototype in `/Users/ragaven/w
 
 ## Latest Session Update
 
+- Continued G-016 with adapter runtime deployment tracking and promotion gating. Schema version 13 adds `learning_model_deployments`; Learning Review can queue adapter deployment jobs; the learning worker verifies manual/OpenAI-compatible/Ollama runtime deployments; adapter promotion now requires a verified runtime deployment when the model has an adapter artifact; and active real LLM serving resolution prefers verified deployment metadata such as served model, runtime provider, health status, and base URL.
+- Updated Learning Review UI/API types to display runtime deployments, deploy candidates, and show verified deployment details in the serving-model status panel.
+- Updated README, architecture, RAG+PEFT+NATS design, and goal tracker to reflect in-app runtime deployment tracking/gating while keeping environment-specific LM Studio/Ollama loader integration as remaining production work.
 - Added a durable NATS learning worker for G-016. The worker processes persisted learning job messages for refresh, judge, dataset, evaluation, and PEFT preparation paths; moves jobs through running/completed/failed states; publishes malformed jobs to DLQ; and can run as `python -m app.learning_worker`.
 - Added schema version 11 with `learning_artifacts`, repository helpers, artifact counts, and Learning Review API/UI visibility for recent worker artifacts.
 - Added local PEFT artifact preparation: queued PEFT jobs now produce a JSONL dataset artifact and training manifest with SHA-256 hashes and `training_status=awaiting_external_peft_trainer` when no trainer is configured, giving external LoRA/QLoRA trainers an auditable handoff without claiming model training happened inside the web app.
 - Updated local stack to start the learning worker with NATS/Qdrant/backend/frontend, and updated local Kubernetes to run the worker as a backend sidecar sharing local SQLite state.
-- Updated README, architecture, RAG+PEFT+NATS design, and goal tracker to reflect the worker and artifact registry. Remaining G-016 work is bundled trainer templates, production embeddings/Qdrant migration controls, external adapter registry/runtime deployment, artifact lifecycle/access hardening, and Postgres migration.
-- Verification passed: `bash -n scripts/run-local-stack.sh`, `bash -n scripts/run-local-k8s.sh`, `PYTHONPYCACHEPREFIX=/tmp/maintenance-wizard-pycache python3 -m compileall backend/app`, `backend/.venv/bin/pytest backend/tests/test_api.py` with 78 tests, `npm --prefix frontend run test` with 17 tests, `npm --prefix frontend run build`, `npm --prefix frontend run test:e2e` after browser-launch escalation, and `git diff --check`.
-- Completion notification attempted through `scripts/notify-complete.sh`; desktop and mobile delivery failed because `ntfy.sh` could not be resolved.
+- Updated README, architecture, RAG+PEFT+NATS design, and goal tracker to reflect the worker and artifact registry. Remaining G-016 work is bundled trainer templates, production embeddings/Qdrant migration controls, environment-specific adapter loader integration, artifact lifecycle/access hardening, and Postgres migration.
+- Verification passed for the adapter runtime deployment slice: `PYTHONPYCACHEPREFIX=.pycache python3 -m compileall backend/app`, `backend/.venv/bin/pytest backend/tests/test_api.py` with 85 tests, `npm --prefix frontend run test` with 17 tests, `npm --prefix frontend run build`, `npm --prefix frontend run test:e2e` after browser-launch escalation, and `git diff --check`.
 
 - Treated the app as production-targeted by default and persisted that rule in `docs/rules.md`.
 - Made async learning enabled by default in backend configuration and local stack scripts.
@@ -56,7 +58,7 @@ Next production hardening items:
 - Add durable NATS learning workers for judge, dataset, evaluation, and PEFT jobs.
 - Add artifact lifecycle, retention, and access-policy hardening for production object buckets.
 - Add bundled PEFT trainer templates for local Qwen/SLM LoRA or QLoRA training.
-- Add external adapter registry/runtime deployment after PEFT training so promoted adapter artifacts can be loaded by LM Studio/Ollama or another serving runtime.
+- Configure environment-specific adapter loader integration after PEFT training so approved adapter artifacts can be loaded by LM Studio/Ollama or another serving runtime; adapter runtime deployment tracking/gating is handled in-app.
 - Add production embedding model selection/versioning and Qdrant collection migration controls.
 - Move learning state from SQLite to Postgres for multi-worker production.
 
