@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
@@ -41,6 +43,77 @@ class Equipment(BaseModel):
     process: str
     criticality: int = Field(ge=1, le=5)
     status: str
+
+
+class AssetProfile(BaseModel):
+    equipment_id: str
+    name: str
+    area: str
+    process: str
+    criticality: int = Field(ge=1, le=5)
+    status: str
+    asset_type: str
+    location_code: str
+    location_name: str
+    parent_system: str
+    manufacturer: str
+    model: str
+    serial_number: str
+    installed_at: str
+    owner_team: str
+    supervisor: str
+    description: str
+    last_updated: str
+
+
+class AssetMetricSnapshot(BaseModel):
+    id: str
+    equipment_id: str
+    metric_key: str
+    label: str
+    value: float
+    unit: str
+    target_value: Optional[float] = None
+    status: str
+    trend: str
+    detail: str
+    captured_at: str
+    sort_order: int
+
+
+class AssetRecommendation(BaseModel):
+    id: str
+    equipment_id: str
+    action_type: str
+    title: str
+    description: str
+    priority: int
+    source: str
+    created_at: str
+    sort_order: int
+
+
+class AssetSubsystem(BaseModel):
+    id: str
+    equipment_id: str
+    name: str
+    component: str
+    condition: str
+    detail: str
+    sort_order: int
+
+
+class AssetReliabilityMetric(BaseModel):
+    id: str
+    equipment_id: str
+    metric_name: str
+    value: float
+    unit: str
+    target_value: Optional[float] = None
+    status: str
+    trend: str
+    detail: str
+    sort_order: int
 
 
 class Alert(BaseModel):
@@ -137,6 +210,60 @@ class WorkOrderUpdateRequest(BaseModel):
     follow_up_required: Optional[bool] = None
     ai_summary: Optional[str] = None
     completion_summary: Optional[str] = None
+
+
+class AssetDocument(BaseModel):
+    id: str
+    source_type: str
+    equipment_id: Optional[str] = None
+    title: str
+    excerpt: str
+
+
+class AssetPerformancePoint(BaseModel):
+    timestamp: str
+    value: float
+    threshold: float
+
+
+class AssetPerformanceChart(BaseModel):
+    signal: str
+    title: str
+    unit: str
+    points: list[AssetPerformancePoint]
+
+
+class AssetListItem(BaseModel):
+    id: str
+    name: str
+    asset_type: str
+    area: str
+    process: str
+    location_code: str
+    location_name: str
+    criticality: int
+    status: str
+    health_score: int
+    risk_level: RiskLevel
+    active_alerts: int
+    open_work_orders: int
+    supervisor: str
+    last_updated: str
+
+
+class AssetDetail(BaseModel):
+    profile: AssetProfile
+    health: HealthSummary
+    metrics: list[AssetMetricSnapshot] = Field(default_factory=list)
+    recommendations: list[AssetRecommendation] = Field(default_factory=list)
+    maintenance_events: list[MaintenanceEvent] = Field(default_factory=list)
+    work_orders: list[WorkOrder] = Field(default_factory=list)
+    subsystems: list[AssetSubsystem] = Field(default_factory=list)
+    reliability_metrics: list[AssetReliabilityMetric] = Field(default_factory=list)
+    performance_charts: list[AssetPerformanceChart] = Field(default_factory=list)
+    documents: list[AssetDocument] = Field(default_factory=list)
+    knowledge: list[Evidence] = Field(default_factory=list)
+    prediction: Optional[PredictionResponse] = None
 
 
 class WorkOrderLogRequest(BaseModel):
@@ -236,6 +363,14 @@ class NeoTable(BaseModel):
     rows: list[dict[str, Any]]
 
 
+class NeoAction(BaseModel):
+    type: str
+    label: str
+    status: Literal["completed", "blocked", "not_allowed", "not_found"]
+    target_id: Optional[str] = None
+    detail: Optional[str] = None
+
+
 class NeoChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = []
@@ -244,6 +379,7 @@ class NeoChatRequest(BaseModel):
 class NeoChatResponse(BaseModel):
     answer: str
     table: Optional[NeoTable] = None
+    action: Optional[NeoAction] = None
     used_live_provider: bool = False
     provider: str = "mock"
 
@@ -320,6 +456,212 @@ class MaintenanceLabel(BaseModel):
     usable_for_training: bool = True
     used_live_provider: bool = False
     provider: str = "mock"
+
+
+class LearningInteraction(BaseModel):
+    id: str
+    assistant: str
+    interaction_type: str
+    user_id: Optional[str] = None
+    user_role: Optional[str] = None
+    equipment_id: Optional[str] = None
+    work_order_id: Optional[str] = None
+    prompt: str
+    response: str
+    provider: str = "mock"
+    used_live_provider: bool = False
+    prompt_version: str = "default"
+    model_version: str = "model-local-qwen2.5-current"
+    source_refs: list[dict[str, Any]] = []
+    approved_for_learning: bool = False
+    outcome_status: Optional[str] = None
+    created_at: str
+
+
+class LearningExample(BaseModel):
+    id: str
+    source_type: str
+    source_id: str
+    equipment_id: Optional[str] = None
+    work_order_id: Optional[str] = None
+    instruction: str
+    input_text: str
+    expected_output: str
+    metadata: dict[str, Any] = {}
+    approved: bool = False
+    judge_score: float = Field(default=0, ge=0, le=1)
+    judge_label: str = "not_scored"
+    judge_rationale: Optional[str] = None
+    judge_provider: str = "not_scored"
+    judge_used_live_provider: bool = False
+    judged_at: Optional[str] = None
+    created_at: str
+
+
+class LearningJudgeResult(BaseModel):
+    score: float = Field(ge=0, le=1)
+    label: Literal["training_worthy", "review", "reject"]
+    rationale: str
+    strengths: list[str] = []
+    risks: list[str] = []
+    used_live_provider: bool = False
+    provider: str = "mock"
+
+
+class LearningExampleUpdateRequest(BaseModel):
+    approved: bool
+
+
+class LearningDatasetCreateRequest(BaseModel):
+    name: str = "maintenance-wizard-learning-snapshot"
+    description: Optional[str] = None
+    approved_only: bool = True
+    min_judge_score: float = Field(default=0.65, ge=0, le=1)
+
+
+class LearningDatasetSnapshot(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    example_count: int
+    approved_only: bool = True
+    jsonl_content: str
+    created_by: Optional[str] = None
+    created_at: str
+
+
+class LearningModelVersion(BaseModel):
+    id: str
+    provider: str
+    model_name: str
+    base_model: Optional[str] = None
+    adapter_path: Optional[str] = None
+    status: str
+    notes: Optional[str] = None
+    created_at: str
+
+
+class LearningPromptVersion(BaseModel):
+    id: str
+    assistant: str
+    version: str
+    prompt: str
+    status: str
+    notes: Optional[str] = None
+    created_at: str
+
+
+class LearningModelVersionCreateRequest(BaseModel):
+    provider: str = "openai"
+    model_name: str
+    base_model: Optional[str] = None
+    adapter_path: Optional[str] = None
+    status: Literal["candidate", "active", "retired"] = "candidate"
+    notes: Optional[str] = None
+
+
+class LearningModelPromotionRequest(BaseModel):
+    model_version_id: str
+    evaluation_run_id: str
+    notes: Optional[str] = None
+
+
+class LearningModelRollbackRequest(BaseModel):
+    target_model_version_id: str
+    evaluation_run_id: str
+    notes: Optional[str] = None
+
+
+class LearningModelPromotion(BaseModel):
+    id: str
+    model_version_id: str
+    previous_active_model_id: Optional[str] = None
+    evaluation_run_id: str
+    dataset_id: str
+    prompt_version_id: str
+    action: Literal["promote", "rollback"]
+    reviewer_email: str
+    notes: Optional[str] = None
+    created_at: str
+
+
+class LearningEvaluationCreateRequest(BaseModel):
+    dataset_id: str
+    model_version_id: str = "model-local-qwen2.5-current"
+    prompt_version_id: str = "prompt-neo-default"
+    min_quality_score: float = Field(default=0.7, ge=0, le=1)
+    notes: Optional[str] = None
+
+
+class LearningEvaluationRun(BaseModel):
+    id: str
+    dataset_id: Optional[str] = None
+    model_version_id: Optional[str] = None
+    prompt_version_id: Optional[str] = None
+    metrics: dict[str, Any] = {}
+    notes: Optional[str] = None
+    passed: bool = False
+    created_at: str
+
+
+LearningJobType = Literal[
+    "refresh_examples",
+    "judge_example",
+    "dataset_snapshot",
+    "evaluation",
+    "peft_tuning",
+    "adapter_registered",
+    "model_promotion",
+]
+LearningJobStatus = Literal["queued", "published", "running", "completed", "failed"]
+
+
+class LearningJob(BaseModel):
+    id: str
+    job_type: LearningJobType
+    subject: str
+    status: LearningJobStatus
+    requested_by: Optional[str] = None
+    correlation_id: str
+    input_refs: dict[str, Any] = {}
+    output_refs: dict[str, Any] = {}
+    error: Optional[str] = None
+    retry_count: int = 0
+    created_at: str
+    updated_at: str
+
+
+class LearningArtifact(BaseModel):
+    id: str
+    job_id: str
+    artifact_type: str
+    uri: str
+    content_hash: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class LearningPeftJobCreateRequest(BaseModel):
+    dataset_id: str
+    model_version_id: str = "model-local-qwen2.5-current"
+    prompt_version_id: str = "prompt-neo-default"
+    adapter_name: str = "maintenance-wizard-qwen-lora"
+    base_model: Optional[str] = "qwen2.5-7b-instruct"
+    training_config: dict[str, Any] = {}
+    notes: Optional[str] = None
+
+
+class LearningSummary(BaseModel):
+    counts: dict[str, int]
+    recent_examples: list[LearningExample] = []
+    recent_snapshots: list[LearningDatasetSnapshot] = []
+    model_versions: list[LearningModelVersion] = []
+    prompt_versions: list[LearningPromptVersion] = []
+    evaluation_runs: list[LearningEvaluationRun] = []
+    recent_jobs: list[LearningJob] = []
+    recent_artifacts: list[LearningArtifact] = []
+    recent_promotions: list[LearningModelPromotion] = []
+    vector_store: dict[str, Any] = Field(default_factory=dict)
 
 
 class AnomalyContext(BaseModel):
@@ -448,3 +790,4 @@ class PasswordResetRequest(BaseModel):
 
 Recommendation.model_rebuild()
 PredictionResponse.model_rebuild()
+AssetDetail.model_rebuild()

@@ -10,37 +10,41 @@ NAMESPACE="${K8S_NAMESPACE:-maintenance-wizard}"
 BACKEND_IMAGE="${BACKEND_IMAGE:-maintenance-wizard-backend:local-k8s}"
 FRONTEND_IMAGE="${FRONTEND_IMAGE:-maintenance-wizard-frontend:local-k8s}"
 NATS_IMAGE="${NATS_IMAGE:-nats:2}"
+QDRANT_IMAGE="${QDRANT_IMAGE:-qdrant/qdrant:latest}"
 KIND_AUTO_INSTALL="${KIND_AUTO_INSTALL:-true}"
 
 BACKEND_HOST_PORT="${BACKEND_HOST_PORT:-18080}"
 FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-18081}"
 NATS_HOST_PORT="${NATS_HOST_PORT:-14222}"
 NATS_MONITOR_HOST_PORT="${NATS_MONITOR_HOST_PORT:-18222}"
+QDRANT_HOST_PORT="${QDRANT_HOST_PORT:-16333}"
 
 BACKEND_NODE_PORT="${BACKEND_NODE_PORT:-30080}"
 FRONTEND_NODE_PORT="${FRONTEND_NODE_PORT:-30081}"
 NATS_NODE_PORT="${NATS_NODE_PORT:-30422}"
 NATS_MONITOR_NODE_PORT="${NATS_MONITOR_NODE_PORT:-30822}"
+QDRANT_NODE_PORT="${QDRANT_NODE_PORT:-30333}"
 
 BACKEND_URL="http://127.0.0.1:${BACKEND_HOST_PORT}"
 FRONTEND_URL="http://127.0.0.1:${FRONTEND_HOST_PORT}"
 NATS_URL="nats://127.0.0.1:${NATS_HOST_PORT}"
 NATS_MONITOR_URL="http://127.0.0.1:${NATS_MONITOR_HOST_PORT}"
+QDRANT_URL="http://127.0.0.1:${QDRANT_HOST_PORT}"
 
 usage() {
   cat <<EOF
 Usage: scripts/run-local-k8s.sh [start|status|stop]
 
 Commands:
-  start   Create/reuse a local Kind cluster and deploy NATS, backend, and frontend.
+  start   Create/reuse a local Kind cluster and deploy NATS, Qdrant, backend, and frontend.
   status  Show Kubernetes resources and live HTTP status checks.
   stop    Delete the local Kind cluster and temporary generated build files.
 
 Environment overrides:
   K8S_CLUSTER_NAME, K8S_NAMESPACE
-  BACKEND_HOST_PORT, FRONTEND_HOST_PORT, NATS_HOST_PORT, NATS_MONITOR_HOST_PORT
-  BACKEND_NODE_PORT, FRONTEND_NODE_PORT, NATS_NODE_PORT, NATS_MONITOR_NODE_PORT
-  BACKEND_IMAGE, FRONTEND_IMAGE, NATS_IMAGE
+  BACKEND_HOST_PORT, FRONTEND_HOST_PORT, NATS_HOST_PORT, NATS_MONITOR_HOST_PORT, QDRANT_HOST_PORT
+  BACKEND_NODE_PORT, FRONTEND_NODE_PORT, NATS_NODE_PORT, NATS_MONITOR_NODE_PORT, QDRANT_NODE_PORT
+  BACKEND_IMAGE, FRONTEND_IMAGE, NATS_IMAGE, QDRANT_IMAGE
   KIND_AUTO_INSTALL=false to fail instead of installing Kind when missing
 
 URLs after start:
@@ -48,6 +52,7 @@ URLs after start:
   Backend:  ${BACKEND_URL}
   NATS:     ${NATS_URL}
   NATS UI:  ${NATS_MONITOR_URL}
+  Qdrant:   ${QDRANT_URL}
 EOF
 }
 
@@ -143,6 +148,10 @@ nodes:
         hostPort: ${NATS_MONITOR_HOST_PORT}
         listenAddress: "127.0.0.1"
         protocol: TCP
+      - containerPort: ${QDRANT_NODE_PORT}
+        hostPort: ${QDRANT_HOST_PORT}
+        listenAddress: "127.0.0.1"
+        protocol: TCP
 EOF
 }
 
@@ -201,6 +210,10 @@ build_images() {
     echo "Pulling NATS image: ${NATS_IMAGE}"
     docker pull "$NATS_IMAGE"
   fi
+  if ! docker image inspect "$QDRANT_IMAGE" >/dev/null 2>&1; then
+    echo "Pulling Qdrant image: ${QDRANT_IMAGE}"
+    docker pull "$QDRANT_IMAGE"
+  fi
   echo "Building backend image: ${BACKEND_IMAGE}"
   docker build -f "${RUNTIME_DIR}/backend.Dockerfile" -t "$BACKEND_IMAGE" "$ROOT_DIR"
   echo "Building frontend image: ${FRONTEND_IMAGE}"
@@ -214,6 +227,7 @@ build_images() {
 load_images() {
   echo "Loading images into Kind cluster"
   load_image "$NATS_IMAGE"
+  load_image "$QDRANT_IMAGE"
   load_image "$BACKEND_IMAGE"
   load_image "$FRONTEND_IMAGE"
 }
@@ -299,6 +313,56 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: qdrant
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+    spec:
+      containers:
+        - name: qdrant
+          image: ${QDRANT_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 6333
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 6333
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: qdrant-data
+              mountPath: /qdrant/storage
+      volumes:
+        - name: qdrant-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: ${NAMESPACE}
+spec:
+  type: NodePort
+  selector:
+    app: qdrant
+  ports:
+    - name: http
+      port: 6333
+      targetPort: 6333
+      nodePort: ${QDRANT_NODE_PORT}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: backend
   namespace: ${NAMESPACE}
 spec:
@@ -322,6 +386,14 @@ spec:
               value: "true"
             - name: NATS_URL
               value: "nats://nats.${NAMESPACE}.svc.cluster.local:4222"
+            - name: LEARNING_ASYNC_ENABLED
+              value: "true"
+            - name: RAG_VECTOR_STORE
+              value: "qdrant"
+            - name: RAG_QDRANT_URL
+              value: "http://qdrant.${NAMESPACE}.svc.cluster.local:6333"
+            - name: RAG_QDRANT_COLLECTION
+              value: "maintenance_wizard_documents"
             - name: AUTH_ENABLED
               value: "true"
             - name: AUTH_SEED_DEMO_USERS
@@ -347,6 +419,32 @@ spec:
               port: 8000
             initialDelaySeconds: 20
             periodSeconds: 20
+        - name: learning-worker
+          image: ${BACKEND_IMAGE}
+          imagePullPolicy: Never
+          command: ["python", "-m", "app.learning_worker"]
+          env:
+            - name: NATS_URL
+              value: "nats://nats.${NAMESPACE}.svc.cluster.local:4222"
+            - name: LEARNING_ASYNC_ENABLED
+              value: "true"
+            - name: RAG_VECTOR_STORE
+              value: "qdrant"
+            - name: RAG_QDRANT_URL
+              value: "http://qdrant.${NAMESPACE}.svc.cluster.local:6333"
+            - name: RAG_QDRANT_COLLECTION
+              value: "maintenance_wizard_documents"
+            - name: AUTH_ENABLED
+              value: "true"
+            - name: AUTH_SEED_DEMO_USERS
+              value: "true"
+            - name: JWT_SECRET_KEY
+              value: "maintenance-wizard-local-k8s-secret-change-me"
+            - name: DATABASE_PATH
+              value: "/data/maintenance_wizard.db"
+          volumeMounts:
+            - name: backend-data
+              mountPath: /data
       volumes:
         - name: backend-data
           emptyDir: {}
@@ -415,6 +513,7 @@ EOF
 wait_for_rollouts() {
   echo "Waiting for Kubernetes rollouts"
   kubectl_cmd -n "$NAMESPACE" rollout status deployment/nats --timeout=180s
+  kubectl_cmd -n "$NAMESPACE" rollout status deployment/qdrant --timeout=180s
   kubectl_cmd -n "$NAMESPACE" rollout status deployment/backend --timeout=240s
   kubectl_cmd -n "$NAMESPACE" rollout status deployment/frontend --timeout=180s
 }
@@ -434,6 +533,7 @@ show_urls() {
   echo "Backend:  ${BACKEND_URL}"
   echo "NATS:     ${NATS_URL}"
   echo "NATS UI:  ${NATS_MONITOR_URL}"
+  echo "Qdrant:   ${QDRANT_URL}"
   echo
   echo "Demo login: admin@plant.local / DemoPass123!"
 }
@@ -476,6 +576,9 @@ status_stack() {
   echo
   echo "NATS monitor:"
   curl -fsS "${NATS_MONITOR_URL}/healthz" || true
+  echo
+  echo "Qdrant:"
+  curl -fsS "${QDRANT_URL}/readyz" || true
   echo
 }
 

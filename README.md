@@ -6,18 +6,21 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 
 ## Current Capabilities
 
-- FastAPI backend with health, dashboard, equipment health, alert, chat, diagnosis, prediction, work order, assistant, report, and feedback endpoints.
-- React + TypeScript + Vite frontend for an operational dashboard, asset details, work-order queue/detail/execution/review screens, left-nav ingestion view, engineer chat, recommendation panel, report export, and detailed feedback controls.
+- FastAPI backend with health, dashboard, asset list/detail section loading, equipment health, alert, chat, diagnosis, prediction, work order, assistant, report, feedback, and learning-review endpoints.
+- React + TypeScript + Vite frontend for an operational dashboard, a company Assets table, lazy-loaded data-backed asset details, work-order queue/detail/execution/review screens, left-nav ingestion view, engineer chat, recommendation panel, report export, and detailed feedback controls.
 - Sample steel-plant data for a hot strip mill drive, blast furnace blower, caster cooling pump, hot rolling hydraulic system, and melt shop overhead crane.
-- SQLite-backed persistence seeded from five sample assets with equipment, alerts, sensor readings, spares, maintenance events, work orders, work logs, documents, document chunks, document intelligence, maintenance labels, and feedback.
+- SQLite-backed persistence seeded from five sample assets with equipment, asset profiles, asset metrics, recommendations, subsystems, reliability metrics, alerts, sensor readings, spares, maintenance events, work orders, work logs, SOP/manual/log/history evidence, document chunks, document intelligence, maintenance labels, and feedback.
 - Local document chunk index with deterministic embeddings, hybrid retrieval scoring, optional LLM/SLM reranking, and relevance reasons for offline retrieval-augmented answers.
 - Time-series sensor readings with rolling-baseline anomaly detection, risk impact, and optional LLM/SLM context classification with inspection steps.
 - Provider-agnostic LLM/SLM adapters for OpenAI and Ollama with structured JSON validation and deterministic fallback reasoning.
 - Markdown maintenance report export.
 - API and frontend ingestion for text/Markdown/CSV/log/JSON and embedded-text PDF documents.
 - Structured JSON record ingestion for equipment, alerts, spares, sensor readings, and maintenance history.
-- Optional async IoT streaming ingestion via NATS JetStream for plant applications and edge gateways.
-- Engineer feedback capture with equipment-linked root cause, action, outcome, and notes normalized into reusable maintenance labels for later recommendations and prediction drivers.
+- Async IoT streaming ingestion via NATS JetStream for plant applications and edge gateways.
+- Production RAG backed by Qdrant vector database, with local SQLite vector scoring only as a fallback.
+- Engineer feedback capture with equipment-linked root cause, action, outcome, and notes normalized into reusable maintenance labels for later recommendations, prediction drivers, and LLM-as-a-Judge training-example review.
+- Learning Review workflow for admin/engineer reviewers to score feedback, labels, completed work orders, approved assistant interactions, and ingested documents with an LLM-as-a-Judge rubric before approving them for RAG reuse or local PEFT tuning snapshots.
+- Durable NATS learning worker for queued judge/dataset/evaluation/PEFT jobs, including local PEFT dataset and training-manifest artifacts with content hashes.
 - Local login and role-based authorization for steel-plant users with admin, engineer, technician, supervisor, planner, operator, and API-only service roles.
 - Role-specific technician and supervisor LLM assistant flows for live work-order directions, problem-code suggestions, completion summaries, follow-up review, and draft follow-up work.
 - Backend and frontend tests for core prototype behavior.
@@ -31,7 +34,7 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 - Prioritized maintenance actions based on risk level, active alerts, equipment criticality, spares availability, lead time, maintenance history, and feedback signals.
 - Work-order lifecycle support with WAPPR, WMATL, APPR, INPRG, COMP, and CLOSE status tracking, assignment, priority, problem code, recommended action, follow-up flags, and work logs.
 - Structured Markdown report export with diagnosis, risk, RUL, root causes, immediate actions, planned actions, spares strategy, learning notes, evidence, and summary.
-- Continuous-improvement loop through equipment-linked engineer feedback reused in future recommendation ranking, LLM prompt context, normalized training labels, reports, and prediction drivers.
+- Continuous-improvement loop through equipment-linked engineer feedback, maintenance labels, work-order outcomes, approved assistant interactions, and LLM-as-a-Judge scores reused in future recommendation ranking, RAG prompt context, JSONL tuning snapshots, reports, and prediction drivers.
 
 ## Project Layout
 
@@ -51,6 +54,7 @@ Important docs:
 - `docs/progress.md`: session-level progress notes and verification history.
 - `docs/demo_script.md`: suggested demo walkthrough.
 - `docs/local-llm-lm-studio.md`: LM Studio setup for local OpenAI-compatible LLM inference.
+- `docs/rag-peft-nats-learning-architecture.md`: production design for RAG, PEFT adapter tuning, and NATS-backed async learning jobs.
 - `docs/submission-guide.md`: hackathon packaging guide.
 - `docs/production-hardening.md`: production-readiness gaps and next steps.
 
@@ -137,7 +141,7 @@ Frontend URL: `http://localhost:5173`
 
 ## Local Full Stack
 
-To run NATS JetStream, the streaming-enabled backend, and the frontend together:
+To run NATS JetStream, Qdrant, the streaming-enabled backend, and the frontend together:
 
 ```bash
 scripts/run-local-stack.sh
@@ -150,15 +154,15 @@ scripts/run-local-stack.sh status
 scripts/run-local-stack.sh stop
 ```
 
-The script requires Docker for the temporary `nats:2` container, an installed backend venv, and installed frontend `node_modules`. It writes backend and frontend logs under `.local-stack/`.
+The script requires Docker for the temporary `nats:2` and `qdrant/qdrant` containers, an installed backend venv, and installed frontend `node_modules`. It writes backend and frontend logs under `.local-stack/`.
 
 `scripts/run-local-stack.sh status` uses the seeded demo admin login to check protected streaming status when local auth is enabled.
 
-`scripts/run-local-stack.sh stop` stops backend/frontend listeners on the configured ports and stops the named local-stack NATS container, even if `.local-stack` PID marker files are missing.
+`scripts/run-local-stack.sh stop` stops backend/frontend listeners on the configured ports and stops the named local-stack NATS and Qdrant containers, even if `.local-stack` PID marker files are missing.
 
 ## Local Kubernetes Stack
 
-To create a disposable local Kubernetes cluster and deploy NATS JetStream, the FastAPI backend, and the production-built frontend:
+To create a disposable local Kubernetes cluster and deploy NATS JetStream, Qdrant, the FastAPI backend, and the production-built frontend:
 
 ```bash
 scripts/run-local-k8s.sh start
@@ -171,12 +175,13 @@ scripts/run-local-k8s.sh status
 scripts/run-local-k8s.sh stop
 ```
 
-The script requires Docker, `kubectl`, `curl`, and `python3`. If `kind` is missing, the script installs it automatically with Homebrew when available, then falls back to `go install sigs.k8s.io/kind@latest` when Go is available. Set `KIND_AUTO_INSTALL=false` to fail fast instead. It creates a Kind cluster named `maintenance-wizard-local`, builds local backend/frontend images, loads those images plus `nats:2` into the cluster, applies Kubernetes deployments/services, and exposes:
+The script requires Docker, `kubectl`, `curl`, and `python3`. If `kind` is missing, the script installs it automatically with Homebrew when available, then falls back to `go install sigs.k8s.io/kind@latest` when Go is available. Set `KIND_AUTO_INSTALL=false` to fail fast instead. It creates a Kind cluster named `maintenance-wizard-local`, builds local backend/frontend images, loads those images plus `nats:2` and `qdrant/qdrant` into the cluster, applies Kubernetes deployments/services, and exposes:
 
 - Frontend: `http://127.0.0.1:18081`
 - Backend: `http://127.0.0.1:18080`
 - NATS: `nats://127.0.0.1:14222`
 - NATS monitor: `http://127.0.0.1:18222`
+- Qdrant: `http://127.0.0.1:16333`
 
 `scripts/run-local-k8s.sh stop` deletes the Kind cluster and generated `.local-k8s/` runtime files.
 
@@ -194,32 +199,36 @@ Supported LLM provider values:
 - `openai`: OpenAI-compatible chat completions adapter using `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL`.
 - `ollama`: Ollama chat adapter using `OLLAMA_BASE_URL` and `OLLAMA_MODEL`.
 
-For local LM Studio inference, use the `openai` provider mode with `OPENAI_BASE_URL=http://localhost:1234/v1`. The recommended local model for this project is Qwen2.5 7B Instruct GGUF with a 4-bit quantization. Keep local response controls at `LLM_TIMEOUT_SECONDS=15`, `LLM_STREAM_TIMEOUT_SECONDS=60`, `LLM_STRUCTURED_MAX_TOKENS=300`, and `LLM_TEXT_MAX_TOKENS=600`; Neo, Smith, and Trinity stream chat answers as tokens arrive and prompt the model to complete answers within that budget. See `docs/local-llm-lm-studio.md` for install, model, `.env`, and smoke-test steps.
+For local LM Studio inference, use the `openai` provider mode with `OPENAI_BASE_URL=http://localhost:1234/v1`. The recommended local model for this project is Qwen2.5 7B Instruct GGUF with a 4-bit quantization. Keep local response controls at `LLM_TIMEOUT_SECONDS=15`, `LLM_STREAM_TIMEOUT_SECONDS=60`, `LLM_STRUCTURED_MAX_TOKENS=300`, and `LLM_TEXT_MAX_TOKENS=600`; Neo streams dashboard, technician, and supervisor chat answers as tokens arrive and prompts the model to complete answers within that budget. See `docs/local-llm-lm-studio.md` for install, model, `.env`, and smoke-test steps.
 
 Provider responses must return the structured JSON contract requested by each feature. Recommendation generation expects `summary`, `probable_root_causes`, `immediate_actions`, `planned_actions`, and `confidence_adjustment`; document intelligence, maintenance labels, anomaly context, retrieval reranking, and reasoning explanations each use their own Pydantic-validated JSON schemas. Missing keys, malformed JSON, timeout, or network failure automatically fall back to deterministic local reasoning so the prototype remains runnable without secrets.
 
-The backend creates and seeds `backend/data/maintenance_wizard.db` automatically on startup unless `DATABASE_PATH` is set to another SQLite file path. Documents are chunked into `document_chunks` with deterministic local embeddings for retrieval.
+The backend creates and seeds `backend/data/maintenance_wizard.db` automatically on startup unless `DATABASE_PATH` is set to another SQLite file path. Asset-detail seed SQL loads normalized profile, metric, recommendation, subsystem, reliability, maintenance, work-order, and document evidence records for all five sample assets. Documents are chunked into `document_chunks` with deterministic local embeddings for retrieval.
 
 Document upload supports `.txt`, `.md`, `.markdown`, `.csv`, `.log`, `.json`, and `.pdf`. Parsed text is stored in SQLite, indexed into retrieval chunks, and processed into document intelligence with summary, assets, components, failure modes, symptoms, safety constraints, spares, and thresholds.
 
 Structured record ingestion supports `equipment`, `alerts`, `spares`, `sensor_readings`, and `maintenance_events`. Maintenance events and engineer feedback are normalized into maintenance labels with failure mode, component, root cause, action class, outcome status, signal hints, and training usability. Engineer feedback is stored with `equipment_id`, `status`, `corrected_diagnosis`, `actual_root_cause`, `action_taken`, `outcome`, and `notes`.
 
-NATS JetStream streaming ingestion is disabled by default. Set `STREAMING_ENABLED=true` and configure `NATS_URL` to consume IoT envelopes from `steelplant.iot.*` subjects into the same structured record tables used by JSON ingestion. The backend uses the `MW_IOT` stream, `maintenance-wizard-ingestor` durable consumer, explicit acknowledgments after persistence, and `steelplant.iot.dlq` for invalid messages.
+NATS JetStream streaming ingestion is enabled in the local stack and should remain enabled for production. Set `STREAMING_ENABLED=true` and configure `NATS_URL` to consume IoT envelopes from `steelplant.iot.*` subjects into the same structured record tables used by JSON ingestion. The backend uses the `MW_IOT` stream, `maintenance-wizard-ingestor` durable consumer, explicit acknowledgments after persistence, and `steelplant.iot.dlq` for invalid messages.
 
-The current SQLite schema version is `6`. Lightweight startup migrations add `feedback.equipment_id`, create `document_intelligence`, `maintenance_labels`, `streaming_messages`, local auth tables, work orders, and work-order logs for older local databases. Full migration tooling is still a production hardening item.
+The same NATS server also carries production learning jobs without mixing them with plant IoT payloads. Keep `LEARNING_ASYNC_ENABLED=true` to publish queued tuning jobs to `LEARNING_NATS_STREAM=MW_LEARNING` on `maintenance.learning.*` subjects. Run the worker with `python -m app.learning_worker`, or use the local stack scripts, to consume jobs with `LEARNING_NATS_CONSUMER=maintenance-wizard-learning-worker`. PEFT requests currently prepare a JSONL dataset and training manifest under `LEARNING_ARTIFACT_DIR`, then record artifact hashes for audit and external trainer handoff.
+
+Production RAG uses Qdrant as the vector database. Set `RAG_VECTOR_STORE=qdrant`, `RAG_QDRANT_URL=http://localhost:6333`, and `RAG_QDRANT_COLLECTION=maintenance_wizard_documents`. Uploaded and seeded document chunks are indexed into Qdrant when it is available; retrieval falls back to SQLite-local vectors only when the vector DB is unavailable or explicitly disabled for tests.
+
+The current SQLite schema version is `11`. Lightweight startup migrations add `feedback.equipment_id`, create asset detail tables, `document_intelligence`, `maintenance_labels`, `streaming_messages`, local auth tables, work orders, work-order logs, learning interactions, judged examples, dataset snapshots, model versions, prompt versions, evaluation runs, learning jobs, and learning artifacts for older local databases. Full migration tooling is still a production hardening item.
 
 ## Authentication And Authorization
 
 The app uses local SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI role guards, and React role-aware navigation. `/api/health` and `/api/auth/login` are public. Maintenance data, ingestion, diagnosis, reports, feedback, streaming status, and user management require a bearer token and role permission.
 
-Demo users are seeded when `AUTH_SEED_DEMO_USERS=true`; all use password `DemoPass123!`.
+Demo users are loaded from `assets/sample_data/users_seed.sql` when `AUTH_SEED_DEMO_USERS=true`; all use password `DemoPass123!`.
 
 | User | Role |
 | --- | --- |
 | `admin@plant.local` | Full access and user management |
 | `maintenance@plant.local` | Diagnosis, reports, predictions, feedback |
-| `technician@plant.local` | Work-order execution and Smith technician AI assistant |
-| `supervisor@plant.local` | Work-order review and Trinity supervisor AI assistant |
+| `technician@plant.local` | Work-order execution and Neo technician AI assistant |
+| `supervisor@plant.local` | Work-order review and Neo supervisor AI assistant |
 | `reliability@plant.local` | Diagnosis, reports, feedback, ingestion, streaming status |
 | `planner@plant.local` | Dashboard, predictions, recommendations, reports |
 | `operator@plant.local` | Read-only dashboard, alerts, health, anomalies |
@@ -229,13 +238,19 @@ Set `JWT_SECRET_KEY` to a strong secret outside local demos. External OIDC/SAML 
 
 ## LLM And Learning Behavior
 
-LLMs/SLMs are invoked only after deterministic ingestion and validation. They can enrich document ingestion with structured intelligence, normalize maintenance events and feedback into labels, rerank retrieved evidence, classify anomaly context, explain predictions/recommendations, guide technicians through work-order execution, and help supervisors review follow-ups. Smith, the technician assistant, is visible and callable only for `maintenance_technician`; Trinity, the supervisor assistant, is visible and callable only for `maintenance_supervisor`. They share the same LLM provider, model, token-limit, and streaming configuration as Neo, and stream visible chat responses before sending final structured app updates. They are not the source of truth for raw IoT ingestion, anomaly scores, risk scoring, RUL calculation, work-order persistence, or status changes.
+LLMs/SLMs are invoked only after deterministic ingestion and validation. They can enrich document ingestion with structured intelligence, normalize maintenance events and feedback into labels, rerank retrieved evidence, classify anomaly context, explain predictions/recommendations, guide technicians through work-order execution, and help supervisors review follow-ups. Neo presents role-aware modes: the technician mode is visible and callable only for `maintenance_technician`, and the supervisor mode is visible and callable only for `maintenance_supervisor`. Both modes share the same LLM provider, model, token-limit, and streaming configuration as dashboard Neo, and stream visible chat responses before sending final structured app updates. Dashboard Neo starts with a deterministic role-aware welcome that highlights immediate attention items such as assigned technician work, supervisor approvals/follow-ups, engineering asset reviews, or read-only operator watch items. It also has deterministic, role-aware commands for backend asset summaries, work-order next steps, work-order creation/status actions, and admin user retrieval/updates. Neo is not the source of truth for raw IoT ingestion, anomaly scores, risk scoring, or RUL calculation; persisted actions still go through the backend repository and role checks.
 
 LLMs are not involved in NATS IoT streaming ingestion. Streaming payloads are validated deterministically and persisted before later diagnosis, chat, report, and recommendation flows use the updated data.
 
 When configured, recommendation prompts include equipment context, selected alert, symptoms/query, computed risk, failure probability, RUL, retrieved evidence, normalized maintenance labels, and recent engineer feedback notes. The backend validates structured JSON before merging LLM suggestions into deterministic recommendations.
 
-Engineer feedback improves future behavior without retraining. Accepted or corrected feedback can promote known root causes and confirmed actions, appear as learning notes in reports, produce normalized labels, and add prediction drivers for the relevant equipment.
+Engineer feedback improves future behavior before retraining through RAG and ranking. Accepted or corrected feedback can promote known root causes and confirmed actions, appear as learning notes in reports, produce normalized labels, and add prediction drivers for the relevant equipment.
+
+The learning pipeline uses an LLM-as-a-Judge quality gate before data can be reused for training or tuning. Candidate examples are generated from accepted/corrected feedback, usable maintenance labels, completed work orders, approved assistant interactions, and ingested documents. The judge scores each example from 0.0 to 1.0, labels it as `training_worthy`, `review`, or `reject`, records a rationale/provider, and falls back to a deterministic rubric if the local LLM is unavailable. Dataset snapshots include only examples that are both human-approved and above the configured judge threshold, defaulting to `0.65`.
+
+The architecture is RAG + PEFT-ready rather than one or the other. Judge-qualified, approved examples are immediately available to retrieval and recommendation prompts, while the same examples can be exported as JSONL snapshots for offline/local adapter tuning. This keeps live recommendations auditable and reversible while allowing later Qwen/SLM LoRA or other PEFT jobs to use only curated maintenance content.
+
+For production, the learning/tuning path uses a persisted learning-job model and NATS JetStream as the async job backbone rather than running large judging, dataset, evaluation, or PEFT jobs in the web request path. The current app records reviewer learning actions in `learning_jobs`, exposes recent job status in Learning Review, and can queue PEFT tuning jobs against approved dataset/model/prompt versions. Set `LEARNING_ASYNC_ENABLED=true` to publish queued jobs to the separate `maintenance.learning.*` NATS subjects. The worker consumes those jobs, updates job status, writes PEFT dataset/manifest artifacts, and records artifact hashes. External trainer execution, object storage, and adapter promotion gates remain the next production implementation layer. See `docs/rag-peft-nats-learning-architecture.md`.
 
 ## Tests
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
   Activity,
@@ -17,7 +17,6 @@ import {
   KeyRound,
   LogIn,
   LogOut,
-  MessageSquare,
   Search,
   Send,
   ShieldAlert,
@@ -30,12 +29,30 @@ import {
 import {
   api,
   fallbackDashboard,
+  type AssetDetail,
+  type AssetDetailSection,
+  type AssetDocument,
+  type AssetListItem,
+  type AssetMetricSnapshot,
+  type AssetPerformanceChart,
+  type AssetReliabilityMetric,
+  type AssetSubsystem,
   type AuthSession,
   type AuthUser,
   type DashboardSummary,
   type HealthSummary,
+  type LearningDatasetSnapshot,
+  type LearningEvaluationRun,
+  type LearningExample,
+  type LearningArtifact,
+  type LearningJob,
+  type LearningModelVersion,
+  type LearningSummary,
+  type MaintenanceEvent,
+  type NeoAction,
   type NeoChatResponse,
   type NeoTable,
+  type PredictionResponse,
   type Recommendation,
   type SupervisorAssistantResponse,
   type TechnicianAssistantResponse,
@@ -46,8 +63,55 @@ import {
 } from './services/api'
 
 const riskRank = { low: 1, medium: 2, high: 3, critical: 4 }
-type AppView = 'dashboard' | 'asset' | 'workOrders' | 'ingestion' | 'users'
+type AppView = 'dashboard' | 'assets' | 'asset' | 'workOrders' | 'ingestion' | 'learning' | 'users'
 type AssetTab = 'summary' | 'maintenance' | 'performance' | 'reliability' | 'documents' | 'workOrders'
+
+const assetSectionsByTab: Record<AssetTab, AssetDetailSection[]> = {
+  summary: ['summary'],
+  maintenance: ['maintenance'],
+  performance: ['performance'],
+  reliability: ['reliability'],
+  documents: ['documents'],
+  workOrders: ['work_orders'],
+}
+
+function mergeAssetDetail(
+  current: AssetDetail | null,
+  next: AssetDetail,
+  sections: AssetDetailSection[],
+): AssetDetail {
+  const merged: AssetDetail = current
+    ? { ...current, profile: next.profile, health: next.health }
+    : { ...next }
+  const requested = new Set(sections)
+
+  if (requested.has('summary')) {
+    merged.metrics = next.metrics
+    merged.recommendations = next.recommendations
+    merged.subsystems = next.subsystems
+  }
+  if (requested.has('maintenance')) {
+    merged.maintenance_events = next.maintenance_events
+    merged.work_orders = next.work_orders
+  }
+  if (requested.has('performance')) {
+    merged.metrics = next.metrics
+    merged.performance_charts = next.performance_charts
+  }
+  if (requested.has('reliability')) {
+    merged.reliability_metrics = next.reliability_metrics
+    merged.prediction = next.prediction
+  }
+  if (requested.has('documents')) {
+    merged.documents = next.documents
+    merged.knowledge = next.knowledge
+  }
+  if (requested.has('work_orders')) {
+    merged.work_orders = next.work_orders
+  }
+
+  return merged
+}
 
 const roleLabels: Record<UserRole, string> = {
   admin: 'Admin',
@@ -74,12 +138,23 @@ const roleOptions: UserRole[] = [
 const decisionRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer', 'planner']
 const technicianAssistantRoles: UserRole[] = ['maintenance_technician']
 const supervisorAssistantRoles: UserRole[] = ['maintenance_supervisor']
+const workOrderCreationRoles: UserRole[] = [
+  'admin',
+  'maintenance_engineer',
+  'maintenance_technician',
+  'maintenance_supervisor',
+  'reliability_engineer',
+  'planner',
+]
 const workOrderAssignmentRoles: UserRole[] = ['admin', 'maintenance_supervisor']
-const technicianAssistantName = 'Smith'
-const supervisorAssistantName = 'Trinity'
+const diagnosisAssistantName = 'Morpheus'
+const reliabilityAssistantName = 'Smith'
+const technicianAssistantName = 'Neo'
+const supervisorAssistantName = 'Neo'
 const feedbackRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer']
 const ingestionRoles: UserRole[] = ['admin', 'reliability_engineer']
 const streamingRoles: UserRole[] = ['admin', 'reliability_engineer']
+const learningRoles: UserRole[] = ['admin', 'maintenance_engineer', 'reliability_engineer']
 
 const fallbackWorkOrders: WorkOrder[] = [
   {
@@ -213,6 +288,51 @@ function AssistantMessageContent({ turn }: { turn: AssistantTurn }) {
   return <p>{turn.content}</p>
 }
 
+function scrollStreamToBottom(ref: { current: HTMLElement | null }) {
+  const scroll = () => {
+    const node = ref.current
+    if (!node) return
+    node.scrollTop = node.scrollHeight
+    if (typeof node.scrollIntoView === 'function') {
+      node.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' })
+      node.scrollTop = node.scrollHeight
+    }
+  }
+
+  scroll()
+
+  if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+    window.requestAnimationFrame(scroll)
+    window.setTimeout(scroll, 0)
+    window.setTimeout(scroll, 50)
+    window.setTimeout(scroll, 150)
+    window.setTimeout(scroll, 300)
+    return
+  }
+
+  scroll()
+}
+
+function usePinnedStreamScroll(ref: { current: HTMLElement | null }, trigger: string) {
+  useEffect(() => {
+    const node = ref.current
+    if (!node) return
+
+    scrollStreamToBottom(ref)
+
+    if (typeof MutationObserver === 'undefined') return
+
+    const observer = new MutationObserver(() => scrollStreamToBottom(ref))
+    observer.observe(node, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    })
+
+    return () => observer.disconnect()
+  }, [ref, trigger])
+}
+
 export function App() {
   const [session, setSession] = useState<AuthSession | null>(() => api.restoreSession())
   const [authReady, setAuthReady] = useState(false)
@@ -220,10 +340,29 @@ export function App() {
   const [loginPassword, setLoginPassword] = useState('DemoPass123!')
   const [authMessage, setAuthMessage] = useState('')
   const [dashboard, setDashboard] = useState<DashboardSummary>(fallbackDashboard)
+  const [assets, setAssets] = useState<AssetListItem[]>([])
+  const [assetDetail, setAssetDetail] = useState<AssetDetail | null>(null)
+  const [assetDetailLoading, setAssetDetailLoading] = useState(false)
+  const [assetLoadedSections, setAssetLoadedSections] = useState<AssetDetailSection[]>([])
+  const [assetSectionLoading, setAssetSectionLoading] = useState<Partial<Record<AssetDetailSection, boolean>>>({})
+  const [assetReliabilityPrediction, setAssetReliabilityPrediction] = useState<PredictionResponse | null>(null)
+  const [assetReliabilityText, setAssetReliabilityText] = useState('')
+  const [assetReliabilityLoading, setAssetReliabilityLoading] = useState(false)
+  const [assetReliabilityProvider, setAssetReliabilityProvider] = useState('')
+  const [assetReliabilityUsedLive, setAssetReliabilityUsedLive] = useState(false)
+  const [assetReliabilityMessage, setAssetReliabilityMessage] = useState('')
+  const [assetReliabilityStreamAsset, setAssetReliabilityStreamAsset] = useState('')
+  const [assetMessage, setAssetMessage] = useState('')
   const [activeView, setActiveView] = useState<AppView>('dashboard')
   const [selectedEquipment, setSelectedEquipment] = useState('RM-DRIVE-01')
   const [assetTab, setAssetTab] = useState<AssetTab>('summary')
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null)
+  const [diagnosisLoading, setDiagnosisLoading] = useState(false)
+  const [diagnosisStreaming, setDiagnosisStreaming] = useState(false)
+  const [diagnosisStreamText, setDiagnosisStreamText] = useState('')
+  const [diagnosisProvider, setDiagnosisProvider] = useState('')
+  const [diagnosisUsedLive, setDiagnosisUsedLive] = useState(false)
+  const [diagnosisMessage, setDiagnosisMessage] = useState('')
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>(fallbackWorkOrders)
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState('WO-8304')
   const [workOrderMessage, setWorkOrderMessage] = useState('')
@@ -249,8 +388,6 @@ export function App() {
       content: `I’m ${supervisorAssistantName}. Ask me to summarize follow-ups, risks, or draft a follow-up work order.`,
     },
   ])
-  const [question, setQuestion] = useState('Why is the hot strip mill main drive vibrating?')
-  const [answer, setAnswer] = useState('')
   const [neoQuestion, setNeoQuestion] = useState('Show work orders needing follow-up')
   const [neoTable, setNeoTable] = useState<NeoTable | null>(null)
   const [neoLoading, setNeoLoading] = useState(false)
@@ -259,7 +396,7 @@ export function App() {
     {
       id: 'neo-welcome',
       role: 'assistant',
-      content: 'I’m Neo. Ask me for assets, work orders, or users and I’ll update the dashboard table.',
+      content: 'I’m Neo. I’m checking your role-aware attention queue.',
     },
   ])
   const [apiState, setApiState] = useState<'connected' | 'fallback'>('fallback')
@@ -279,12 +416,28 @@ export function App() {
   const [users, setUsers] = useState<AuthUser[]>([])
   const [technicians, setTechnicians] = useState<AuthUser[]>([])
   const [userMessage, setUserMessage] = useState('')
+  const [learningSummary, setLearningSummary] = useState<LearningSummary | null>(null)
+  const [learningExamples, setLearningExamples] = useState<LearningExample[]>([])
+  const [learningDatasets, setLearningDatasets] = useState<LearningDatasetSnapshot[]>([])
+  const [learningMessage, setLearningMessage] = useState('')
+  const [learningLoading, setLearningLoading] = useState(false)
+  const [learningDatasetName, setLearningDatasetName] = useState('maintenance-wizard-learning-snapshot')
+  const [learningDatasetDescription, setLearningDatasetDescription] = useState('Approved examples for local LLM adapter tuning and evaluation.')
+  const [adapterProvider, setAdapterProvider] = useState('openai')
+  const [adapterModelName, setAdapterModelName] = useState('qwen2.5-7b-instruct-lora-candidate')
+  const [adapterBaseModel, setAdapterBaseModel] = useState('qwen2.5-7b-instruct')
+  const [adapterPath, setAdapterPath] = useState('')
+  const [adapterNotes, setAdapterNotes] = useState('Offline PEFT adapter candidate trained from approved judge-qualified examples.')
+  const [peftAdapterName, setPeftAdapterName] = useState('maintenance-wizard-qwen-lora')
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserName, setNewUserName] = useState('')
   const [newUserRole, setNewUserRole] = useState<UserRole>('operator')
   const [newUserPassword, setNewUserPassword] = useState('')
   const [resetUser, setResetUser] = useState<AuthUser | null>(null)
   const [resetPasswordValue, setResetPasswordValue] = useState('')
+  const neoTranscriptRef = useRef<HTMLDivElement | null>(null)
+  const morpheusProgressRef = useRef<HTMLDivElement | null>(null)
+  const reliabilityStreamRef = useRef<HTMLDivElement | null>(null)
 
   const currentUser = session?.user
   const canDecision = hasRole(currentUser, decisionRoles)
@@ -293,7 +446,9 @@ export function App() {
   const canFeedback = hasRole(currentUser, feedbackRoles)
   const canIngest = hasRole(currentUser, ingestionRoles)
   const canStreaming = hasRole(currentUser, streamingRoles)
+  const canReviewLearning = hasRole(currentUser, learningRoles)
   const canAdminUsers = currentUser?.role === 'admin'
+  const canCreateWorkOrders = hasRole(currentUser, workOrderCreationRoles)
   const canAssignWorkOrders = hasRole(currentUser, workOrderAssignmentRoles)
   const canApproveWorkOrders = canAssignWorkOrders
 
@@ -302,8 +457,44 @@ export function App() {
     setSession(null)
     setActiveView('dashboard')
     setWorkOrders(fallbackWorkOrders)
+    setAssets([])
+    setAssetDetail(null)
+    setAssetLoadedSections([])
+    setAssetSectionLoading({})
+    setAssetReliabilityPrediction(null)
+    setAssetReliabilityText('')
+    setAssetReliabilityLoading(false)
+    setAssetReliabilityProvider('')
+    setAssetReliabilityUsedLive(false)
+    setAssetReliabilityMessage('')
+    setAssetReliabilityStreamAsset('')
+    setAssetMessage('')
     setRecommendation(null)
-    setAnswer('')
+    setDiagnosisLoading(false)
+    setDiagnosisStreaming(false)
+    setDiagnosisStreamText('')
+    setDiagnosisProvider('')
+    setDiagnosisUsedLive(false)
+    setDiagnosisMessage('')
+    setNeoTable(null)
+    setLearningSummary(null)
+    setLearningExamples([])
+    setLearningDatasets([])
+    setLearningMessage('')
+    setLearningLoading(false)
+    setAdapterProvider('openai')
+    setAdapterModelName('qwen2.5-7b-instruct-lora-candidate')
+    setAdapterBaseModel('qwen2.5-7b-instruct')
+    setAdapterPath('')
+    setAdapterNotes('Offline PEFT adapter candidate trained from approved judge-qualified examples.')
+    setPeftAdapterName('maintenance-wizard-qwen-lora')
+    setNeoMessages([
+      {
+        id: 'neo-welcome',
+        role: 'assistant',
+        content: 'I’m Neo. I’m checking your role-aware attention queue.',
+      },
+    ])
     setAuthMessage(message)
   }
 
@@ -341,9 +532,67 @@ export function App() {
         const topAsset = [...summary.highest_risk_equipment].sort(
           (a, b) => riskRank[b.risk_level] - riskRank[a.risk_level],
         )[0]
-        if (topAsset) setSelectedEquipment(topAsset.equipment.id)
+        if (topAsset) {
+          setSelectedEquipment((current) =>
+            summary.highest_risk_equipment.some((item) => item.equipment.id === current)
+              ? current
+              : topAsset.equipment.id,
+          )
+        }
       })
       .catch(() => setApiState('fallback'))
+  }
+
+  function loadAssets() {
+    return api
+      .assets()
+      .then((items) => {
+        setAssets(items)
+        setApiState('connected')
+      })
+      .catch(() => {
+        setAssets([])
+        setApiState('fallback')
+      })
+  }
+
+  function loadAssetDetail(equipmentId: string, sections: AssetDetailSection[] = ['summary']) {
+    const isSummaryLoad = sections.includes('summary')
+    if (isSummaryLoad) {
+      setAssetDetailLoading(true)
+    } else {
+      setAssetSectionLoading((current) => ({
+        ...current,
+        ...Object.fromEntries(sections.map((section) => [section, true])),
+      }))
+    }
+    setAssetMessage('')
+    return api
+      .assetDetail(equipmentId, sections)
+      .then((detail) => {
+        setAssetDetail((current) => mergeAssetDetail(current, detail, sections))
+        setAssetLoadedSections((current) => [...new Set([...current, ...sections])])
+        setApiState('connected')
+      })
+      .catch(() => {
+        if (isSummaryLoad) {
+          setAssetDetail(null)
+        } else {
+          setAssetLoadedSections((current) => [...new Set([...current, ...sections])])
+        }
+        setApiState('fallback')
+        setAssetMessage('Asset detail data could not be loaded from the API.')
+      })
+      .finally(() => {
+        if (isSummaryLoad) {
+          setAssetDetailLoading(false)
+        } else {
+          setAssetSectionLoading((current) => ({
+            ...current,
+            ...Object.fromEntries(sections.map((section) => [section, false])),
+          }))
+        }
+      })
   }
 
   function loadUsers() {
@@ -351,6 +600,184 @@ export function App() {
       .users()
       .then((items) => setUsers(items))
       .catch(() => setUserMessage('Users could not be loaded'))
+  }
+
+  function loadLearning() {
+    setLearningLoading(true)
+    setLearningMessage('')
+    return Promise.all([api.learningSummary(), api.learningExamples(), api.learningDatasets()])
+      .then(([summary, examples, datasets]) => {
+        setLearningSummary(summary)
+        setLearningExamples(examples)
+        setLearningDatasets(datasets)
+        setApiState('connected')
+      })
+      .catch(() => {
+        setLearningMessage('Learning data could not be loaded')
+        setApiState('fallback')
+      })
+      .finally(() => setLearningLoading(false))
+  }
+
+  async function refreshLearningExamples() {
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const examples = await api.refreshLearningExamples()
+      const summary = await api.learningSummary()
+      setLearningExamples(examples)
+      setLearningSummary(summary)
+      setLearningMessage(`Refreshed ${examples.length} learning example${examples.length === 1 ? '' : 's'}`)
+      setApiState('connected')
+    } catch {
+      setLearningMessage('Learning examples could not be refreshed')
+      setApiState('fallback')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
+
+  async function toggleLearningApproval(example: LearningExample) {
+    try {
+      const updated = await api.updateLearningExample(example.id, !example.approved)
+      setLearningExamples((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+      const summary = await api.learningSummary()
+      setLearningSummary(summary)
+      setLearningMessage(`${updated.source_type} example ${updated.approved ? 'approved' : 'removed from approved set'}`)
+    } catch {
+      setLearningMessage('Learning approval could not be changed')
+    }
+  }
+
+  async function judgeLearningExample(example: LearningExample) {
+    try {
+      const updated = await api.judgeLearningExample(example.id)
+      setLearningExamples((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+      const summary = await api.learningSummary()
+      setLearningSummary(summary)
+      setLearningMessage(`Judge scored ${updated.source_type} at ${Math.round(updated.judge_score * 100)}%`)
+    } catch {
+      setLearningMessage('Learning judge could not score the example')
+    }
+  }
+
+  async function createLearningSnapshot() {
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const snapshot = await api.createLearningDataset({
+        name: learningDatasetName.trim() || 'maintenance-wizard-learning-snapshot',
+        description: learningDatasetDescription.trim() || undefined,
+        approved_only: true,
+        min_judge_score: 0.65,
+      })
+      setLearningDatasets((items) => [snapshot, ...items])
+      const summary = await api.learningSummary()
+      setLearningSummary(summary)
+      setLearningMessage(`Created dataset snapshot with ${snapshot.example_count} approved example${snapshot.example_count === 1 ? '' : 's'}`)
+    } catch {
+      setLearningMessage('Learning dataset snapshot could not be created')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
+
+  async function downloadLearningSnapshot(snapshot: LearningDatasetSnapshot) {
+    try {
+      const content = await api.learningDatasetJsonl(snapshot.id)
+      const url = URL.createObjectURL(new Blob([content], { type: 'application/jsonl' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${snapshot.id}.jsonl`
+      link.click()
+      URL.revokeObjectURL(url)
+      setLearningMessage(`Downloaded ${snapshot.name}`)
+    } catch {
+      setLearningMessage('Learning dataset download failed')
+    }
+  }
+
+  async function registerLearningAdapter() {
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const model = await api.registerLearningModelVersion({
+        provider: adapterProvider.trim() || 'openai',
+        model_name: adapterModelName.trim(),
+        base_model: adapterBaseModel.trim() || undefined,
+        adapter_path: adapterPath.trim() || undefined,
+        status: 'candidate',
+        notes: adapterNotes.trim() || undefined,
+      })
+      const summary = await api.learningSummary()
+      setLearningSummary(summary)
+      setLearningMessage(`Registered adapter candidate ${model.model_name}`)
+    } catch {
+      setLearningMessage('Adapter candidate could not be registered')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
+
+  async function runLearningEvaluation() {
+    const dataset = learningDatasets[0] ?? learningSummary?.recent_snapshots[0]
+    const model = learningSummary?.model_versions[0]
+    const prompt = learningSummary?.prompt_versions.find((item) => item.assistant === 'neo') ?? learningSummary?.prompt_versions[0]
+    if (!dataset || !model || !prompt) {
+      setLearningMessage('Create a dataset snapshot and keep model/prompt versions available before evaluation')
+      return
+    }
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const run = await api.runLearningEvaluation({
+        dataset_id: dataset.id,
+        model_version_id: model.id,
+        prompt_version_id: prompt.id,
+        min_quality_score: 0.7,
+      })
+      const summary = await api.learningSummary()
+      setLearningSummary(summary)
+      setLearningMessage(`Evaluation ${run.passed ? 'passed' : 'needs review'} with quality ${metricValue(run.metrics.quality_score)}`)
+    } catch {
+      setLearningMessage('Learning evaluation could not be run')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
+
+  async function queuePeftTuningJob() {
+    const dataset = learningDatasets[0] ?? learningSummary?.recent_snapshots[0]
+    const model = learningSummary?.model_versions[0]
+    const prompt = learningSummary?.prompt_versions.find((item) => item.assistant === 'neo') ?? learningSummary?.prompt_versions[0]
+    if (!dataset || !model || !prompt) {
+      setLearningMessage('Create a dataset snapshot and keep model/prompt versions available before queuing PEFT tuning')
+      return
+    }
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const job = await api.queueLearningPeftJob({
+        dataset_id: dataset.id,
+        model_version_id: model.id,
+        prompt_version_id: prompt.id,
+        adapter_name: peftAdapterName.trim() || 'maintenance-wizard-qwen-lora',
+        base_model: adapterBaseModel.trim() || undefined,
+        training_config: {
+          method: 'lora',
+          max_examples: dataset.example_count,
+          source: 'learning-review',
+        },
+        notes: 'Production async PEFT tuning request from Learning Review.',
+      })
+      const summary = await api.learningSummary()
+      setLearningSummary(summary)
+      setLearningMessage(`Queued PEFT tuning job ${job.id} with status ${job.status}`)
+    } catch {
+      setLearningMessage('PEFT tuning job could not be queued')
+    } finally {
+      setLearningLoading(false)
+    }
   }
 
   function loadTechnicians() {
@@ -376,6 +803,45 @@ export function App() {
       .catch(() => setWorkOrders(fallbackWorkOrdersForUser(currentUser)))
   }
 
+  function loadNeoWelcome() {
+    setNeoMessages([
+      {
+        id: 'neo-welcome-loading',
+        role: 'assistant',
+        content: 'I’m Neo. I’m checking your role-aware attention queue.',
+      },
+    ])
+    setNeoTable(null)
+    return api
+      .neoWelcome()
+      .then((response) => {
+        setNeoTable(response.table ?? null)
+        setNeoMessages([
+          {
+            id: 'neo-welcome',
+            role: 'assistant',
+            content: response.answer,
+            details: neoResponseDetails(response),
+            provider: response.provider,
+            usedLiveProvider: response.used_live_provider,
+          },
+        ])
+        setApiState('connected')
+      })
+      .catch(() => {
+        setNeoMessages([
+          {
+            id: 'neo-welcome-fallback',
+            role: 'assistant',
+            content: 'I’m Neo. I could not load your role-aware attention queue yet. Ask me for assigned work, assets, work orders, or users and I’ll use your role permissions.',
+            provider: 'fallback',
+            usedLiveProvider: false,
+          },
+        ])
+        setApiState('fallback')
+      })
+  }
+
   useEffect(() => {
     api.onUnauthorized(() => clearSession('Session expired. Sign in again.'))
     const restored = api.restoreSession()
@@ -399,7 +865,9 @@ export function App() {
   useEffect(() => {
     if (!authReady || !session || session.user.role === 'iot_service') return
     loadDashboard()
+    loadAssets()
     loadWorkOrders()
+    loadNeoWelcome()
     if (canStreaming) loadStreamingStatus()
     if (canAssignWorkOrders) loadTechnicians()
   }, [authReady, session?.user.id])
@@ -407,12 +875,113 @@ export function App() {
   useEffect(() => {
     if (activeView === 'ingestion' && canStreaming) loadStreamingStatus()
     if (activeView === 'ingestion' && !canIngest) setActiveView('dashboard')
+    if (activeView === 'learning' && !canReviewLearning) setActiveView('dashboard')
     if (activeView === 'users' && !canAdminUsers) setActiveView('dashboard')
-  }, [activeView, canIngest, canStreaming, canAdminUsers])
+  }, [activeView, canIngest, canReviewLearning, canStreaming, canAdminUsers])
 
   useEffect(() => {
     if (activeView === 'users' && canAdminUsers) loadUsers()
   }, [activeView, canAdminUsers])
+
+  useEffect(() => {
+    if (activeView === 'learning' && canReviewLearning) void loadLearning()
+  }, [activeView, canReviewLearning])
+
+  useEffect(() => {
+    if (!authReady || !session || activeView !== 'asset') return
+    loadAssetDetail(selectedEquipment, ['summary'])
+  }, [authReady, session?.user.id, activeView, selectedEquipment])
+
+  useEffect(() => {
+    if (!authReady || !session || activeView !== 'asset' || !assetDetail) return
+    const unloadedSections = assetSectionsByTab[assetTab].filter(
+      (section) => !assetLoadedSections.includes(section) && !assetSectionLoading[section],
+    )
+    if (unloadedSections.length === 0) return
+    loadAssetDetail(selectedEquipment, unloadedSections)
+  }, [
+    activeView,
+    assetTab,
+    assetDetail?.profile.equipment_id,
+    assetLoadedSections.join('|'),
+    assetSectionLoading,
+    authReady,
+    selectedEquipment,
+    session?.user.id,
+  ])
+
+  useEffect(() => {
+    if (!authReady || !session || activeView !== 'asset' || assetTab !== 'reliability' || !assetDetail) return
+    if (assetReliabilityStreamAsset === selectedEquipment) return
+    let cancelled = false
+    let streamedText = ''
+    setAssetReliabilityPrediction(null)
+    setAssetReliabilityText('')
+    setAssetReliabilityProvider('')
+    setAssetReliabilityUsedLive(false)
+    setAssetReliabilityMessage('')
+    setAssetReliabilityLoading(true)
+    setAssetReliabilityStreamAsset(selectedEquipment)
+
+    api
+      .assetReliabilityPredictionStream(selectedEquipment, (event) => {
+        if (cancelled) return
+        if (event.type === 'meta') {
+          setAssetReliabilityProvider(event.provider)
+          setAssetReliabilityUsedLive(event.used_live_provider)
+        }
+        if (event.type === 'token') {
+          streamedText += event.content
+          setAssetReliabilityText(streamedText)
+          scrollStreamToBottom(reliabilityStreamRef)
+        }
+        if (event.type === 'done') {
+          setAssetReliabilityProvider(event.provider)
+          setAssetReliabilityUsedLive(event.used_live_provider)
+          setAssetReliabilityPrediction(event.prediction)
+          setAssetReliabilityText(event.answer || streamedText)
+          setAssetReliabilityLoading(false)
+          scrollStreamToBottom(reliabilityStreamRef)
+        }
+        if (event.type === 'error') {
+          setAssetReliabilityProvider(event.provider)
+          setAssetReliabilityUsedLive(false)
+          setAssetReliabilityMessage(event.message)
+          setAssetReliabilityLoading(false)
+          scrollStreamToBottom(reliabilityStreamRef)
+        }
+      })
+      .catch(() => {
+        if (cancelled) return
+        setAssetReliabilityMessage('Live LLM reliability prediction could not be streamed.')
+        setAssetReliabilityLoading(false)
+        scrollStreamToBottom(reliabilityStreamRef)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeView,
+    assetTab,
+    assetDetail?.profile.equipment_id,
+    authReady,
+    selectedEquipment,
+    session?.user.id,
+  ])
+
+  usePinnedStreamScroll(
+    neoTranscriptRef,
+    `${neoMessages.length}:${neoMessages[neoMessages.length - 1]?.content.length ?? 0}:${neoLoading}:${neoStreaming}`,
+  )
+  usePinnedStreamScroll(
+    morpheusProgressRef,
+    `${diagnosisStreamText.length}:${diagnosisLoading}:${diagnosisStreaming}:${diagnosisMessage.length}:${recommendation?.id ?? ''}`,
+  )
+  usePinnedStreamScroll(
+    reliabilityStreamRef,
+    `${assetReliabilityText.length}:${assetReliabilityLoading}:${assetReliabilityMessage.length}:${assetReliabilityPrediction?.equipment_id ?? ''}`,
+  )
 
   const selectedHealth = useMemo(
     () => dashboard.highest_risk_equipment.find((item) => item.equipment.id === selectedEquipment) ?? dashboard.highest_risk_equipment[0],
@@ -423,8 +992,8 @@ export function App() {
     [selectedWorkOrderId, workOrders],
   )
   const assetWorkOrders = useMemo(
-    () => workOrders.filter((item) => item.equipment_id === selectedEquipment),
-    [selectedEquipment, workOrders],
+    () => assetDetail?.work_orders ?? workOrders.filter((item) => item.equipment_id === selectedEquipment),
+    [assetDetail, selectedEquipment, workOrders],
   )
   const dashboardMetrics = useMemo(() => {
     const openOrders = workOrders.filter((item) => !['COMP', 'CLOSE'].includes(item.status))
@@ -440,35 +1009,91 @@ export function App() {
   function openAsset(equipmentId: string) {
     setSelectedEquipment(equipmentId)
     setAssetTab('summary')
+    setAssetDetail(null)
+    setAssetLoadedSections([])
+    setAssetSectionLoading({})
+    setAssetReliabilityPrediction(null)
+    setAssetReliabilityText('')
+    setAssetReliabilityLoading(false)
+    setAssetReliabilityProvider('')
+    setAssetReliabilityUsedLive(false)
+    setAssetReliabilityMessage('')
+    setAssetReliabilityStreamAsset('')
+    setRecommendation(null)
+    setDiagnosisLoading(false)
+    setDiagnosisStreaming(false)
+    setDiagnosisStreamText('')
+    setDiagnosisProvider('')
+    setDiagnosisUsedLive(false)
+    setDiagnosisMessage('')
     setActiveView('asset')
   }
 
-  function runDiagnosis() {
-    api
-      .diagnose(selectedEquipment, selectedHealth?.active_alerts[0]?.id)
-      .then((result) => {
+  async function runDiagnosis() {
+    if (diagnosisLoading) return
+    const alertId = selectedHealth?.active_alerts[0]?.id
+    let streamedText = ''
+    let streamCompleted = false
+    setDiagnosisLoading(true)
+    setDiagnosisStreaming(false)
+    setDiagnosisStreamText('')
+    setDiagnosisProvider('openai')
+    setDiagnosisUsedLive(true)
+    setDiagnosisMessage('')
+    try {
+      await api.diagnoseStream(selectedEquipment, alertId, (event) => {
+        if (event.type === 'meta') {
+          setDiagnosisProvider(event.provider)
+          setDiagnosisUsedLive(event.used_live_provider)
+          setDiagnosisStreaming(true)
+        }
+        if (event.type === 'token') {
+          streamedText += event.content
+          setDiagnosisStreamText(streamedText)
+          setDiagnosisStreaming(true)
+          scrollStreamToBottom(morpheusProgressRef)
+        }
+        if (event.type === 'done') {
+          streamCompleted = true
+          setRecommendation(event.recommendation)
+          setDiagnosisProvider(event.recommendation.provider)
+          setDiagnosisUsedLive(event.recommendation.used_live_provider)
+          setDiagnosisStreaming(false)
+          setDiagnosisLoading(false)
+          setApiState('connected')
+          scrollStreamToBottom(morpheusProgressRef)
+        }
+        if (event.type === 'error') {
+          streamCompleted = true
+          setDiagnosisMessage(event.message)
+          setDiagnosisStreaming(false)
+          setDiagnosisLoading(false)
+          setApiState('fallback')
+          scrollStreamToBottom(morpheusProgressRef)
+        }
+      })
+      if (!streamCompleted) {
+        setDiagnosisStreaming(false)
+        setDiagnosisLoading(false)
+        setDiagnosisMessage(`${diagnosisAssistantName} diagnosis stream ended before the recommendation was ready.`)
+        scrollStreamToBottom(morpheusProgressRef)
+      }
+    } catch {
+      try {
+        const result = await api.diagnose(selectedEquipment, alertId)
         setRecommendation(result)
-        setAnswer(result.report_summary)
+        setDiagnosisProvider(result.provider)
+        setDiagnosisUsedLive(result.used_live_provider)
         setApiState('connected')
-      })
-      .catch(() => {
+      } catch {
         setApiState('fallback')
-        setAnswer('Start the backend API to generate live diagnosis. The visible dashboard is using bundled fallback data.')
-      })
-  }
-
-  function sendQuestion() {
-    api
-      .chat(selectedEquipment, question)
-      .then((result) => {
-        setRecommendation(result.recommendation)
-        setAnswer(result.answer)
-        setApiState('connected')
-      })
-      .catch(() => {
-        setApiState('fallback')
-        setAnswer('Backend is not reachable yet. The planned API will answer this with cited SOP, manual, alert, and maintenance history evidence.')
-      })
+        setDiagnosisMessage(`${diagnosisAssistantName} could not retrieve a diagnosis.`)
+        scrollStreamToBottom(morpheusProgressRef)
+      } finally {
+        setDiagnosisStreaming(false)
+        setDiagnosisLoading(false)
+      }
+    }
   }
 
   async function sendNeoQuestion() {
@@ -479,6 +1104,7 @@ export function App() {
       ...turns,
       { id: assistantTurnId('neo-user'), role: 'user', content: prompt },
     ])
+    scrollStreamToBottom(neoTranscriptRef)
     setNeoLoading(true)
     setNeoStreaming(false)
     try {
@@ -501,12 +1127,14 @@ export function App() {
             usedLiveProvider: streamUsedLiveProvider,
           },
         ])
+        scrollStreamToBottom(neoTranscriptRef)
         return assistantMessageId
       }
 
       const updateAssistantMessage = (updates: Partial<AssistantTurn>) => {
         if (!assistantMessageId) return
         setNeoMessages((turns) => turns.map((turn) => (turn.id === assistantMessageId ? { ...turn, ...updates } : turn)))
+        scrollStreamToBottom(neoTranscriptRef)
       }
 
       await api.neoChatStream(prompt, history, (event) => {
@@ -528,11 +1156,12 @@ export function App() {
         }
         if (event.type === 'done') {
           setNeoTable(event.response.table ?? null)
+          if (event.response.action) void refreshAfterNeoAction(event.response.action)
           if (assistantMessageId) {
             const message = neoResponseMessage(event.response)
             updateAssistantMessage({
               content: message,
-              details: event.response.table ? [`Updated table: ${event.response.table.title}`, `${event.response.table.rows.length} row(s)`] : undefined,
+              details: neoResponseDetails(event.response),
               provider: event.response.provider,
               usedLiveProvider: event.response.used_live_provider,
             })
@@ -557,9 +1186,37 @@ export function App() {
   }
 
   function neoResponseMessage(response: NeoChatResponse) {
+    if (response.action) return response.answer
     return response.table
       ? `I found ${response.table.rows.length} row${response.table.rows.length === 1 ? '' : 's'} for ${response.table.title}. The table is updated in the dashboard.`
       : response.answer
+  }
+
+  function neoResponseDetails(response: NeoChatResponse) {
+    const details: string[] = []
+    if (response.action) {
+      details.push(`${response.action.label}: ${response.action.status.replace('_', ' ')}`)
+      if (response.action.target_id) details.push(`Target: ${response.action.target_id}`)
+      if (response.action.detail) details.push(response.action.detail)
+    }
+    if (response.table) {
+      details.push(`Updated table: ${response.table.title}`)
+      details.push(`${response.table.rows.length} row(s)`)
+    }
+    return details.length ? details : undefined
+  }
+
+  function refreshAfterNeoAction(action: NeoAction) {
+    if (action.status !== 'completed') return
+    if (action.type.includes('work_order')) {
+      void loadWorkOrders()
+      void loadDashboard()
+      void loadAssets()
+      return
+    }
+    if (action.type === 'manage_user' && canAdminUsers) {
+      void loadUsers()
+    }
   }
 
   function appendNeoResponse(response: NeoChatResponse) {
@@ -570,11 +1227,12 @@ export function App() {
         id: assistantTurnId('neo-assistant'),
         role: 'assistant',
         content: message,
-        details: response.table ? [`Updated table: ${response.table.title}`, `${response.table.rows.length} row(s)`] : undefined,
+        details: neoResponseDetails(response),
         provider: response.provider,
         usedLiveProvider: response.used_live_provider,
       },
     ])
+    scrollStreamToBottom(neoTranscriptRef)
   }
 
   function sendFeedback(status: 'accepted' | 'rejected' | 'corrected') {
@@ -630,6 +1288,10 @@ export function App() {
   }
 
   async function createWorkOrderFromContext(source?: Recommendation) {
+    if (!canCreateWorkOrders) {
+      setWorkOrderMessage('You do not have permission to create work orders')
+      return
+    }
     try {
       const created = await api.createWorkOrder(draftWorkOrderPayload(source))
       setWorkOrders((items) => [created, ...items.filter((item) => item.id !== created.id)])
@@ -1048,13 +1710,34 @@ export function App() {
   }
 
   const recommendationPanel = (
-    <div className="recommendationSection">
-      <div className="sectionHeader">
-        <CheckCircle2 size={18} />
-        <h2>Recommendation</h2>
+    <div className="recommendationSection morpheusPanel">
+      <div className="assistantHeaderCompact">
+        <span className="assistantAvatar">M</span>
+        <div>
+          <h2>{diagnosisAssistantName}</h2>
+          <small>Diagnosis assistant</small>
+        </div>
       </div>
+      {(diagnosisProvider || diagnosisLoading) && (
+        <small className="providerLine">
+          {diagnosisLoading && <span className="loadingSpinner" aria-hidden="true" />}
+          {diagnosisProvider
+            ? `${diagnosisUsedLive ? 'Live LLM' : 'LLM fallback'} · ${diagnosisProvider}`
+            : 'Starting diagnosis stream'}
+        </small>
+      )}
+      {diagnosisStreamText && (
+        <div className="morpheusProgress" ref={morpheusProgressRef} aria-live="polite">
+          <FormattedAssistantContent content={diagnosisStreamText} />
+        </div>
+      )}
+      {diagnosisMessage && <p className="inlineStatus errorText">{diagnosisMessage}</p>}
       {recommendation ? (
         <>
+          <div className="sectionHeader recommendationTitle">
+            <CheckCircle2 size={18} />
+            <h3>Recommendation</h3>
+          </div>
           <p className="diagnosis">{recommendation.diagnosis}</p>
           <div className="recommendationBadges">
             <span className={`riskBadge ${recommendation.risk_level}`}>{recommendation.risk_level}</span>
@@ -1121,15 +1804,21 @@ export function App() {
               <Download size={16} />
               Export Report
             </button>
-            <button className="textButton" onClick={() => createWorkOrderFromContext(recommendation)}>
-              <Briefcase size={16} />
-              Create Work Order
-            </button>
+            {canCreateWorkOrders && (
+              <button className="textButton" onClick={() => createWorkOrderFromContext(recommendation)}>
+                <Briefcase size={16} />
+                Create Work Order
+              </button>
+            )}
           </div>
           {reportMessage && <p className="inlineStatus">{reportMessage}</p>}
         </>
       ) : (
-        <p className="emptyState">Run diagnosis or ask a question to generate cited maintenance actions.</p>
+        <p className="emptyState">
+          {diagnosisLoading || diagnosisStreaming
+            ? `${diagnosisAssistantName} is preparing the diagnosis...`
+            : `Run ${diagnosisAssistantName} to generate cited maintenance actions.`}
+        </p>
       )}
     </div>
   )
@@ -1159,7 +1848,7 @@ export function App() {
                 <small>Dashboard AI assistant</small>
               </div>
             </div>
-            <div className="neoTranscript" aria-label="Neo chat transcript">
+            <div className="neoTranscript" ref={neoTranscriptRef} aria-label="Neo chat transcript">
               {neoMessages.map((turn) => (
                 <div className={`chatBubble ${turn.role}`} key={turn.id}>
                   <span>{turn.role === 'assistant' ? 'Neo' : 'You'}</span>
@@ -1239,12 +1928,198 @@ export function App() {
     </section>
   )
 
+  const assetMetricByKey = new Map((assetDetail?.metrics ?? []).map((metric) => [metric.metric_key, metric]))
+  const assetHealth = assetDetail?.health
+  const assetProfile = assetDetail?.profile
+  const isAssetSectionPending = (section: AssetDetailSection) =>
+    !assetLoadedSections.includes(section) || Boolean(assetSectionLoading[section])
+  const assetLoadingPanel = (label: string) => (
+    <section className="detailPanel widePanel">
+      <p className="emptyState">Loading {label} data...</p>
+    </section>
+  )
+
+  const assetSummaryTab = assetDetail ? (
+    <div className="assetSummaryGrid">
+      <section className="detailPanel summarySubsystems">
+        <h2>Sub-systems</h2>
+        <AssetSubsystemList subsystems={assetDetail.subsystems} />
+      </section>
+      <section className="healthStack summaryHealthStack">
+        <AssetMetricTile metric={assetMetricByKey.get('health')} fallbackValue={assetHealth?.health_score} />
+        <AssetMetricTile metric={assetMetricByKey.get('efficiency')} />
+        <AssetMetricTile metric={assetMetricByKey.get('risk')} />
+      </section>
+      <section className="detailPanel assetFactsPanel summaryProfile">
+        <h2>Asset profile</h2>
+        <AssetProfileFacts detail={assetDetail} />
+      </section>
+      <section className="detailPanel performanceInsights summaryInsight">
+        <div className="sectionHeader">
+          <Sparkles size={18} />
+          <h2>Performance insights</h2>
+        </div>
+        <div className="insightHero">
+          <span>Risk</span>
+          <strong>{100 - (assetHealth?.health_score ?? 0)}%</strong>
+          <small>Probable cause</small>
+          <h2>{assetHealth?.active_alerts[0]?.message ?? assetHealth?.notes[0]}</h2>
+        </div>
+        <button className="outlineButton" disabled={diagnosisLoading} onClick={runDiagnosis}>
+          {diagnosisLoading ? <span className="loadingSpinner" aria-hidden="true" /> : null}
+          View data
+        </button>
+      </section>
+      <section className="detailPanel summaryActions">
+        <h2>Recommended actions</h2>
+        <ol className="actionList">
+          {assetDetail.recommendations.slice(0, 3).map((action) => (
+            <li key={action.id}>
+              <strong>{action.title}</strong>
+              <span>{action.description}</span>
+            </li>
+          ))}
+        </ol>
+        {canCreateWorkOrders && (
+          <button className="outlineButton" onClick={() => createWorkOrderFromContext(recommendation ?? undefined)}>
+            Create work order
+          </button>
+        )}
+      </section>
+      {canDecision && (
+        <section className="detailPanel assetDecisionPanel">
+          <div className="sectionHeader">
+            <CheckCircle2 size={18} />
+            <h2>Diagnosis and recommendation</h2>
+          </div>
+          <div className="diagnoseActionRow">
+            <button className="textButton" disabled={diagnosisLoading} onClick={runDiagnosis}>
+              {diagnosisLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <CheckCircle2 size={16} />}
+              {diagnosisLoading ? `${diagnosisAssistantName} is diagnosing...` : `Run ${diagnosisAssistantName}`}
+            </button>
+          </div>
+          {recommendationPanel}
+        </section>
+      )}
+    </div>
+  ) : null
+
+  const assetTabContent = assetDetail ? (
+    <>
+      {assetTab === 'summary' && assetSummaryTab}
+      {assetTab === 'maintenance' && (isAssetSectionPending('maintenance') ? assetLoadingPanel('maintenance') : (
+        <div className="assetTabGrid">
+          <section className="detailPanel widePanel">
+            <h2>Maintenance history</h2>
+            <MaintenanceEventTable events={assetDetail.maintenance_events} />
+          </section>
+          <section className="detailPanel widePanel">
+            <h2>Related work orders</h2>
+            <WorkOrderTable
+              workOrders={assetWorkOrders}
+              compact
+              canApprove={canApproveWorkOrders}
+              canStart={canTechnicianAssistant}
+              onApprove={approveWorkOrder}
+              onStart={startWorkOrder}
+              onOpen={(id) => { setSelectedWorkOrderId(id); setActiveView('workOrders') }}
+            />
+          </section>
+        </div>
+      ))}
+      {assetTab === 'performance' && (isAssetSectionPending('performance') ? assetLoadingPanel('performance') : (
+        <div className="assetTabGrid">
+          <section className="detailPanel widePanel">
+            <h2>Performance metrics</h2>
+            <AssetMetricGrid metrics={assetDetail.metrics} />
+          </section>
+          {assetDetail.performance_charts.map((chart) => (
+            <SignalLineChartCard chart={chart} key={chart.signal} />
+          ))}
+        </div>
+      ))}
+      {assetTab === 'reliability' && (isAssetSectionPending('reliability') ? assetLoadingPanel('reliability') : (
+        <div className="assetTabGrid">
+          <section className="detailPanel widePanel">
+            <h2>Reliability metrics</h2>
+            <ReliabilityMetricGrid metrics={assetDetail.reliability_metrics} />
+          </section>
+          <section className="detailPanel widePanel smithPredictionPanel">
+            <div className="assistantHeaderCompact">
+              <span className="assistantAvatar">S</span>
+              <div>
+                <h2>{reliabilityAssistantName}</h2>
+                <small>Predictive failure assistant</small>
+              </div>
+            </div>
+            <div
+              className="reliabilityPredictionStream"
+              ref={reliabilityStreamRef}
+              aria-label={`${reliabilityAssistantName} failure prediction stream`}
+              aria-live="polite"
+            >
+              {(assetReliabilityProvider || assetReliabilityLoading) && (
+                <small className="providerLine">
+                  {assetReliabilityLoading && <span className="loadingSpinner" aria-hidden="true" />}
+                  {assetReliabilityProvider
+                    ? `${assetReliabilityUsedLive ? 'Live LLM' : 'LLM unavailable'} · ${assetReliabilityProvider}`
+                    : `${reliabilityAssistantName} is starting the prediction stream`}
+                </small>
+              )}
+              {assetReliabilityText && <FormattedAssistantContent content={assetReliabilityText} />}
+              {assetReliabilityMessage && <p className="inlineStatus errorText">{assetReliabilityMessage}</p>}
+              {assetReliabilityPrediction ? (
+                <>
+                  <div className="predictionSummary">
+                    <span className={`riskBadge ${assetReliabilityPrediction.risk_level}`}>{assetReliabilityPrediction.risk_level}</span>
+                    <strong>{Math.round(assetReliabilityPrediction.failure_probability * 100)}% failure probability</strong>
+                    <small>{assetReliabilityPrediction.remaining_useful_life_days} days estimated RUL</small>
+                  </div>
+                  <ul className="actionList">
+                    {assetReliabilityPrediction.drivers.slice(0, 6).map((driver) => <li key={driver}>{driver}</li>)}
+                  </ul>
+                </>
+              ) : !assetReliabilityText && !assetReliabilityMessage && (
+                <p className="emptyState">{reliabilityAssistantName} is streaming live LLM failure prediction...</p>
+              )}
+            </div>
+          </section>
+        </div>
+      ))}
+      {assetTab === 'documents' && (isAssetSectionPending('documents') ? assetLoadingPanel('document') : (
+        <div className="assetTabGrid">
+          <section className="detailPanel widePanel">
+            <h2>Knowledge Retrieval</h2>
+            <KnowledgeEvidenceList evidence={assetDetail.knowledge} />
+          </section>
+          <section className="detailPanel widePanel">
+            <h2>SOP, manual, log, and history evidence</h2>
+            <AssetDocumentList documents={assetDetail.documents} />
+          </section>
+        </div>
+      ))}
+      {assetTab === 'workOrders' && (isAssetSectionPending('work_orders') ? assetLoadingPanel('work order') : (
+        <section className="detailPanel widePanel">
+          <h2>Related work orders</h2>
+          <WorkOrderTable
+            workOrders={assetWorkOrders}
+            canApprove={canApproveWorkOrders}
+            canStart={canTechnicianAssistant}
+            onApprove={approveWorkOrder}
+            onStart={startWorkOrder}
+            onOpen={(id) => { setSelectedWorkOrderId(id); setActiveView('workOrders') }}
+          />
+        </section>
+      ))}
+    </>
+  ) : null
+
   const assetDetailView = (
     <section className="assetDetailGrid">
       <div className="pageHeader">
         <p className="breadcrumb">Operational dashboard / Assets /</p>
-        <h1>{selectedHealth?.equipment.name}</h1>
-        <span>Last updated from live maintenance data</span>
+        <h1>{assetProfile?.name ?? selectedEquipment}</h1>
+        <span>{assetProfile ? `Last updated ${formatDate(assetProfile.last_updated)}` : 'Loading live asset data'}</span>
       </div>
       <div className="tabRow">
         {(['summary', 'maintenance', 'performance', 'reliability', 'documents', 'workOrders'] as AssetTab[]).map((tab) => (
@@ -1253,85 +2128,12 @@ export function App() {
           </button>
         ))}
       </div>
-      <section className="detailPanel performanceInsights">
-        <div className="sectionHeader">
-          <Sparkles size={18} />
-          <h2>Performance insights</h2>
-        </div>
-        <div className="insightHero">
-          <span>Risk</span>
-          <strong>{100 - (selectedHealth?.health_score ?? 0)}%</strong>
-          <small>Probable cause</small>
-          <h2>{selectedHealth?.active_alerts[0]?.message ?? selectedHealth?.notes[0]}</h2>
-        </div>
-        <button className="outlineButton" onClick={runDiagnosis}>View data</button>
-      </section>
-      <section className="detailPanel">
-        <h2>Recommended actions</h2>
-        <ol className="actionList">
-          {(recommendation?.immediate_actions ?? selectedHealth?.notes ?? []).slice(0, 3).map((action) => (
-            <li key={action}>{action}</li>
-          ))}
-        </ol>
-        <button className="outlineButton" onClick={() => createWorkOrderFromContext(recommendation ?? undefined)}>
-          Create work order
-        </button>
-      </section>
-      <section className="healthStack">
-        <HealthTile label="Health" value={selectedHealth?.health_score ?? 0} />
-        <HealthTile label="Efficiency" value={Math.max(0, (selectedHealth?.health_score ?? 0) - 4)} />
-      </section>
-      <section className="detailPanel">
-        <h2>Maintenance history</h2>
-        <WorkOrderTable
-          workOrders={assetWorkOrders}
-          compact
-          canApprove={canApproveWorkOrders}
-          canStart={canTechnicianAssistant}
-          onApprove={approveWorkOrder}
-          onStart={startWorkOrder}
-          onOpen={(id) => { setSelectedWorkOrderId(id); setActiveView('workOrders') }}
-        />
-      </section>
-      <LineChartCard title="Primary signal trend" health={selectedHealth} />
-      <LineChartCard title="Secondary signal trend" health={selectedHealth} />
-      <section className="detailPanel assetVisual">
-        <h2>Sub-systems</h2>
-        <ol>
-          <li>Drive train and coupling</li>
-          <li>Bearing housing and lubrication</li>
-          <li>Control and protection signals</li>
-        </ol>
-      </section>
-      <section className="detailPanel">
-        <h2>{assetTab === 'documents' ? 'Knowledge Retrieval' : 'Asset Context'}</h2>
-        <p>{selectedHealth?.notes.join(' ')}</p>
-        <ul>{selectedHealth?.top_spares_constraints.map((spare) => <li key={spare.id}>{spare.name}: {spare.available_qty} stock</li>)}</ul>
-      </section>
-      {canDecision && (
-        <section className="detailPanel assistantPanelWide">
-          <div className="diagnoseActionRow">
-            <button className="textButton" onClick={runDiagnosis}>
-              <CheckCircle2 size={16} />
-              Diagnose
-            </button>
-          </div>
-          <div className="chatPanel">
-            <div className="sectionHeader">
-              <MessageSquare size={18} />
-              <h2>Engineer Query</h2>
-            </div>
-            <div className="queryRow">
-              <textarea aria-label="Engineer question" rows={3} value={question} onChange={(event) => setQuestion(event.target.value)} />
-              <button onClick={sendQuestion} title="Ask maintenance wizard">
-                <Send size={18} />
-                <span>Send</span>
-              </button>
-            </div>
-            {answer && <p className="answer">{answer}</p>}
-          </div>
-          {recommendationPanel}
-        </section>
+      {assetDetailLoading && <section className="detailPanel widePanel"><p className="emptyState">Loading asset detail data...</p></section>}
+      {!assetDetailLoading && assetMessage && <section className="detailPanel widePanel"><p className="inlineStatus errorText">{assetMessage}</p></section>}
+      {assetDetail && (
+        <>
+          {assetTabContent}
+        </>
       )}
     </section>
   )
@@ -1428,7 +2230,7 @@ export function App() {
               )}
               {!canTechnicianAssistant && !canSupervisorAssistant && (
                 <section className="assistantBox">
-                  <p className="emptyState">Smith and Trinity are available to technician and supervisor accounts.</p>
+                  <p className="emptyState">Neo is available to technician and supervisor accounts.</p>
                 </section>
               )}
             </div>
@@ -1495,6 +2297,21 @@ export function App() {
           )}
         </section>
       </section>
+    </section>
+  )
+
+  const assetsView = (
+    <section className="detailPanel assetsView">
+      <div className="sectionHeader">
+        <Activity size={18} />
+        <h2>Assets</h2>
+      </div>
+      {assets.length > 0 ? (
+        <AssetsTable assets={assets} onOpen={openAsset} />
+      ) : (
+        <p className="emptyState">Asset table data is unavailable until the backend API responds.</p>
+      )}
+      {assetMessage && <p className="inlineStatus">{assetMessage}</p>}
     </section>
   )
 
@@ -1582,6 +2399,224 @@ export function App() {
         </button>
       </div>
       {ingestionMessage && <p className="inlineStatus">{ingestionMessage}</p>}
+    </section>
+  )
+
+  const learningModels: LearningModelVersion[] = learningSummary?.model_versions ?? []
+  const learningPrompts = learningSummary?.prompt_versions ?? []
+  const learningEvaluations: LearningEvaluationRun[] = learningSummary?.evaluation_runs ?? []
+  const learningJobs: LearningJob[] = learningSummary?.recent_jobs ?? []
+  const learningArtifacts: LearningArtifact[] = learningSummary?.recent_artifacts ?? []
+
+  const learningView = (
+    <section className="detailPanel learningView">
+      <div className="sectionHeader">
+        <Sparkles size={18} />
+        <h2>Learning and Tuning</h2>
+      </div>
+      <p className="emptyState">
+        Review approved human feedback, maintenance labels, work-order outcomes, ingested documents, and assistant interactions before exporting a local tuning dataset.
+      </p>
+      <div className="learningToolbar">
+        <button className="textButton" onClick={refreshLearningExamples} disabled={learningLoading}>
+          {learningLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
+          Refresh examples
+        </button>
+        <label className="field">
+          <span>Snapshot name</span>
+          <input value={learningDatasetName} onChange={(event) => setLearningDatasetName(event.target.value)} />
+        </label>
+        <label className="field">
+          <span>Description</span>
+          <input value={learningDatasetDescription} onChange={(event) => setLearningDatasetDescription(event.target.value)} />
+        </label>
+        <button className="textButton" onClick={createLearningSnapshot} disabled={learningLoading}>
+          <FileJson size={16} />
+          Create JSONL snapshot
+        </button>
+      </div>
+      <div className="learningStats">
+        {(['interactions', 'examples', 'approved_examples', 'snapshots', 'artifacts'] as const).map((key) => (
+          <span className="learningStat" key={key}>
+            <small>{key.replace(/_/g, ' ')}</small>
+            <strong>{learningSummary?.counts[key] ?? 0}</strong>
+          </span>
+        ))}
+      </div>
+      <div className="vectorStoreStatus">
+        <span>
+          <strong>RAG vector DB</strong>
+          <small>
+            {learningSummary?.vector_store?.store ?? 'unknown'} · {learningSummary?.vector_store?.state ?? 'not checked'}
+          </small>
+        </span>
+        <span>
+          <small>Collection</small>
+          <strong>{learningSummary?.vector_store?.collection ?? 'local fallback'}</strong>
+        </span>
+      </div>
+      <div className="learningGrid">
+        <section className="learningPanel">
+          <h3>Approved Controls</h3>
+          <div className="learningExamples" aria-label="Learning examples">
+            {learningExamples.length ? learningExamples.slice(0, 30).map((example) => (
+              <article className={`learningExample ${example.approved ? 'approved' : ''}`} key={example.id}>
+                <div>
+                  <strong>{example.source_type.replace(/_/g, ' ')}</strong>
+                  <small>{example.equipment_id ?? 'company-wide'} · {formatDate(example.created_at)}</small>
+                </div>
+                <div className="judgeScoreRow">
+                  <span className={`judgeBadge ${example.judge_label}`}>
+                    {Math.round(example.judge_score * 100)}% · {example.judge_label.replace(/_/g, ' ')}
+                  </span>
+                  <small>{example.judge_used_live_provider ? 'Live LLM judge' : 'Judge fallback'} · {example.judge_provider}</small>
+                </div>
+                <p>{example.instruction}</p>
+                <blockquote>{clipText(example.expected_output, 220)}</blockquote>
+                {example.judge_rationale && <p className="judgeRationale">{clipText(example.judge_rationale, 220)}</p>}
+                <div className="learningExampleActions">
+                  <button className="outlineButton" onClick={() => judgeLearningExample(example)}>
+                    Judge
+                  </button>
+                  <button className={example.approved ? 'outlineButton' : 'textButton'} onClick={() => toggleLearningApproval(example)}>
+                    {example.approved ? 'Remove approval' : 'Approve'}
+                  </button>
+                </div>
+              </article>
+            )) : (
+              <p className="emptyState">No learning examples have been generated yet.</p>
+            )}
+          </div>
+        </section>
+        <section className="learningPanel">
+          <h3>Model and Prompt Versions</h3>
+          <div className="versionList">
+            {learningModels.map((model) => (
+              <div className="versionRow" key={model.id}>
+                <strong>{model.model_name}</strong>
+                <small>{model.provider} · {model.status}</small>
+                {model.notes && <p>{model.notes}</p>}
+              </div>
+            ))}
+            {learningPrompts.map((prompt) => (
+              <div className="versionRow" key={prompt.id}>
+                <strong>{prompt.assistant} / {prompt.version}</strong>
+                <small>{prompt.status}</small>
+                {prompt.notes && <p>{prompt.notes}</p>}
+              </div>
+            ))}
+          </div>
+          <h3>Adapter Candidate</h3>
+          <div className="learningAdapterGrid">
+            <label className="field">
+              <span>Provider</span>
+              <input value={adapterProvider} onChange={(event) => setAdapterProvider(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Model</span>
+              <input value={adapterModelName} onChange={(event) => setAdapterModelName(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Base model</span>
+              <input value={adapterBaseModel} onChange={(event) => setAdapterBaseModel(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Adapter path</span>
+              <input value={adapterPath} onChange={(event) => setAdapterPath(event.target.value)} placeholder="adapter registry path or artifact URI" />
+            </label>
+            <label className="field adapterNotesField">
+              <span>Notes</span>
+              <textarea value={adapterNotes} onChange={(event) => setAdapterNotes(event.target.value)} />
+            </label>
+            <button className="textButton" onClick={registerLearningAdapter} disabled={learningLoading || !adapterModelName.trim()}>
+              <Sparkles size={16} />
+              Register adapter
+            </button>
+          </div>
+          <h3>Dataset Snapshots</h3>
+          <div className="datasetList">
+            {learningDatasets.length ? learningDatasets.map((snapshot) => (
+              <div className="datasetRow" key={snapshot.id}>
+                <span>
+                  <strong>{snapshot.name}</strong>
+                  <small>{snapshot.example_count} examples · {formatDate(snapshot.created_at)}</small>
+                </span>
+                <button className="iconTextButton" onClick={() => downloadLearningSnapshot(snapshot)}>
+                  <Download size={16} />
+                  JSONL
+                </button>
+              </div>
+            )) : (
+              <p className="emptyState">Create a snapshot after approving examples.</p>
+            )}
+          </div>
+          <h3>Evaluation Runs</h3>
+          <button className="textButton fullWidthAction" onClick={runLearningEvaluation} disabled={learningLoading}>
+            <CheckCircle2 size={16} />
+            Run dataset evaluation
+          </button>
+          <div className="evaluationList">
+            {learningEvaluations.length ? learningEvaluations.map((run) => (
+              <div className={`evaluationRow ${run.passed ? 'passed' : 'review'}`} key={run.id}>
+                <span>
+                  <strong>{run.passed ? 'Passed' : 'Needs review'}</strong>
+                  <small>{formatDate(run.created_at)}</small>
+                </span>
+                <div className="evaluationMetrics">
+                  <span>Quality <strong>{metricValue(run.metrics.quality_score)}</strong></span>
+                  <span>Avg judge <strong>{metricValue(run.metrics.average_judge_score)}</strong></span>
+                  <span>Sources <strong>{metricValue(run.metrics.source_type_coverage)}</strong></span>
+                  <span>Assets <strong>{metricValue(run.metrics.asset_coverage)}</strong></span>
+                </div>
+                {run.notes && <p>{run.notes}</p>}
+              </div>
+            )) : (
+              <p className="emptyState">Run an evaluation after creating a dataset snapshot.</p>
+            )}
+          </div>
+          <h3>Async Learning Jobs</h3>
+          <div className="learningAdapterGrid">
+            <label className="field adapterNotesField">
+              <span>PEFT adapter job name</span>
+              <input value={peftAdapterName} onChange={(event) => setPeftAdapterName(event.target.value)} />
+            </label>
+            <button className="textButton fullWidthAction" onClick={queuePeftTuningJob} disabled={learningLoading}>
+              <Sparkles size={16} />
+              Queue PEFT tuning job
+            </button>
+          </div>
+          <div className="jobList">
+            {learningJobs.length ? learningJobs.map((job) => (
+              <div className={`jobRow ${job.status}`} key={job.id}>
+                <span>
+                  <strong>{job.job_type.replace(/_/g, ' ')}</strong>
+                  <small>{job.status} · {formatDate(job.updated_at)}</small>
+                </span>
+                <small>{job.subject}</small>
+                {job.error && <p>{job.error}</p>}
+                {typeof job.output_refs.dispatch === 'string' && <p>{job.output_refs.dispatch}</p>}
+              </div>
+            )) : (
+              <p className="emptyState">Learning jobs will appear after review, dataset, evaluation, or PEFT queue actions.</p>
+            )}
+          </div>
+          <h3>Learning Artifacts</h3>
+          <div className="artifactList">
+            {learningArtifacts.length ? learningArtifacts.map((artifact) => (
+              <div className="artifactRow" key={artifact.id}>
+                <span>
+                  <strong>{artifact.artifact_type.replace(/_/g, ' ')}</strong>
+                  <small>{artifact.job_id} · {formatDate(artifact.created_at)}</small>
+                </span>
+                <small>sha256 {artifact.content_hash.slice(0, 12)}</small>
+              </div>
+            )) : (
+              <p className="emptyState">Worker-produced datasets, manifests, and adapter artifacts will appear here.</p>
+            )}
+          </div>
+        </section>
+      </div>
+      {learningMessage && <p className="inlineStatus">{learningMessage}</p>}
     </section>
   )
 
@@ -1779,6 +2814,10 @@ export function App() {
               <ClipboardList size={17} />
               Dashboard
             </button>
+            <button className={`navButton ${activeView === 'assets' || activeView === 'asset' ? 'selected' : ''}`} onClick={() => setActiveView('assets')}>
+              <Activity size={17} />
+              Assets
+            </button>
             <button className={`navButton ${activeView === 'workOrders' ? 'selected' : ''}`} onClick={() => setActiveView('workOrders')}>
               <Briefcase size={17} />
               Work Orders
@@ -1787,6 +2826,12 @@ export function App() {
               <button className={`navButton ${activeView === 'ingestion' ? 'selected' : ''}`} onClick={() => setActiveView('ingestion')}>
                 <Upload size={17} />
                 Ingestion
+              </button>
+            )}
+            {canReviewLearning && (
+              <button className={`navButton ${activeView === 'learning' ? 'selected' : ''}`} onClick={() => setActiveView('learning')}>
+                <Sparkles size={17} />
+                Learning
               </button>
             )}
             {canAdminUsers && (
@@ -1801,19 +2846,23 @@ export function App() {
             <button className="linkButton" onClick={() => setActiveView('workOrders')}>Work Orders</button>
             <button className="linkButton" onClick={() => openAsset(selectedEquipment)}>Selected Asset</button>
           </section>
-          <section className="navQuickActions" aria-label="Quick actions">
-            <h2>Quick actions</h2>
-            <button className="textButton" onClick={() => createWorkOrderFromContext()}>
-              <Briefcase size={16} />
-              Create work order
-            </button>
-            {canSupervisorAssistant && (
-              <button className="textButton" onClick={() => runSupervisorAssistant()}>
-                <Bot size={16} />
-                Review follow-ups
-              </button>
-            )}
-          </section>
+          {(canCreateWorkOrders || canSupervisorAssistant) && (
+            <section className="navQuickActions" aria-label="Quick actions">
+              <h2>Quick actions</h2>
+              {canCreateWorkOrders && (
+                <button className="textButton" onClick={() => createWorkOrderFromContext()}>
+                  <Briefcase size={16} />
+                  Create work order
+                </button>
+              )}
+              {canSupervisorAssistant && (
+                <button className="textButton" onClick={() => runSupervisorAssistant()}>
+                  <Bot size={16} />
+                  Review follow-ups
+                </button>
+              )}
+            </section>
+          )}
           <div className="sectionHeader compactHeader">
             <Wrench size={18} />
             <h2>Priority Assets ({dashboard.highest_risk_equipment.length})</h2>
@@ -1837,12 +2886,16 @@ export function App() {
 
         {activeView === 'dashboard' ? (
           operationalDashboardView
+        ) : activeView === 'assets' ? (
+          assetsView
         ) : activeView === 'asset' ? (
           assetDetailView
         ) : activeView === 'workOrders' ? (
           workOrdersView
         ) : activeView === 'ingestion' ? (
           ingestionView
+        ) : activeView === 'learning' ? (
+          learningView
         ) : (
           usersView
         )}
@@ -2016,6 +3069,222 @@ function NeoResultTable({ table }: { table: NeoTable }) {
   )
 }
 
+function AssetsTable({ assets, onOpen }: { assets: AssetListItem[]; onOpen: (assetId: string) => void }) {
+  return (
+    <div className="assetsTable" aria-label="Company assets table">
+      <div className="assetsTableHead">
+        <span>Asset</span>
+        <span>Type</span>
+        <span>Location</span>
+        <span>Criticality</span>
+        <span>Health</span>
+        <span>Risk</span>
+        <span>Open WOs</span>
+        <span>Supervisor</span>
+      </div>
+      {assets.map((asset) => (
+        <div className="assetsTableRow" key={asset.id}>
+          <button className="workOrderCellButton" type="button" onClick={() => onOpen(asset.id)}>
+            <strong>{asset.name}</strong>
+            <small>{asset.id}</small>
+          </button>
+          <span>{asset.asset_type}</span>
+          <span>
+            {asset.location_code}
+            <small>{asset.area}</small>
+          </span>
+          <span>{asset.criticality}</span>
+          <span>{asset.health_score}%</span>
+          <span className={`riskBadge ${asset.risk_level}`}>{asset.risk_level}</span>
+          <span>{asset.open_work_orders}</span>
+          <span>{asset.supervisor}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function AssetProfileFacts({ detail }: { detail: AssetDetail }) {
+  const profile = detail.profile
+  const facts = [
+    ['Asset ID', profile.equipment_id],
+    ['Type', profile.asset_type],
+    ['Location', `${profile.location_code} · ${profile.location_name}`],
+    ['System', profile.parent_system],
+    ['Manufacturer', profile.manufacturer],
+    ['Model', profile.model],
+    ['Serial', profile.serial_number],
+    ['Installed', profile.installed_at],
+    ['Owner', profile.owner_team],
+    ['Supervisor', profile.supervisor],
+  ]
+  return (
+    <>
+      <p>{profile.description}</p>
+      <dl className="assetFactGrid">
+        {facts.map(([label, value]) => (
+          <span key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </span>
+        ))}
+      </dl>
+    </>
+  )
+}
+
+function AssetMetricTile({ metric, fallbackValue }: { metric?: AssetMetricSnapshot; fallbackValue?: number }) {
+  if (!metric && fallbackValue === undefined) return null
+  const label = metric?.label ?? 'Health'
+  const value = metric?.value ?? fallbackValue ?? 0
+  const unit = metric?.unit ?? '%'
+  return (
+    <section className="healthTile">
+      <h2>{label}</h2>
+      <strong>{Math.round(value)}{unit}</strong>
+      <small>{metric?.detail ?? 'Computed from live health data.'}</small>
+    </section>
+  )
+}
+
+function AssetMetricGrid({ metrics }: { metrics: AssetMetricSnapshot[] }) {
+  return (
+    <div className="assetMetricGrid">
+      {metrics.map((metric) => (
+        <span className="assetMetric" key={metric.id}>
+          <small>{metric.label}</small>
+          <strong>{Math.round(metric.value)}{metric.unit}</strong>
+          <em>{metric.status.replace('_', ' ')}</em>
+          <p>{metric.detail}</p>
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function AssetSubsystemList({ subsystems }: { subsystems: AssetSubsystem[] }) {
+  return (
+    <ol className="assetSubsystemList">
+      {subsystems.map((subsystem) => (
+        <li key={subsystem.id}>
+          <strong>{subsystem.name}</strong>
+          <span>{subsystem.component}</span>
+          <small className={`riskBadge ${subsystem.condition === 'critical' ? 'critical' : subsystem.condition === 'degraded' ? 'high' : 'medium'}`}>
+            {subsystem.condition}
+          </small>
+          <p>{subsystem.detail}</p>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+function MaintenanceEventTable({ events }: { events: MaintenanceEvent[] }) {
+  if (!events.length) return <p className="emptyState">No maintenance history is available for this asset.</p>
+  return (
+    <div className="maintenanceEventTable" aria-label="Maintenance history table">
+      <div className="maintenanceEventHead">
+        <span>Date</span>
+        <span>Issue</span>
+        <span>Root cause</span>
+        <span>Action</span>
+        <span>Downtime</span>
+      </div>
+      {events.map((event) => (
+        <div className="maintenanceEventRow" key={event.id}>
+          <span>{formatDate(event.date)}</span>
+          <span>{event.issue}</span>
+          <span>{event.root_cause}</span>
+          <span>{event.action}</span>
+          <span>{event.downtime_hours}h</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SignalLineChartCard({ chart }: { chart: AssetPerformanceChart }) {
+  if (!chart.points.length) {
+    return (
+      <section className="detailPanel chartCard">
+        <h2>{chart.title}</h2>
+        <p className="emptyState">No performance readings are available for this signal.</p>
+      </section>
+    )
+  }
+  const values = chart.points.map((point) => point.value)
+  const min = Math.min(...values, ...chart.points.map((point) => point.threshold))
+  const max = Math.max(...values, ...chart.points.map((point) => point.threshold))
+  const span = Math.max(1, max - min)
+  const xStep = chart.points.length > 1 ? 300 / (chart.points.length - 1) : 300
+  const path = chart.points
+    .map((point, index) => {
+      const x = 20 + index * xStep
+      const y = 120 - ((point.value - min) / span) * 95
+      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`
+    })
+    .join(' ')
+  const thresholdY = 120 - (((chart.points[0]?.threshold ?? min) - min) / span) * 95
+  return (
+    <section className="detailPanel chartCard">
+      <h2>{chart.title}</h2>
+      <svg viewBox="0 0 340 140" role="img" aria-label={`${chart.title} line chart`}>
+        <path d="M20 120 H320" className="axis" />
+        <path d="M20 20 V120" className="axis" />
+        <path d={`M20 ${thresholdY} H320`} className="thresholdPath" />
+        <path d={path} className="linePath" />
+      </svg>
+      <small>{chart.points.length} readings · {chart.unit}</small>
+    </section>
+  )
+}
+
+function ReliabilityMetricGrid({ metrics }: { metrics: AssetReliabilityMetric[] }) {
+  return (
+    <div className="assetMetricGrid reliabilityGrid">
+      {metrics.map((metric) => (
+        <span className="assetMetric" key={metric.id}>
+          <small>{metric.metric_name}</small>
+          <strong>{metric.value}{metric.unit}</strong>
+          <em>{metric.status.replace('_', ' ')}</em>
+          <p>{metric.detail}</p>
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function AssetDocumentList({ documents }: { documents: AssetDocument[] }) {
+  if (!documents.length) return <p className="emptyState">No documents are linked to this asset.</p>
+  return (
+    <div className="assetDocumentList">
+      {documents.map((document) => (
+        <article className="assetDocument" key={document.id}>
+          <span className="rolePill">{document.source_type}</span>
+          <h3>{document.title}</h3>
+          <p>{document.excerpt}</p>
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function KnowledgeEvidenceList({ evidence }: { evidence: AssetDetail['knowledge'] }) {
+  if (!evidence.length) return <p className="emptyState">No retrieved evidence is available for this asset.</p>
+  return (
+    <div className="assetDocumentList">
+      {evidence.map((item) => (
+        <article className="assetDocument" key={item.source_id}>
+          <span className="rolePill">{item.source_type}</span>
+          <h3>{item.title}</h3>
+          <p>{item.excerpt}</p>
+          {item.relevance_reason && <small>{item.relevance_reason}</small>}
+        </article>
+      ))}
+    </div>
+  )
+}
+
 function WorkOrderTable({
   workOrders,
   onOpen,
@@ -2140,34 +3409,6 @@ function MiniBars({ values }: { values: number[] }) {
   )
 }
 
-function HealthTile({ label, value }: { label: string; value: number }) {
-  return (
-    <section className="healthTile">
-      <h2>{label}</h2>
-      <strong>{value}%</strong>
-      <small>{value < 70 ? 'Under target' : 'On target'}</small>
-    </section>
-  )
-}
-
-function LineChartCard({ title, health }: { title: string; health?: HealthSummary }) {
-  const points = (health?.anomalies.length ? health.anomalies : []).slice(0, 8)
-  const values = points.length ? points.map((item) => Math.min(100, Math.max(5, item.value))) : [42, 48, 45, 55, 52, 60, 58, 70]
-  const path = values
-    .map((value, index) => `${index === 0 ? 'M' : 'L'} ${20 + index * 42} ${120 - value}`)
-    .join(' ')
-  return (
-    <section className="detailPanel chartCard">
-      <h2>{title}</h2>
-      <svg viewBox="0 0 340 140" role="img" aria-label={`${title} line chart`}>
-        <path d="M20 120 H320" className="axis" />
-        <path d="M20 20 V120" className="axis" />
-        <path d={path} className="linePath" />
-      </svg>
-    </section>
-  )
-}
-
 function StatusTimeline({ status }: { status: string }) {
   const statuses = ['WAPPR', 'WMATL', 'APPR', 'INPRG', 'COMP', 'CLOSE']
   const activeIndex = Math.max(0, statuses.indexOf(status))
@@ -2189,4 +3430,19 @@ function formatDate(value: string) {
   } catch {
     return value
   }
+}
+
+function metricValue(value: unknown) {
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? `${value}` : value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')
+  }
+  if (typeof value === 'string' && value.trim()) return value
+  if (typeof value === 'boolean') return value ? 'yes' : 'no'
+  return '0'
+}
+
+function clipText(value: string, limit: number) {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  if (compact.length <= limit) return compact
+  return `${compact.slice(0, limit - 1).trim()}…`
 }

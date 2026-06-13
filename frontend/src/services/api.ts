@@ -41,6 +41,77 @@ export interface Equipment {
   status: string
 }
 
+export interface AssetProfile {
+  equipment_id: string
+  name: string
+  area: string
+  process: string
+  criticality: number
+  status: string
+  asset_type: string
+  location_code: string
+  location_name: string
+  parent_system: string
+  manufacturer: string
+  model: string
+  serial_number: string
+  installed_at: string
+  owner_team: string
+  supervisor: string
+  description: string
+  last_updated: string
+}
+
+export interface AssetMetricSnapshot {
+  id: string
+  equipment_id: string
+  metric_key: string
+  label: string
+  value: number
+  unit: string
+  target_value?: number | null
+  status: string
+  trend: string
+  detail: string
+  captured_at: string
+  sort_order: number
+}
+
+export interface AssetRecommendation {
+  id: string
+  equipment_id: string
+  action_type: string
+  title: string
+  description: string
+  priority: number
+  source: string
+  created_at: string
+  sort_order: number
+}
+
+export interface AssetSubsystem {
+  id: string
+  equipment_id: string
+  name: string
+  component: string
+  condition: string
+  detail: string
+  sort_order: number
+}
+
+export interface AssetReliabilityMetric {
+  id: string
+  equipment_id: string
+  metric_name: string
+  value: number
+  unit: string
+  target_value?: number | null
+  status: string
+  trend: string
+  detail: string
+  sort_order: number
+}
+
 export interface Alert {
   id: string
   equipment_id: string
@@ -110,6 +181,16 @@ export interface HealthSummary {
   notes: string[]
 }
 
+export interface MaintenanceEvent {
+  id: string
+  equipment_id: string
+  date: string
+  issue: string
+  root_cause: string
+  action: string
+  downtime_hours: number
+}
+
 export interface DashboardSummary {
   equipment_count: number
   active_alert_count: number
@@ -138,11 +219,88 @@ export interface Recommendation {
   report_summary: string
 }
 
+export interface PredictionResponse {
+  equipment_id: string
+  risk_level: RiskLevel
+  failure_probability: number
+  remaining_useful_life_days: number
+  drivers: string[]
+  reasoning_explanation?: ReasoningExplanation | null
+}
+
+export interface AssetDocument {
+  id: string
+  source_type: string
+  equipment_id?: string | null
+  title: string
+  excerpt: string
+}
+
+export interface AssetPerformancePoint {
+  timestamp: string
+  value: number
+  threshold: number
+}
+
+export interface AssetPerformanceChart {
+  signal: string
+  title: string
+  unit: string
+  points: AssetPerformancePoint[]
+}
+
+export interface AssetListItem {
+  id: string
+  name: string
+  asset_type: string
+  area: string
+  process: string
+  location_code: string
+  location_name: string
+  criticality: number
+  status: string
+  health_score: number
+  risk_level: RiskLevel
+  active_alerts: number
+  open_work_orders: number
+  supervisor: string
+  last_updated: string
+}
+
+export type AssetDetailSection = 'summary' | 'maintenance' | 'performance' | 'reliability' | 'documents' | 'work_orders'
+
+export interface AssetDetail {
+  profile: AssetProfile
+  health: HealthSummary
+  metrics: AssetMetricSnapshot[]
+  recommendations: AssetRecommendation[]
+  maintenance_events: MaintenanceEvent[]
+  work_orders: WorkOrder[]
+  subsystems: AssetSubsystem[]
+  reliability_metrics: AssetReliabilityMetric[]
+  performance_charts: AssetPerformanceChart[]
+  documents: AssetDocument[]
+  knowledge: Evidence[]
+  prediction: PredictionResponse | null
+}
+
+export type AssetReliabilityPredictionStreamEvent =
+  | { type: 'meta'; provider: string; used_live_provider: boolean }
+  | { type: 'token'; content: string }
+  | { type: 'done'; answer: string; prediction: PredictionResponse; provider: string; used_live_provider: boolean }
+  | { type: 'error'; message: string; provider: string; used_live_provider: false }
+
 export interface ChatResponse {
   answer: string
   recommendation: Recommendation
   evidence: Evidence[]
 }
+
+export type DiagnosisStreamEvent =
+  | { type: 'meta'; provider: string; used_live_provider: boolean }
+  | { type: 'token'; content: string }
+  | { type: 'done'; recommendation: Recommendation }
+  | { type: 'error'; message: string }
 
 export interface NeoTable {
   title: string
@@ -150,9 +308,18 @@ export interface NeoTable {
   rows: Record<string, string | number | boolean | null>[]
 }
 
+export interface NeoAction {
+  type: string
+  label: string
+  status: 'completed' | 'blocked' | 'not_allowed' | 'not_found'
+  target_id?: string | null
+  detail?: string | null
+}
+
 export interface NeoChatResponse {
   answer: string
   table?: NeoTable | null
+  action?: NeoAction | null
   used_live_provider: boolean
   provider: string
 }
@@ -365,6 +532,113 @@ export interface MaintenanceLabelsResponse {
   labels: MaintenanceLabel[]
 }
 
+export interface LearningExample {
+  id: string
+  source_type: string
+  source_id: string
+  equipment_id?: string | null
+  work_order_id?: string | null
+  instruction: string
+  input_text: string
+  expected_output: string
+  metadata: Record<string, unknown>
+  approved: boolean
+  judge_score: number
+  judge_label: string
+  judge_rationale?: string | null
+  judge_provider: string
+  judge_used_live_provider: boolean
+  judged_at?: string | null
+  created_at: string
+}
+
+export interface LearningDatasetSnapshot {
+  id: string
+  name: string
+  description?: string | null
+  example_count: number
+  approved_only: boolean
+  jsonl_content: string
+  created_by?: string | null
+  created_at: string
+}
+
+export interface LearningModelVersion {
+  id: string
+  provider: string
+  model_name: string
+  base_model?: string | null
+  adapter_path?: string | null
+  status: string
+  notes?: string | null
+  created_at: string
+}
+
+export interface LearningPromptVersion {
+  id: string
+  assistant: string
+  version: string
+  prompt: string
+  status: string
+  notes?: string | null
+  created_at: string
+}
+
+export interface LearningEvaluationRun {
+  id: string
+  dataset_id?: string | null
+  model_version_id?: string | null
+  prompt_version_id?: string | null
+  metrics: Record<string, unknown>
+  notes?: string | null
+  passed: boolean
+  created_at: string
+}
+
+export interface LearningJob {
+  id: string
+  job_type: string
+  subject: string
+  status: 'queued' | 'published' | 'running' | 'completed' | 'failed'
+  requested_by?: string | null
+  correlation_id: string
+  input_refs: Record<string, unknown>
+  output_refs: Record<string, unknown>
+  error?: string | null
+  retry_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface LearningArtifact {
+  id: string
+  job_id: string
+  artifact_type: string
+  uri: string
+  content_hash: string
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+export interface LearningSummary {
+  counts: Record<string, number>
+  recent_examples: LearningExample[]
+  recent_snapshots: LearningDatasetSnapshot[]
+  model_versions: LearningModelVersion[]
+  prompt_versions: LearningPromptVersion[]
+  evaluation_runs: LearningEvaluationRun[]
+  recent_jobs: LearningJob[]
+  recent_artifacts: LearningArtifact[]
+  vector_store: {
+    store?: string
+    enabled?: boolean
+    collection?: string
+    url?: string
+    state?: string
+    error?: string | null
+  }
+}
+
 export type WorkOrderStatus = 'WAPPR' | 'WMATL' | 'APPR' | 'INPRG' | 'COMP' | 'CLOSE'
 
 export interface WorkOrderLog {
@@ -488,6 +762,18 @@ export const api = {
       body: JSON.stringify({ password }),
     }),
   equipment: () => request<Equipment[]>('/api/equipment'),
+  assets: () => request<AssetListItem[]>('/api/assets'),
+  assetDetail: (equipmentId: string, sections: AssetDetailSection[] = ['summary']) =>
+    request<AssetDetail>(`/api/assets/${equipmentId}?sections=${encodeURIComponent(sections.join(','))}`),
+  assetReliabilityPredictionStream: (
+    equipmentId: string,
+    onEvent: (event: AssetReliabilityPredictionStreamEvent) => void,
+  ) =>
+    streamRequest<AssetReliabilityPredictionStreamEvent>(
+      `/api/assets/${equipmentId}/reliability/stream`,
+      { method: 'GET' },
+      onEvent,
+    ),
   dashboard: () => request<DashboardSummary>('/api/dashboard/summary'),
   streamingStatus: () => request<StreamingStatus>('/api/streaming/status'),
   health: (equipmentId: string) => request<HealthSummary>(`/api/equipment/${equipmentId}/health`),
@@ -497,11 +783,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ equipment_id: equipmentId, alert_id: alertId }),
     }),
+  diagnoseStream: (equipmentId: string, alertId: string | undefined, onEvent: (event: DiagnosisStreamEvent) => void) =>
+    streamRequest<DiagnosisStreamEvent>(
+      '/api/diagnose/stream',
+      {
+        method: 'POST',
+        body: JSON.stringify({ equipment_id: equipmentId, alert_id: alertId }),
+      },
+      onEvent,
+    ),
   chat: (equipmentId: string, message: string) =>
     request<ChatResponse>('/api/chat', {
       method: 'POST',
       body: JSON.stringify({ equipment_id: equipmentId, message }),
     }),
+  neoWelcome: () => request<NeoChatResponse>('/api/neo/welcome'),
   neoChat: (message: string, history: { role: 'user' | 'assistant'; content: string }[] = []) =>
     request<NeoChatResponse>('/api/neo/chat', {
       method: 'POST',
@@ -545,6 +841,69 @@ export const api = {
   generateMaintenanceLabels: (equipmentId: string) =>
     request<MaintenanceLabelsResponse>(`/api/equipment/${equipmentId}/maintenance-labels`, {
       method: 'POST',
+    }),
+  learningSummary: () => request<LearningSummary>('/api/learning/summary'),
+  refreshLearningExamples: () =>
+    request<LearningExample[]>('/api/learning/examples/refresh', {
+      method: 'POST',
+    }),
+  learningExamples: (approvedOnly?: boolean) => {
+    const query = typeof approvedOnly === 'boolean' ? `?approved_only=${approvedOnly ? 'true' : 'false'}` : ''
+    return request<LearningExample[]>(`/api/learning/examples${query}`)
+  },
+  updateLearningExample: (exampleId: string, approved: boolean) =>
+    request<LearningExample>(`/api/learning/examples/${exampleId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ approved }),
+    }),
+  createLearningDataset: (payload: { name: string; description?: string; approved_only?: boolean; min_judge_score?: number }) =>
+    request<LearningDatasetSnapshot>('/api/learning/datasets', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  learningDatasets: () => request<LearningDatasetSnapshot[]>('/api/learning/datasets'),
+  learningDatasetJsonl: (datasetId: string) => textRequest(`/api/learning/datasets/${datasetId}/jsonl`),
+  judgeLearningExample: (exampleId: string) =>
+    request<LearningExample>(`/api/learning/examples/${exampleId}/judge`, {
+      method: 'POST',
+    }),
+  registerLearningModelVersion: (payload: {
+    provider: string
+    model_name: string
+    base_model?: string
+    adapter_path?: string
+    status?: string
+    notes?: string
+  }) =>
+    request<LearningModelVersion>('/api/learning/model-versions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  runLearningEvaluation: (payload: {
+    dataset_id: string
+    model_version_id: string
+    prompt_version_id: string
+    min_quality_score?: number
+    notes?: string
+  }) =>
+    request<LearningEvaluationRun>('/api/learning/evaluations', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  learningEvaluations: () => request<LearningEvaluationRun[]>('/api/learning/evaluations'),
+  learningJobs: () => request<LearningJob[]>('/api/learning/jobs'),
+  queueLearningPeftJob: (payload: {
+    dataset_id: string
+    model_version_id: string
+    prompt_version_id: string
+    adapter_name?: string
+    base_model?: string
+    training_config?: Record<string, unknown>
+    notes?: string
+  }) =>
+    request<LearningJob>('/api/learning/jobs/peft', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
   workOrders: (equipmentId?: string, followUpOnly = false) => {
     const params = new URLSearchParams()

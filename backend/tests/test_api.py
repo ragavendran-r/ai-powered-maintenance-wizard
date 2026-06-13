@@ -2,11 +2,14 @@ import asyncio
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 os.environ["LLM_PROVIDER"] = "mock"
+os.environ["LEARNING_ASYNC_ENABLED"] = "false"
+os.environ["RAG_VECTOR_STORE"] = "sqlite"
 
 from app.data import repository
 from app.data.database import database_status, reset_database
@@ -20,6 +23,8 @@ from app.services.iot_streaming import (
 from app.services.retrieval import retrieve_evidence
 from app.services.document_intelligence import document_intelligence
 from app.services.maintenance_labeling import stored_labels
+from app.services.vector_store import VectorStoreHit
+from app.services.learning_worker import process_learning_job_message
 
 
 client = TestClient(app)
@@ -68,15 +73,127 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "6"
+    assert status["schema_version"] == "12"
     assert status["counts"]["equipment"] == 5
-    assert status["counts"]["document_chunks"] >= 8
+    assert status["counts"]["asset_profiles"] == 5
+    assert status["counts"]["asset_metric_snapshots"] == 15
+    assert status["counts"]["asset_recommendations"] >= 10
+    assert status["counts"]["asset_subsystems"] == 15
+    assert status["counts"]["asset_reliability_metrics"] == 15
+    assert status["counts"]["work_orders"] >= 5
+    assert status["counts"]["documents"] >= 21
+    assert status["counts"]["document_chunks"] >= 21
     assert "document_intelligence" in status["counts"]
     assert "maintenance_labels" in status["counts"]
     assert "streaming_messages" in status["counts"]
     assert "work_orders" in status["counts"]
     assert "work_order_logs" in status["counts"]
     assert status["counts"]["users"] == 8
+    assert "learning_interactions" in status["counts"]
+    assert "learning_examples" in status["counts"]
+    assert status["counts"]["learning_model_versions"] >= 1
+    assert status["counts"]["learning_prompt_versions"] >= 3
+    assert "learning_jobs" in status["counts"]
+    assert "learning_artifacts" in status["counts"]
+
+
+def test_assets_api_returns_company_asset_table():
+    response = client.get("/api/assets", headers=auth_headers("operator@plant.local"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 5
+    drive = next(item for item in payload if item["id"] == "RM-DRIVE-01")
+    assert drive["asset_type"] == "AC main drive motor"
+    assert drive["location_code"] == "HSM-FS-01"
+    assert drive["health_score"] >= 0
+    assert drive["open_work_orders"] >= 1
+    assert drive["supervisor"] == "Maintenance Supervisor"
+
+
+def test_assets_api_requires_authenticated_read_role():
+    response = client.get("/api/assets")
+    service_response = client.get("/api/assets", headers=auth_headers("iot-service@plant.local"))
+    detail_response = client.get("/api/assets/RM-DRIVE-01", headers=auth_headers("iot-service@plant.local"))
+
+    assert response.status_code == 401
+    assert service_response.status_code == 403
+    assert detail_response.status_code == 403
+
+
+def test_asset_detail_api_is_seeded_and_data_backed():
+    response = client.get("/api/assets/RM-DRIVE-01", headers=auth_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["profile"]["name"] == "Hot Strip Mill Main Drive Motor"
+    assert payload["profile"]["manufacturer"] == "Bharat Heavy Electricals"
+    assert {metric["metric_key"] for metric in payload["metrics"]} >= {"health", "efficiency", "risk"}
+    assert any(item["title"] == "Bearing housing inspection" for item in payload["recommendations"])
+    assert any(item["name"] == "Drive train and coupling" for item in payload["subsystems"])
+    assert any(item["metric_name"] == "MTBF" for item in payload["reliability_metrics"])
+    assert any(chart["signal"] == "drive_end_vibration" for chart in payload["performance_charts"])
+    assert any(document["source_type"] == "log" for document in payload["documents"])
+    assert any(event["issue"] for event in payload["maintenance_events"])
+    assert any(order["equipment_id"] == "RM-DRIVE-01" for order in payload["work_orders"])
+    assert payload["knowledge"]
+    assert payload["prediction"]["drivers"]
+
+
+def test_all_asset_detail_tabs_have_seeded_data_for_each_company_asset():
+    expected_sources = {"sop", "manual", "log", "history"}
+    asset_ids = ["RM-DRIVE-01", "BF-BLOWER-02", "CC-PUMP-03", "HYD-SYS-04", "OH-CRANE-05"]
+
+    for asset_id in asset_ids:
+        response = client.get(
+            f"/api/assets/{asset_id}?sections=maintenance,performance,reliability,documents,work_orders",
+            headers=auth_headers("operator@plant.local"),
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["profile"]["equipment_id"] == asset_id
+        assert payload["maintenance_events"], asset_id
+        assert payload["work_orders"], asset_id
+        assert payload["performance_charts"], asset_id
+        assert payload["reliability_metrics"], asset_id
+        assert {document["source_type"] for document in payload["documents"]} >= expected_sources
+        assert payload["knowledge"], asset_id
+
+
+def test_asset_detail_api_can_load_sections_independently():
+    summary_response = client.get("/api/assets/RM-DRIVE-01?sections=summary", headers=auth_headers())
+
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["profile"]["name"] == "Hot Strip Mill Main Drive Motor"
+    assert any(item["title"] == "Bearing housing inspection" for item in summary["recommendations"])
+    assert any(item["name"] == "Drive train and coupling" for item in summary["subsystems"])
+    assert summary["maintenance_events"] == []
+    assert summary["performance_charts"] == []
+    assert summary["documents"] == []
+    assert summary["knowledge"] == []
+    assert summary["reliability_metrics"] == []
+    assert summary["work_orders"] == []
+    assert summary["prediction"] is None
+
+    documents_response = client.get("/api/assets/RM-DRIVE-01?sections=documents", headers=auth_headers())
+
+    assert documents_response.status_code == 200
+    documents = documents_response.json()
+    assert documents["recommendations"] == []
+    assert any(document["source_type"] == "sop" for document in documents["documents"])
+    assert len(documents["knowledge"]) > 0
+
+
+def test_asset_reliability_prediction_stream_requires_live_llm():
+    response = client.get("/api/assets/RM-DRIVE-01/reliability/stream", headers=auth_headers())
+
+    assert response.status_code == 200
+    assert '"type": "meta"' in response.text
+    assert '"used_live_provider": false' in response.text
+    assert '"type": "error"' in response.text
+    assert '"type": "done"' not in response.text
 
 
 def test_repository_initializes_once_under_concurrent_access(monkeypatch):
@@ -142,6 +259,8 @@ def test_operator_can_read_but_cannot_diagnose_or_ingest():
 
     assert dashboard_response.status_code == 200
     assert diagnose_response.status_code == 403
+    with client.stream("POST", "/api/diagnose/stream", json={"equipment_id": "RM-DRIVE-01"}, headers=headers) as stream_response:
+        assert stream_response.status_code == 403
     assert ingest_response.status_code == 403
 
 
@@ -336,6 +455,30 @@ def test_create_update_and_log_work_order():
     assert any("minor play" in item["content"] for item in log_response.json()["logs"])
 
 
+def test_operator_cannot_create_work_order():
+    response = client.post(
+        "/api/work-orders",
+        json={
+            "equipment_id": "BF-BLOWER-02",
+            "title": "Inspect blower actuator linkage",
+            "description": "Inspect inlet guide vane actuator linkage after pressure variance trend.",
+            "priority": 2,
+            "work_type": "CM",
+            "failure_class": "CTRL",
+            "problem_code": "IGVACT",
+            "classification": "Control actuator",
+            "assigned_to": "Reliability Engineer",
+            "supervisor": "Blast Furnace Supervisor",
+            "due_date": "2026-06-14T09:00:00+05:30",
+            "recommended_action": "Stroke actuator and verify position feedback.",
+        },
+        headers=auth_headers("operator@plant.local"),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Insufficient role permissions"
+
+
 def test_technician_assistant_suggests_problem_code_from_observation():
     headers = auth_headers("technician@plant.local")
 
@@ -377,7 +520,7 @@ def test_technician_assistant_streams_sse_response():
     assert '"type": "meta"' in body
     assert '"type": "token"' in body
     assert '"type": "done"' in body
-    assert "Smith" in body
+    assert "Neo" in body
     assert "LWTQCONNECT" in body
 
     forbidden_response = client.post(
@@ -428,7 +571,7 @@ def test_supervisor_assistant_streams_sse_response():
     assert '"type": "meta"' in body
     assert '"type": "token"' in body
     assert '"type": "done"' in body
-    assert "Trinity" in body
+    assert "Neo" in body
     assert "WO-8297" in body
 
     forbidden_response = client.post(
@@ -645,6 +788,23 @@ def test_diagnosis_returns_evidence_and_actions():
     assert payload["spares_strategy"]
 
 
+def test_diagnosis_stream_returns_morpheus_progress_and_recommendation():
+    with client.stream(
+        "POST",
+        "/api/diagnose/stream",
+        json={"equipment_id": "RM-DRIVE-01", "alert_id": "ALT-1001"},
+        headers=auth_headers(),
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        body = "".join(response.iter_text())
+
+    assert "Morpheus is reviewing asset health" in body
+    assert '"type": "done"' in body
+    assert '"recommendation"' in body
+    assert "RM-DRIVE-01" in body
+
+
 def test_chat_returns_recommendation():
     response = client.post(
         "/api/chat",
@@ -743,6 +903,148 @@ def test_neo_user_table_supports_role_filters_without_llm():
     assert payload["provider"] == "deterministic"
 
 
+def test_neo_welcome_highlights_assigned_technician_work():
+    response = client.get("/api/neo/welcome", headers=auth_headers("technician@plant.local"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "deterministic"
+    assert payload["action"]["type"] == "neo_welcome"
+    assert payload["action"]["target_id"] == "WO-8304"
+    assert "Immediate attention" in payload["answer"]
+    assert "Primary Work Order: WO-8304" in payload["answer"]
+    assert "Closeout" in payload["answer"]
+    assert payload["table"]["title"] == "Your Assigned Work"
+    assert {row["Work order"] for row in payload["table"]["rows"]} == {"WO-8304"}
+
+
+def test_neo_welcome_highlights_supervisor_approvals_and_followups():
+    response = client.get("/api/neo/welcome", headers=auth_headers("supervisor@plant.local"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "deterministic"
+    assert payload["table"]["title"] == "Supervisor Attention"
+    assert "waiting for approval" in payload["answer"]
+    assert any(row["Work order"] == "WO-8311" for row in payload["table"]["rows"])
+
+
+def test_neo_welcome_is_read_only_for_operator_attention():
+    response = client.get("/api/neo/welcome", headers=auth_headers("operator@plant.local"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "deterministic"
+    assert payload["table"]["title"] == "Operator Attention"
+    assert "read-only" in payload["answer"]
+    assert payload["action"]["status"] == "completed"
+
+
+def test_neo_returns_asset_performance_summary_from_backend_data():
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "performance summary for BF-BLOWER-02"},
+        headers=auth_headers("operator@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "deterministic"
+    assert payload["table"]["title"] == "BF-BLOWER-02 Performance"
+    assert payload["action"]["type"] == "asset_performance"
+    assert payload["action"]["status"] == "completed"
+    assert {row["Metric"] for row in payload["table"]["rows"]} >= {"Health", "Efficiency", "Risk"}
+
+
+def test_neo_returns_asset_documents_from_backend_data():
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "show documents for BF-BLOWER-02"},
+        headers=auth_headers("operator@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "deterministic"
+    assert payload["table"]["title"] == "BF-BLOWER-02 Documents"
+    assert any(row["Source"] in {"manual", "sop", "log", "history"} for row in payload["table"]["rows"])
+
+
+def test_neo_technician_next_steps_use_assigned_work_order_only():
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "what are next steps for my assigned work order"},
+        headers=auth_headers("technician@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "deterministic"
+    assert payload["action"]["type"] == "work_order_next_steps"
+    assert payload["action"]["target_id"] == "WO-8304"
+    assert payload["table"]["rows"][0]["Work order"] == "WO-8304"
+    assert "assigned to you" in payload["answer"].lower()
+
+
+def test_neo_can_create_work_order_for_critical_asset_when_role_allows():
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "create work order for critical asset"},
+        headers=auth_headers("planner@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "deterministic"
+    assert payload["action"]["type"] == "create_work_order"
+    assert payload["action"]["status"] == "completed"
+    assert payload["action"]["target_id"].startswith("WO-")
+    assert payload["table"]["title"] == "Created Work Order"
+    created = repository.get_work_order(payload["action"]["target_id"])
+    assert created
+    assert created["status"] == "WAPPR"
+    assert created["priority"] == 1
+
+
+def test_neo_blocks_work_order_creation_for_operator():
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "create work order for BF-BLOWER-02"},
+        headers=auth_headers("operator@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "deterministic"
+    assert payload["action"]["status"] == "not_allowed"
+    assert payload["table"] is None
+
+
+def test_neo_can_manage_user_data_for_admin_only():
+    admin_response = client.post(
+        "/api/neo/chat",
+        json={"message": "deactivate user operator@plant.local"},
+        headers=auth_headers(),
+    )
+
+    assert admin_response.status_code == 200
+    admin_payload = admin_response.json()
+    assert admin_payload["action"]["type"] == "manage_user"
+    assert admin_payload["action"]["status"] == "completed"
+    assert admin_payload["table"]["rows"][0]["Status"] == "Inactive"
+    assert repository.get_user_by_email("operator@plant.local")["is_active"] is False
+
+    reset_database()
+    operator_response = client.post(
+        "/api/neo/chat",
+        json={"message": "deactivate user technician@plant.local"},
+        headers=auth_headers("operator@plant.local"),
+    )
+    assert operator_response.status_code == 200
+    operator_payload = operator_response.json()
+    assert operator_payload["action"]["status"] == "not_allowed"
+
+
 def test_neo_general_maintenance_query_uses_evidence_fallback_when_llm_is_slow():
     response = client.post(
         "/api/neo/chat",
@@ -826,6 +1128,294 @@ def test_feedback_is_reused_in_future_recommendations():
     assert payload["learning_notes"]
     assert payload["reasoning_explanation"]["subject_type"] == "recommendation"
     assert "engineer feedback record" in payload["report_summary"]
+
+
+def test_feedback_refreshes_approved_learning_examples_and_retrieval():
+    headers = auth_headers("maintenance@plant.local")
+    client.post(
+        "/api/recommendations/rec-learning-retrieval/feedback",
+        json={
+            "equipment_id": "RM-DRIVE-01",
+            "status": "accepted",
+            "actual_root_cause": "Loose foundation bolt resonance",
+            "action_taken": "Retorque foundation bolts and recheck alignment",
+            "outcome": "Vibration normalized after bolt retorque",
+        },
+        headers=headers,
+    )
+
+    examples = repository.list_learning_examples(approved_only=True, equipment_id="RM-DRIVE-01")
+    assert any(example["source_type"] == "feedback" for example in examples)
+    feedback_example = next(example for example in examples if example["source_type"] == "feedback")
+    assert feedback_example["judge_score"] >= 0.65
+    assert feedback_example["judge_label"] == "training_worthy"
+    evidence = retrieve_evidence("Loose foundation bolt resonance retorque", "RM-DRIVE-01", limit=6)
+    assert any(item.source_type == "learning_example" for item in evidence)
+
+
+def test_retrieval_uses_vector_store_hits(monkeypatch):
+    monkeypatch.setattr("app.services.retrieval.configured_vector_store_name", lambda: "qdrant")
+    monkeypatch.setattr(
+        "app.services.retrieval.search_document_chunks",
+        lambda query, equipment_id, limit: [
+            VectorStoreHit(
+                source_id="DOC-QDRANT::chunk-000",
+                title="Qdrant indexed SOP",
+                content="Vector database evidence for blast furnace blower actuator inspection.",
+                source_type="sop",
+                equipment_id="BF-BLOWER-02",
+                score=0.91,
+            )
+        ],
+    )
+
+    evidence = retrieve_evidence("blower actuator inspection", "BF-BLOWER-02", limit=1, use_reranker=False)
+
+    assert evidence[0].source_id == "DOC-QDRANT::chunk-000"
+    assert evidence[0].relevance_reason == "Matched by qdrant vector search."
+
+
+def test_learning_review_endpoints_are_role_gated_and_export_jsonl():
+    operator_response = client.get("/api/learning/summary", headers=auth_headers("operator@plant.local"))
+    assert operator_response.status_code == 403
+
+    headers = auth_headers("reliability@plant.local")
+    refresh_response = client.post("/api/learning/examples/refresh", headers=headers)
+    assert refresh_response.status_code == 200
+    assert any(example["approved"] for example in refresh_response.json())
+
+    summary_response = client.get("/api/learning/summary", headers=headers)
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["counts"]["examples"] >= 1
+    assert summary["model_versions"]
+    assert summary["prompt_versions"]
+    assert any(example["judge_score"] > 0 for example in summary["recent_examples"])
+    assert "recent_jobs" in summary
+    assert summary["vector_store"]["store"] == "sqlite"
+
+    dataset_response = client.post(
+        "/api/learning/datasets",
+        json={"name": "test-learning-snapshot", "approved_only": True, "min_judge_score": 0.65},
+        headers=headers,
+    )
+    assert dataset_response.status_code == 200
+    dataset = dataset_response.json()
+    assert dataset["example_count"] >= 1
+    assert '"messages"' in dataset["jsonl_content"]
+
+    export_response = client.get(f"/api/learning/datasets/{dataset['id']}/jsonl", headers=headers)
+    assert export_response.status_code == 200
+    assert export_response.headers["content-type"].startswith("application/jsonl")
+    first_line = export_response.text.splitlines()[0]
+    assert json.loads(first_line)["messages"][0]["role"] == "system"
+
+    model_response = client.post(
+        "/api/learning/model-versions",
+        json={
+            "provider": "openai",
+            "model_name": "qwen2.5-7b-instruct-lora-candidate",
+            "base_model": "qwen2.5-7b-instruct",
+            "adapter_path": "file:///models/qwen2.5-lora",
+            "status": "candidate",
+            "notes": "Local PEFT adapter candidate.",
+        },
+        headers=headers,
+    )
+    assert model_response.status_code == 200
+    model = model_response.json()
+    assert model["adapter_path"] == "file:///models/qwen2.5-lora"
+
+    evaluation_response = client.post(
+        "/api/learning/evaluations",
+        json={
+            "dataset_id": dataset["id"],
+            "model_version_id": model["id"],
+            "prompt_version_id": "prompt-neo-default",
+            "min_quality_score": 0.6,
+        },
+        headers=headers,
+    )
+    assert evaluation_response.status_code == 200
+    evaluation = evaluation_response.json()
+    assert evaluation["dataset_id"] == dataset["id"]
+    assert evaluation["model_version_id"] == model["id"]
+    assert evaluation["metrics"]["example_count"] == dataset["example_count"]
+    assert evaluation["metrics"]["average_judge_score"] >= 0.65
+    assert evaluation["passed"] is True
+
+    evaluations_response = client.get("/api/learning/evaluations", headers=headers)
+    assert evaluations_response.status_code == 200
+    assert any(item["id"] == evaluation["id"] for item in evaluations_response.json())
+
+    peft_job_response = client.post(
+        "/api/learning/jobs/peft",
+        json={
+            "dataset_id": dataset["id"],
+            "model_version_id": model["id"],
+            "prompt_version_id": "prompt-neo-default",
+            "adapter_name": "maintenance-wizard-qwen-lora",
+            "base_model": "qwen2.5-7b-instruct",
+            "training_config": {"method": "lora", "max_examples": dataset["example_count"]},
+        },
+        headers=headers,
+    )
+    assert peft_job_response.status_code == 200
+    peft_job = peft_job_response.json()
+    assert peft_job["job_type"] == "peft_tuning"
+    assert peft_job["subject"] == "maintenance.learning.peft.requested"
+    assert peft_job["status"] == "queued"
+    assert peft_job["input_refs"]["dataset_id"] == dataset["id"]
+    assert peft_job["output_refs"]["dispatch"] == "disabled"
+
+    jobs_response = client.get("/api/learning/jobs", headers=headers)
+    assert jobs_response.status_code == 200
+    jobs = jobs_response.json()
+    assert any(job["id"] == peft_job["id"] for job in jobs)
+    assert any(job["job_type"] == "dataset_snapshot" and job["status"] == "completed" for job in jobs)
+
+
+def test_peft_learning_job_publishes_when_async_learning_is_enabled(monkeypatch):
+    headers = auth_headers("reliability@plant.local")
+    client.post("/api/learning/examples/refresh", headers=headers)
+    dataset = client.post(
+        "/api/learning/datasets",
+        json={"name": "async-learning-snapshot", "approved_only": True, "min_judge_score": 0.65},
+        headers=headers,
+    ).json()
+    model = client.post(
+        "/api/learning/model-versions",
+        json={
+            "provider": "openai",
+            "model_name": "qwen2.5-7b-instruct-lora-async",
+            "base_model": "qwen2.5-7b-instruct",
+            "adapter_path": "file:///models/qwen2.5-lora-async",
+            "status": "candidate",
+        },
+        headers=headers,
+    ).json()
+    published_jobs = []
+
+    async def fake_publish(job):
+        published_jobs.append(job)
+
+    monkeypatch.setattr(
+        "app.services.learning.get_settings",
+        lambda: SimpleNamespace(
+            learning_async_enabled=True,
+            learning_nats_subject_prefix="maintenance.learning",
+            learning_nats_stream="MW_LEARNING",
+        ),
+    )
+    monkeypatch.setattr("app.services.learning._publish_learning_job", fake_publish)
+
+    response = client.post(
+        "/api/learning/jobs/peft",
+        json={
+            "dataset_id": dataset["id"],
+            "model_version_id": model["id"],
+            "prompt_version_id": "prompt-neo-default",
+            "adapter_name": "maintenance-wizard-qwen-lora",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    job = response.json()
+    assert job["status"] == "published"
+    assert job["subject"] == "maintenance.learning.peft.requested"
+    assert job["output_refs"]["stream"] == "MW_LEARNING"
+    assert published_jobs[0]["id"] == job["id"]
+
+
+def test_learning_worker_prepares_peft_artifacts(monkeypatch, tmp_path):
+    headers = auth_headers("reliability@plant.local")
+    client.post("/api/learning/examples/refresh", headers=headers)
+    dataset = client.post(
+        "/api/learning/datasets",
+        json={"name": "worker-learning-snapshot", "approved_only": True, "min_judge_score": 0.65},
+        headers=headers,
+    ).json()
+    model = client.post(
+        "/api/learning/model-versions",
+        json={
+            "provider": "openai",
+            "model_name": "qwen2.5-7b-instruct-worker",
+            "base_model": "qwen2.5-7b-instruct",
+            "adapter_path": None,
+            "status": "candidate",
+        },
+        headers=headers,
+    ).json()
+    peft_job = client.post(
+        "/api/learning/jobs/peft",
+        json={
+            "dataset_id": dataset["id"],
+            "model_version_id": model["id"],
+            "prompt_version_id": "prompt-neo-default",
+            "adapter_name": "maintenance-wizard-worker-lora",
+            "training_config": {"method": "lora", "epochs": 1},
+        },
+        headers=headers,
+    ).json()
+    monkeypatch.setattr(
+        "app.services.learning.get_settings",
+        lambda: SimpleNamespace(learning_artifact_dir=tmp_path),
+    )
+
+    processed = process_learning_job_message(
+        {
+            "schema_version": "1",
+            "job_id": peft_job["id"],
+            "job_type": "peft_tuning",
+            "requested_by": "reliability@plant.local",
+            "correlation_id": peft_job["correlation_id"],
+            "input_refs": peft_job["input_refs"],
+        },
+        peft_job["subject"],
+    )
+
+    assert processed.status == "completed"
+    completed_job = repository.get_learning_job(peft_job["id"])
+    assert completed_job["status"] == "completed"
+    assert completed_job["output_refs"]["training_status"] == "awaiting_external_peft_trainer"
+    artifacts = repository.list_learning_artifacts(job_id=peft_job["id"])
+    assert {artifact["artifact_type"] for artifact in artifacts} == {
+        "peft_dataset_jsonl",
+        "peft_training_manifest",
+    }
+    for artifact in artifacts:
+        assert artifact["content_hash"]
+        assert artifact["uri"].startswith(str(tmp_path))
+
+
+def test_learning_example_can_be_scored_by_judge_endpoint():
+    headers = auth_headers("reliability@plant.local")
+    refresh_response = client.post("/api/learning/examples/refresh", headers=headers)
+    example = refresh_response.json()[0]
+
+    response = client.post(f"/api/learning/examples/{example['id']}/judge", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["judge_score"] >= 0
+    assert payload["judge_label"] in {"training_worthy", "review", "reject"}
+    assert payload["judge_rationale"]
+
+
+def test_learning_example_approval_can_be_changed_by_engineer():
+    headers = auth_headers("reliability@plant.local")
+    refresh_response = client.post("/api/learning/examples/refresh", headers=headers)
+    example = next(item for item in refresh_response.json() if item["source_type"] == "document")
+
+    response = client.patch(
+        f"/api/learning/examples/{example['id']}",
+        json={"approved": True},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["approved"] is True
 
 
 def test_document_ingestion_persists_to_repository():

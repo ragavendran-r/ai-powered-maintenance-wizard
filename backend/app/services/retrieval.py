@@ -4,8 +4,10 @@ from pydantic import BaseModel, Field
 
 from app.data import repository
 from app.models.schemas import Evidence
+from app.services.learning import TRAINING_WORTHY_SCORE
 from app.services.ai_client import configured_llm_client
 from app.services.vector_index import cosine_similarity, decode_embedding, embed_text, tokenize
+from app.services.vector_store import configured_vector_store_name, search_document_chunks
 
 
 class RetrievalRerankResult(BaseModel):
@@ -27,8 +29,31 @@ def retrieve_evidence(
     terms = set(tokenize(query))
     query_embedding = embed_text(query)
     scored: list[tuple[float, Evidence]] = []
+    seen_sources: set[str] = set()
+
+    vector_store_name = configured_vector_store_name()
+    vector_hits = search_document_chunks(query, equipment_id, max(limit * 2, limit))
+    for hit in vector_hits:
+        if not hit.content:
+            continue
+        seen_sources.add(hit.source_id)
+        scored.append(
+            (
+                hit.score * 3 + 2 + (0.1 if equipment_id and hit.equipment_id == equipment_id else 0),
+                Evidence(
+                    source_type=hit.source_type,
+                    source_id=hit.source_id,
+                    title=hit.title,
+                    excerpt=hit.content[:260],
+                    equipment_id=hit.equipment_id,
+                    relevance_reason=f"Matched by {vector_store_name} vector search.",
+                ),
+            )
+        )
 
     for chunk in repository.list_document_chunks(equipment_id):
+        if chunk["id"] in seen_sources:
+            continue
         text = f"{chunk['title']} {chunk['content']}"
         lexical_score = _score(text, terms)
         vector_score = cosine_similarity(query_embedding, decode_embedding(chunk["embedding"]))
@@ -65,6 +90,32 @@ def retrieve_evidence(
                         excerpt=f"Root cause: {event['root_cause']}. Action: {event['action']}",
                         equipment_id=event["equipment_id"],
                         timestamp=event["date"],
+                    ),
+                )
+            )
+
+    for example in repository.list_learning_examples(
+        approved_only=True,
+        equipment_id=equipment_id,
+        min_judge_score=TRAINING_WORTHY_SCORE,
+        limit=25,
+    ):
+        text = f"{example['instruction']} {example['input_text']} {example['expected_output']}"
+        lexical_score = _score(text, terms)
+        score = lexical_score * 0.12
+        if equipment_id and example.get("equipment_id") == equipment_id:
+            score += 0.2
+        if score > 0:
+            scored.append(
+                (
+                    score,
+                    Evidence(
+                        source_type="learning_example",
+                        source_id=example["id"],
+                        title=f"Approved learning: {example['source_type']}",
+                        excerpt=example["expected_output"][:260],
+                        equipment_id=example.get("equipment_id"),
+                        relevance_reason="Approved human or outcome learning signal.",
                     ),
                 )
             )

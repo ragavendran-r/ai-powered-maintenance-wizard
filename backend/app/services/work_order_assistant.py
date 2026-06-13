@@ -10,16 +10,18 @@ from app.models.schemas import (
     SupervisorAssistantResponse,
     TechnicianAssistantRequest,
     TechnicianAssistantResponse,
+    UserPublic,
     WorkOrderCreateRequest,
 )
 from app.services.ai_client import configured_llm_client
+from app.services.learning import record_assistant_interaction
 from app.services.llm import LLMTextResponse
 from app.services.retrieval import retrieve_evidence
 from app.services.risk import health_summary
 
 
-TECHNICIAN_ASSISTANT_NAME = "Smith"
-SUPERVISOR_ASSISTANT_NAME = "Trinity"
+TECHNICIAN_ASSISTANT_NAME = "Neo"
+SUPERVISOR_ASSISTANT_NAME = "Neo"
 WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS = 600
 
 
@@ -46,7 +48,10 @@ class SupervisorAssistantLLMOutput(BaseModel):
     provider: str = "mock"
 
 
-def technician_assistance(request: TechnicianAssistantRequest) -> TechnicianAssistantResponse:
+def technician_assistance(
+    request: TechnicianAssistantRequest,
+    current_user: Optional[UserPublic] = None,
+) -> TechnicianAssistantResponse:
     work_order = repository.get_work_order(request.work_order_id)
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -82,7 +87,7 @@ def technician_assistance(request: TechnicianAssistantRequest) -> TechnicianAssi
             fallback.model_copy(update={"provider": provider, "used_live_provider": False})
         ),
     )
-    return TechnicianAssistantResponse(
+    assistant_response = TechnicianAssistantResponse(
         work_order_id=work_order["id"],
         next_prompt=response.next_prompt,
         live_directions=response.live_directions,
@@ -95,9 +100,25 @@ def technician_assistance(request: TechnicianAssistantRequest) -> TechnicianAssi
         used_live_provider=response.used_live_provider,
         provider=response.provider,
     )
+    record_assistant_interaction(
+        assistant="neo",
+        interaction_type="technician_work_order_assist",
+        current_user=current_user,
+        equipment_id=work_order["equipment_id"],
+        work_order_id=work_order["id"],
+        prompt=prompt,
+        response=assistant_response.next_prompt,
+        provider=assistant_response.provider,
+        used_live_provider=assistant_response.used_live_provider,
+        source_refs=[item.model_dump(mode="json") for item in evidence[:6]],
+    )
+    return assistant_response
 
 
-def stream_technician_assistance(request: TechnicianAssistantRequest) -> Iterator[dict[str, object]]:
+def stream_technician_assistance(
+    request: TechnicianAssistantRequest,
+    current_user: Optional[UserPublic] = None,
+) -> Iterator[dict[str, object]]:
     work_order = repository.get_work_order(request.work_order_id)
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -149,10 +170,25 @@ def stream_technician_assistance(request: TechnicianAssistantRequest) -> Iterato
             "used_live_provider": used_live_provider,
         }
     )
+    record_assistant_interaction(
+        assistant="neo",
+        interaction_type="technician_work_order_assist_stream",
+        current_user=current_user,
+        equipment_id=work_order["equipment_id"],
+        work_order_id=work_order["id"],
+        prompt=prompt,
+        response=answer,
+        provider=provider,
+        used_live_provider=used_live_provider,
+        source_refs=[item.model_dump(mode="json") for item in evidence[:6]],
+    )
     yield {"type": "done", "response": response.model_dump(mode="json")}
 
 
-def supervisor_assistance(request: SupervisorAssistantRequest) -> SupervisorAssistantResponse:
+def supervisor_assistance(
+    request: SupervisorAssistantRequest,
+    current_user: Optional[UserPublic] = None,
+) -> SupervisorAssistantResponse:
     work_orders = repository.list_work_orders(follow_up_only=request.queue_name == "follow_up")
     selected = repository.get_work_order(request.work_order_id) if request.work_order_id else None
     if request.work_order_id and not selected:
@@ -181,7 +217,7 @@ def supervisor_assistance(request: SupervisorAssistantRequest) -> SupervisorAssi
         draft.title = response.draft_title
     if draft and response.draft_recommended_action:
         draft.recommended_action = response.draft_recommended_action
-    return SupervisorAssistantResponse(
+    assistant_response = SupervisorAssistantResponse(
         summary=response.summary,
         follow_up_actions=response.follow_up_actions,
         risks=response.risks,
@@ -190,9 +226,28 @@ def supervisor_assistance(request: SupervisorAssistantRequest) -> SupervisorAssi
         used_live_provider=response.used_live_provider,
         provider=response.provider,
     )
+    record_assistant_interaction(
+        assistant="neo",
+        interaction_type="supervisor_work_order_assist",
+        current_user=current_user,
+        equipment_id=selected["equipment_id"] if selected else None,
+        work_order_id=selected["id"] if selected else None,
+        prompt=prompt,
+        response=assistant_response.summary,
+        provider=assistant_response.provider,
+        used_live_provider=assistant_response.used_live_provider,
+        source_refs=[
+            {"source_type": "work_order", "source_id": item["id"], "title": item["title"]}
+            for item in work_orders[:8]
+        ],
+    )
+    return assistant_response
 
 
-def stream_supervisor_assistance(request: SupervisorAssistantRequest) -> Iterator[dict[str, object]]:
+def stream_supervisor_assistance(
+    request: SupervisorAssistantRequest,
+    current_user: Optional[UserPublic] = None,
+) -> Iterator[dict[str, object]]:
     work_orders = repository.list_work_orders(follow_up_only=request.queue_name == "follow_up")
     selected = repository.get_work_order(request.work_order_id) if request.work_order_id else None
     if request.work_order_id and not selected:
@@ -236,6 +291,21 @@ def stream_supervisor_assistance(request: SupervisorAssistantRequest) -> Iterato
             "provider": provider,
             "used_live_provider": used_live_provider,
         }
+    )
+    record_assistant_interaction(
+        assistant="neo",
+        interaction_type="supervisor_work_order_assist_stream",
+        current_user=current_user,
+        equipment_id=selected["equipment_id"] if selected else None,
+        work_order_id=selected["id"] if selected else None,
+        prompt=prompt,
+        response=answer,
+        provider=provider,
+        used_live_provider=used_live_provider,
+        source_refs=[
+            {"source_type": "work_order", "source_id": item["id"], "title": item["title"]}
+            for item in work_orders[:8]
+        ],
     )
     yield {"type": "done", "response": response.model_dump(mode="json")}
 

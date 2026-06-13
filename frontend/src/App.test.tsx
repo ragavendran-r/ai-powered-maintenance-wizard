@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import { api, type AssistantStreamEvent, type NeoChatResponse, type NeoStreamEvent, type UserRole } from './services/api'
+import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PredictionResponse, type Recommendation, type UserRole } from './services/api'
 
 const sampleFiles = [
   {
@@ -83,6 +83,32 @@ function assistantStreamResponse<TResponse extends { provider: string; used_live
         { type: 'done', response },
       ]
     : [{ type: 'done', response }]
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
+
+function reliabilityPredictionStreamResponse(prediction: PredictionResponse) {
+  const answer = '### Failure Prediction\n- RM-DRIVE-01 has a high failure risk at 77% with 23 days estimated RUL.\n### Next Actions\n- Inspect drive-end bearing housing and lubrication.'
+  const events: AssetReliabilityPredictionStreamEvent[] = [
+    { type: 'meta', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: answer },
+    { type: 'done', answer, prediction, provider: 'openai', used_live_provider: true },
+  ]
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
+
+function diagnosisStreamResponse(nextRecommendation: Recommendation) {
+  const events: DiagnosisStreamEvent[] = [
+    { type: 'meta', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'Morpheus is retrieving recent evidence and asset health context.' },
+    { type: 'token', content: 'Morpheus is checking predictive risk and retrieved maintenance knowledge.' },
+    { type: 'done', recommendation: nextRecommendation },
+  ]
   return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
     status: 200,
     headers: { 'Content-Type': 'text/event-stream' },
@@ -313,6 +339,328 @@ const workOrders = [
   },
 ]
 
+const assets = [
+  {
+    id: 'RM-DRIVE-01',
+    name: 'Hot Strip Mill Main Drive Motor',
+    asset_type: 'AC main drive motor',
+    area: 'Hot Rolling Mill',
+    process: 'Finishing stand drive',
+    location_code: 'HSM-FS-01',
+    location_name: 'Hot strip mill finishing stand F1',
+    criticality: 5,
+    status: 'degraded',
+    health_score: 0,
+    risk_level: 'critical',
+    active_alerts: 2,
+    open_work_orders: 1,
+    supervisor: 'Maintenance Supervisor',
+    last_updated: '2026-06-12T09:10:00+05:30',
+  },
+  {
+    id: 'BF-BLOWER-02',
+    name: 'Blast Furnace Combustion Air Blower',
+    asset_type: 'Combustion air blower',
+    area: 'Blast Furnace',
+    process: 'Combustion air supply',
+    location_code: 'BF-STOVE-02',
+    location_name: 'Blast furnace stove house blower bay',
+    criticality: 5,
+    status: 'watch',
+    health_score: 29,
+    risk_level: 'high',
+    active_alerts: 1,
+    open_work_orders: 1,
+    supervisor: 'Blast Furnace Supervisor',
+    last_updated: '2026-06-12T08:40:00+05:30',
+  },
+]
+
+const assetDetail = {
+  profile: {
+    equipment_id: 'RM-DRIVE-01',
+    name: 'Hot Strip Mill Main Drive Motor',
+    area: 'Hot Rolling Mill',
+    process: 'Finishing stand drive',
+    criticality: 5,
+    status: 'degraded',
+    asset_type: 'AC main drive motor',
+    location_code: 'HSM-FS-01',
+    location_name: 'Hot strip mill finishing stand F1',
+    parent_system: 'Hot rolling mill power train',
+    manufacturer: 'Bharat Heavy Electricals',
+    model: 'MDR-7800',
+    serial_number: 'RM01-2017-044',
+    installed_at: '2017-09-14',
+    owner_team: 'Rolling maintenance',
+    supervisor: 'Maintenance Supervisor',
+    description: 'Main finishing stand drive motor supporting high-torque strip rolling campaigns.',
+    last_updated: '2026-06-12T09:10:00+05:30',
+  },
+  health: dashboard.highest_risk_equipment[0],
+  metrics: [
+    {
+      id: 'AMS-RM-HEALTH',
+      equipment_id: 'RM-DRIVE-01',
+      metric_key: 'health',
+      label: 'Health',
+      value: 10,
+      unit: '%',
+      target_value: 80,
+      status: 'under_target',
+      trend: 'down',
+      detail: 'Health is constrained by vibration, bearing temperature, and bearing spare availability.',
+      captured_at: '2026-06-12T09:10:00+05:30',
+      sort_order: 1,
+    },
+    {
+      id: 'AMS-RM-EFF',
+      equipment_id: 'RM-DRIVE-01',
+      metric_key: 'efficiency',
+      label: 'Efficiency',
+      value: 68,
+      unit: '%',
+      target_value: 82,
+      status: 'under_target',
+      trend: 'down',
+      detail: 'Mill drive load was reduced after vibration exceeded the advisory threshold.',
+      captured_at: '2026-06-12T09:10:00+05:30',
+      sort_order: 2,
+    },
+    {
+      id: 'AMS-RM-RISK',
+      equipment_id: 'RM-DRIVE-01',
+      metric_key: 'risk',
+      label: 'Risk',
+      value: 90,
+      unit: '%',
+      target_value: 40,
+      status: 'over_target',
+      trend: 'up',
+      detail: 'Risk combines critical vibration, temperature trend, and unavailable bearing spare.',
+      captured_at: '2026-06-12T09:10:00+05:30',
+      sort_order: 3,
+    },
+  ],
+  recommendations: [
+    {
+      id: 'AR-RM-001',
+      equipment_id: 'RM-DRIVE-01',
+      action_type: 'inspection',
+      title: 'Bearing housing inspection',
+      description: 'Verify drive-end bearing housing temperature, looseness, lubrication condition, and vibration after load reduction.',
+      priority: 1,
+      source: 'asset_detail_seed',
+      created_at: '2026-06-12T09:10:00+05:30',
+      sort_order: 1,
+    },
+  ],
+  maintenance_events: [
+    {
+      id: 'ME-1001',
+      equipment_id: 'RM-DRIVE-01',
+      date: '2026-05-12T09:00:00+05:30',
+      issue: 'Drive-end vibration recurrence',
+      root_cause: 'Bearing wear',
+      action: 'Inspected bearing housing and coupling alignment.',
+      downtime_hours: 6,
+    },
+  ],
+  work_orders: [workOrders[0]],
+  subsystems: [
+    {
+      id: 'AS-RM-001',
+      equipment_id: 'RM-DRIVE-01',
+      name: 'Drive train and coupling',
+      component: 'Flexible coupling and guard',
+      condition: 'watch',
+      detail: 'Coupling alignment must be checked because vibration rose under rolling load.',
+      sort_order: 1,
+    },
+  ],
+  reliability_metrics: [
+    {
+      id: 'ARM-RM-001',
+      equipment_id: 'RM-DRIVE-01',
+      metric_name: 'MTBF',
+      value: 96,
+      unit: 'days',
+      target_value: 180,
+      status: 'under_target',
+      trend: 'down',
+      detail: 'Bearing and alignment events reduced mean time between failures.',
+      sort_order: 1,
+    },
+  ],
+  performance_charts: [
+    {
+      signal: 'drive_end_vibration',
+      title: 'Drive End Vibration',
+      unit: 'mm/s',
+      points: [
+        { timestamp: '2026-06-06T07:00:00+05:30', value: 4.6, threshold: 7.1 },
+        { timestamp: '2026-06-06T08:15:00+05:30', value: 9.8, threshold: 7.1 },
+      ],
+    },
+  ],
+  documents: [
+    {
+      id: 'DOC-RM-SOP-01',
+      source_type: 'sop',
+      equipment_id: 'RM-DRIVE-01',
+      title: 'Hot Strip Mill Main Drive Vibration SOP',
+      excerpt: 'Inspect bearing housing temperature and coupling alignment.',
+    },
+    {
+      id: 'DOC-RM-LOG-03',
+      source_type: 'log',
+      equipment_id: 'RM-DRIVE-01',
+      title: 'Main Drive Vibration Shift Log',
+      excerpt: 'Shift log: vibration increased after finishing stand load rose.',
+    },
+  ],
+  knowledge: recommendation.evidence,
+  prediction: {
+    equipment_id: 'RM-DRIVE-01',
+    risk_level: 'critical',
+    failure_probability: 0.77,
+    remaining_useful_life_days: 23,
+    drivers: ['2 active alert(s) require maintenance review.', 'drive_end_vibration is critical risk.'],
+    reasoning_explanation: null,
+  },
+}
+
+const learningExample = {
+  id: 'LEX-FEEDBACK-1',
+  source_type: 'feedback',
+  source_id: 'FB-1',
+  equipment_id: 'RM-DRIVE-01',
+  work_order_id: null,
+  instruction: 'Improve future maintenance recommendations from accepted engineer feedback.',
+  input_text: 'Actual root cause: loose foundation bolt resonance.',
+  expected_output: 'Root cause: loose foundation bolt resonance. Action: retorqued foundation bolts. Outcome: vibration normalized.',
+  metadata: { status: 'accepted' },
+  approved: true,
+  judge_score: 0.82,
+  judge_label: 'training_worthy',
+  judge_rationale: 'Specific, outcome-backed feedback is suitable for retrieval reuse and local adapter tuning.',
+  judge_provider: 'openai',
+  judge_used_live_provider: true,
+  judged_at: '2026-06-13T09:00:00+05:30',
+  created_at: '2026-06-13T09:00:00+05:30',
+}
+
+const learningDataset = {
+  id: 'LDS-1',
+  name: 'maintenance-wizard-learning-snapshot',
+  description: 'Approved examples for local LLM adapter tuning and evaluation.',
+  example_count: 1,
+  approved_only: true,
+  jsonl_content: '{"messages":[]}',
+  created_by: 'admin@plant.local',
+  created_at: '2026-06-13T09:05:00+05:30',
+}
+
+const learningEvaluation = {
+  id: 'LEVAL-1',
+  dataset_id: 'LDS-1',
+  model_version_id: 'model-local-qwen2.5-current',
+  prompt_version_id: 'prompt-neo-default',
+  metrics: {
+    quality_score: 0.81,
+    average_judge_score: 0.82,
+    source_type_coverage: 1,
+    asset_coverage: 1,
+  },
+  notes: 'Dataset quality evaluation by reliability@plant.local.',
+  passed: true,
+  created_at: '2026-06-13T09:10:00+05:30',
+}
+
+const learningJob = {
+  id: 'LJOB-1',
+  job_type: 'dataset_snapshot',
+  subject: 'maintenance.learning.dataset.requested',
+  status: 'completed',
+  requested_by: 'reliability@plant.local',
+  correlation_id: 'LJOB-1',
+  input_refs: { approved_only: true },
+  output_refs: { dataset_id: 'LDS-1', example_count: 1 },
+  error: null,
+  retry_count: 0,
+  created_at: '2026-06-13T09:06:00+05:30',
+  updated_at: '2026-06-13T09:06:00+05:30',
+}
+
+const learningArtifact = {
+  id: 'LART-1',
+  job_id: 'LJOB-1',
+  artifact_type: 'peft_training_manifest',
+  uri: 'artifact://learning/LJOB-1/training_manifest.json',
+  content_hash: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+  metadata: { adapter_name: 'maintenance-wizard-qwen-lora' },
+  created_at: '2026-06-13T09:11:00+05:30',
+}
+
+function learningSummaryPayload(
+  examples = [learningExample],
+  datasets = [learningDataset],
+  evaluations = [learningEvaluation],
+  jobs = [learningJob],
+  artifacts = [learningArtifact],
+) {
+  return {
+    counts: {
+      interactions: 3,
+      examples: examples.length,
+      approved_examples: examples.filter((example) => example.approved).length,
+      snapshots: datasets.length,
+      model_versions: 1,
+      prompt_versions: 1,
+      evaluation_runs: evaluations.length,
+      jobs: jobs.length,
+      queued_jobs: jobs.filter((job) => ['queued', 'published', 'running'].includes(job.status)).length,
+      artifacts: artifacts.length,
+    },
+    recent_examples: examples,
+    recent_snapshots: datasets,
+    model_versions: [
+      {
+        id: 'model-local-qwen2.5-current',
+        provider: 'openai',
+        model_name: 'qwen2.5-7b-instruct',
+        base_model: 'Qwen2.5',
+        adapter_path: null,
+        status: 'active',
+        notes: 'Local LM Studio model used by Neo, Morpheus, and Smith.',
+        created_at: '2026-06-13T09:00:00+05:30',
+      },
+    ],
+    prompt_versions: [
+      {
+        id: 'prompt-neo-default',
+        assistant: 'neo',
+        version: 'default',
+        prompt: 'Role-safe maintenance assistant.',
+        status: 'active',
+        notes: 'Shared dashboard assistant prompt.',
+        created_at: '2026-06-13T09:00:00+05:30',
+      },
+    ],
+    evaluation_runs: evaluations,
+    recent_jobs: jobs,
+    recent_artifacts: artifacts,
+    vector_store: {
+      store: 'qdrant',
+      enabled: true,
+      collection: 'maintenance_wizard_documents',
+      url: 'http://localhost:6333',
+      state: 'ready',
+      error: null,
+    },
+  }
+}
+
 function userFor(email = 'admin@plant.local') {
   const roles: Record<string, UserRole> = {
     'admin@plant.local': 'admin',
@@ -349,6 +697,65 @@ function userFromRequest(init?: RequestInit) {
   const authorization = headers.Authorization ?? headers.authorization ?? ''
   const email = authorization.startsWith('Bearer token-') ? authorization.replace('Bearer token-', '') : 'admin@plant.local'
   return userFor(email)
+}
+
+function neoWelcomeFor(user = userFor()): NeoChatResponse {
+  if (user.role === 'maintenance_technician') {
+    return {
+      answer:
+        'I’m Neo. Immediate attention: 1 open work order is assigned to you.\n\n### Primary Work Order: WO-8304 (APPR)\nThis work order is approved. Confirm lockout/tagout, then ask me to start it before field execution.\n1. Safety: verify permits and stored-energy release.\n2. Execute: Reduce load if vibration persists.\n3. Evidence: record readings and photos.\n4. Coding: use problem code BRGVIB.\n5. Closeout: summarize cause, action taken, residual risk, and follow-up.',
+      table: {
+        title: 'Your Assigned Work',
+        columns: ['Work order', 'Asset', 'Status', 'Priority'],
+        rows: [{ 'Work order': 'WO-8304', Asset: 'RM-DRIVE-01', Status: 'APPR', Priority: 1 }],
+      },
+      action: {
+        type: 'neo_welcome',
+        label: 'Loaded technician attention',
+        status: 'completed',
+        target_id: 'WO-8304',
+        detail: '1 open assigned work order.',
+      },
+      used_live_provider: false,
+      provider: 'deterministic',
+    }
+  }
+  if (user.role === 'operator') {
+    return {
+      answer:
+        'I’m Neo. Immediate attention for Shift Operator: 2 critical/high-risk assets should be watched from operations. Your role is read-only here.',
+      table: {
+        title: 'Operator Attention',
+        columns: ['Asset', 'Name', 'Area', 'Status', 'Risk'],
+        rows: [{ Asset: 'RM-DRIVE-01', Name: 'Hot Strip Mill Main Drive Motor', Area: 'Hot Rolling Mill', Status: 'degraded', Risk: 'critical' }],
+      },
+      action: {
+        type: 'neo_welcome',
+        label: 'Loaded operator attention',
+        status: 'completed',
+        detail: '1 operator attention asset.',
+      },
+      used_live_provider: false,
+      provider: 'deterministic',
+    }
+  }
+  return {
+    answer:
+      'I’m Neo. Immediate attention: 1 work order waiting for approval, 1 follow-up item, and 1 urgent open item.',
+    table: {
+      title: 'Supervisor Attention',
+      columns: ['Work order', 'Asset', 'Status', 'Priority'],
+      rows: [{ 'Work order': 'WO-8311', Asset: 'BF-BLOWER-02', Status: 'WAPPR', Priority: 2 }],
+    },
+    action: {
+      type: 'neo_welcome',
+      label: 'Loaded supervisor attention',
+      status: 'completed',
+      detail: '1 supervisor attention item.',
+    },
+    used_live_provider: false,
+    provider: 'deterministic',
+  }
 }
 
 async function signIn(email = 'admin@plant.local') {
@@ -416,8 +823,126 @@ beforeEach(() => {
       if (url.includes('/api/users/')) {
         return Promise.resolve(new Response(JSON.stringify({ ...userFor('operator@plant.local'), is_active: false }), { status: 200 }))
       }
+      if (url.endsWith('/api/learning/summary')) {
+        return Promise.resolve(new Response(JSON.stringify(learningSummaryPayload()), { status: 200 }))
+      }
+      if (url.endsWith('/api/learning/examples/refresh')) {
+        return Promise.resolve(new Response(JSON.stringify([learningExample]), { status: 200 }))
+      }
+      if (url.includes('/api/learning/examples/') && url.endsWith('/judge')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...learningExample,
+              judge_score: 0.91,
+              judge_rationale: 'Live LLM judge confirmed the example is specific, safe, and outcome-backed.',
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.includes('/api/learning/examples/')) {
+        const body = JSON.parse((init?.body as string) ?? '{}')
+        return Promise.resolve(new Response(JSON.stringify({ ...learningExample, approved: body.approved }), { status: 200 }))
+      }
+      if (url.endsWith('/api/learning/examples')) {
+        return Promise.resolve(new Response(JSON.stringify([learningExample]), { status: 200 }))
+      }
+      if (url.endsWith('/api/learning/model-versions')) {
+        const body = JSON.parse((init?.body as string) ?? '{}')
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: 'model-adapter-candidate',
+              provider: body.provider,
+              model_name: body.model_name,
+              base_model: body.base_model,
+              adapter_path: body.adapter_path,
+              status: body.status ?? 'candidate',
+              notes: body.notes,
+              created_at: '2026-06-13T09:12:00+05:30',
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.endsWith('/api/learning/evaluations')) {
+        if (init?.method === 'POST') {
+          return Promise.resolve(new Response(JSON.stringify({ ...learningEvaluation, id: 'LEVAL-NEW' }), { status: 200 }))
+        }
+        return Promise.resolve(new Response(JSON.stringify([learningEvaluation]), { status: 200 }))
+      }
+      if (url.endsWith('/api/learning/jobs/peft')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...learningJob,
+              id: 'LJOB-PEFT-1',
+              job_type: 'peft_tuning',
+              subject: 'maintenance.learning.peft.requested',
+              status: 'queued',
+              output_refs: { dispatch: 'disabled' },
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.endsWith('/api/learning/jobs')) {
+        return Promise.resolve(new Response(JSON.stringify([learningJob]), { status: 200 }))
+      }
+      if (url.endsWith('/api/learning/datasets')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse((init.body as string) ?? '{}')
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                ...learningDataset,
+                id: 'LDS-NEW',
+                name: body.name,
+                description: body.description,
+                example_count: 1,
+              }),
+              { status: 200 },
+            ),
+          )
+        }
+        return Promise.resolve(new Response(JSON.stringify([learningDataset]), { status: 200 }))
+      }
+      if (url.includes('/api/learning/datasets/') && url.endsWith('/jsonl')) {
+        return Promise.resolve(
+          new Response(
+            '{"messages":[{"role":"system","content":"maintenance assistant"}],"metadata":{"judge_score":0.82}}\n',
+            { status: 200 },
+          ),
+        )
+      }
       if (url.endsWith('/api/dashboard/summary')) {
         return Promise.resolve(new Response(JSON.stringify(dashboard), { status: 200 }))
+      }
+      if (url.endsWith('/api/assets')) {
+        return Promise.resolve(new Response(JSON.stringify(assets), { status: 200 }))
+      }
+      if (url.includes('/api/assets/') && url.endsWith('/reliability/stream')) {
+        return Promise.resolve(reliabilityPredictionStreamResponse(assetDetail.prediction))
+      }
+      if (url.includes('/api/assets/')) {
+        const equipmentId = url.match(/\/api\/assets\/([^/?]+)/)?.[1] ?? 'RM-DRIVE-01'
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...assetDetail,
+              profile: {
+                ...assetDetail.profile,
+                equipment_id: equipmentId,
+                name: assets.find((asset) => asset.id === equipmentId)?.name ?? assetDetail.profile.name,
+              },
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.endsWith('/api/neo/welcome')) {
+        return Promise.resolve(new Response(JSON.stringify(neoWelcomeFor(userFromRequest(init))), { status: 200 }))
       }
       if (url.endsWith('/api/neo/chat/stream')) {
         const body = JSON.parse((init?.body as string) ?? '{}')
@@ -460,7 +985,7 @@ beforeEach(() => {
         const response = assistantStreamResponse(
           {
             work_order_id: 'WO-8304',
-            next_prompt: 'Smith recommends verifying torque and documenting completion.',
+            next_prompt: 'Neo recommends verifying torque and documenting completion.',
             live_directions: ['Verify torque on bolted connections.', 'Record before and after vibration readings.'],
             recommendations: ['Set problem code LWTQCONNECT.'],
             safety_reminders: ['Apply lockout/tagout.'],
@@ -471,7 +996,7 @@ beforeEach(() => {
             used_live_provider: false,
             provider: 'mock',
           },
-          ['Smith recommends verifying torque ', 'and documenting completion.'],
+          ['Neo recommends verifying torque ', 'and documenting completion.'],
         )
         if (assistantResponseDelayMs > 0) {
           return new Promise((resolve) => {
@@ -503,7 +1028,7 @@ beforeEach(() => {
       if (url.includes('/api/work-orders/supervisor-assist/stream')) {
         const response = assistantStreamResponse(
           {
-            summary: 'Trinity reviewed 2 work orders and found 2 follow-ups.',
+            summary: 'Neo reviewed 2 work orders and found 2 follow-ups.',
             follow_up_actions: ['Review WO-8297 brake shoe replacement planning.'],
             risks: ['WO-8304 remains priority 1 and APPR.'],
             draft_work_order: null,
@@ -511,7 +1036,7 @@ beforeEach(() => {
             used_live_provider: false,
             provider: 'mock',
           },
-          ['Trinity reviewed 2 work orders ', 'and found 2 follow-ups.'],
+          ['Neo reviewed 2 work orders ', 'and found 2 follow-ups.'],
         )
         if (assistantResponseDelayMs > 0) {
           return new Promise((resolve) => {
@@ -574,6 +1099,9 @@ beforeEach(() => {
           ),
         )
       }
+      if (url.endsWith('/api/diagnose/stream')) {
+        return Promise.resolve(diagnosisStreamResponse(recommendation))
+      }
       if (url.endsWith('/api/diagnose')) {
         return Promise.resolve(new Response(JSON.stringify(recommendation), { status: 200 }))
       }
@@ -619,6 +1147,7 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Dashboard AI assistant')).toBeInTheDocument()
     expect(screen.getByText('Priority Assets (5)')).toBeInTheDocument()
     const navigation = screen.getByLabelText('Maintenance navigation')
+    expect(within(navigation).getByRole('button', { name: 'Assets' })).toBeInTheDocument()
     const quickActions = within(navigation).getByLabelText('Quick actions')
     expect(within(quickActions).getByRole('heading', { name: 'Quick actions' })).toBeInTheDocument()
     expect(within(quickActions).getByRole('button', { name: /create work order/i })).toBeInTheDocument()
@@ -627,18 +1156,62 @@ describe('Maintenance Wizard dashboard', () => {
     const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText('Hot Strip Mill Main Drive Motor').closest('button')
     if (!assetButton) throw new Error('Missing asset button')
     fireEvent.click(assetButton)
-    expect(screen.getByRole('heading', { name: 'Hot Strip Mill Main Drive Motor' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Hot Strip Mill Main Drive Motor' })).toBeInTheDocument()
     expect(screen.getByText('Performance insights')).toBeInTheDocument()
-    expect(screen.getByText('Maintenance history')).toBeInTheDocument()
-    expect(screen.getByText('Primary signal trend')).toBeInTheDocument()
-    const diagnoseButton = screen.getByRole('button', { name: 'Diagnose' })
-    const engineerQueryHeading = screen.getByRole('heading', { name: 'Engineer Query' })
-    const engineerQuestion = screen.getByRole('textbox', { name: 'Engineer question' })
-    expect(Boolean(diagnoseButton.compareDocumentPosition(engineerQueryHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-    expect(engineerQuestion).toHaveAttribute('rows', '3')
+    expect(screen.getByText('Drive train and coupling')).toBeInTheDocument()
+    expect(screen.getByText('Bearing housing inspection')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Diagnosis and recommendation' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Engineer Query' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Drive End Vibration')).not.toBeInTheDocument()
+    expect(screen.queryByText('Maintenance history')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run Morpheus' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Morpheus' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Ingestion' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Users' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Ingestion file')).not.toBeInTheDocument()
+  })
+
+  it('opens an Assets page with a company asset table and data-backed asset detail', async () => {
+    render(<App />)
+    await signIn()
+
+    fireEvent.click(within(screen.getByLabelText('Maintenance navigation')).getByRole('button', { name: 'Assets' }))
+
+    const assetsTable = await screen.findByLabelText('Company assets table')
+    expect(within(assetsTable).getByText('AC main drive motor')).toBeInTheDocument()
+    expect(within(assetsTable).getByText('HSM-FS-01')).toBeInTheDocument()
+    expect(within(assetsTable).getByText('Maintenance Supervisor')).toBeInTheDocument()
+
+    fireEvent.click(within(assetsTable).getByRole('button', { name: /Hot Strip Mill Main Drive Motor/ }))
+
+    expect(await screen.findByText('Bharat Heavy Electricals')).toBeInTheDocument()
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) => url.toString().includes('/api/assets/RM-DRIVE-01?sections=summary')),
+    ).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Reliability' }))
+    expect(await screen.findByText('MTBF')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Smith' })).toBeInTheDocument()
+    expect(screen.getByText('Predictive failure assistant')).toBeInTheDocument()
+    expect(screen.getByLabelText('Smith failure prediction stream')).toBeInTheDocument()
+    expect(await screen.findByText('Live LLM · openai')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Failure Prediction' })).toBeInTheDocument()
+    expect(screen.getByText('77% failure probability')).toBeInTheDocument()
+    expect(screen.queryByText('Performance insights')).not.toBeInTheDocument()
+    expect(screen.queryByText('Recommended actions')).not.toBeInTheDocument()
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) => url.toString().includes('/api/assets/RM-DRIVE-01?sections=reliability')),
+    ).toBe(true)
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) => url.toString().includes('/api/assets/RM-DRIVE-01/reliability/stream')),
+    ).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Documents' }))
+    expect(await screen.findByText('Knowledge Retrieval')).toBeInTheDocument()
+    expect(screen.getAllByText('Hot Strip Mill Main Drive Vibration SOP').length).toBeGreaterThan(0)
+    expect(screen.getByText('Main Drive Vibration Shift Log')).toBeInTheDocument()
+    expect(screen.queryByText('Performance insights')).not.toBeInTheDocument()
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) => url.toString().includes('/api/assets/RM-DRIVE-01?sections=documents')),
+    ).toBe(true)
   })
 
   it('lets Neo update the dashboard center table for read-only users', async () => {
@@ -658,6 +1231,20 @@ describe('Maintenance Wizard dashboard', () => {
     expect(within(neoResultTable).getByText('OH-CRANE-05')).toBeInTheDocument()
     const transcript = screen.getByLabelText('Neo chat transcript')
     expect(within(transcript).queryByText('Neo found work orders that need attention. WO-8304 and WO-8297 require follow-up.')).not.toBeInTheDocument()
+  })
+
+  it('loads a role-aware Neo welcome with technician immediate work guidance', async () => {
+    render(<App />)
+    await signIn('technician@plant.local')
+
+    const transcript = screen.getByLabelText('Neo chat transcript')
+    expect(await within(transcript).findByText(/Immediate attention: 1 open work order is assigned to you/)).toBeInTheDocument()
+    expect(within(transcript).getByRole('heading', { name: 'Primary Work Order: WO-8304 (APPR)' })).toBeInTheDocument()
+    expect(within(transcript).getByText(/Closeout: summarize cause/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Your Assigned Work' })).toBeInTheDocument()
+    const welcomeTable = screen.getByLabelText('Your Assigned Work results table')
+    expect(within(welcomeTable).getByText('WO-8304')).toBeInTheDocument()
+    expect(within(welcomeTable).getByText('RM-DRIVE-01')).toBeInTheDocument()
   })
 
   it('formats Markdown-like Neo responses into readable sections', async () => {
@@ -684,8 +1271,9 @@ describe('Maintenance Wizard dashboard', () => {
     const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText('Hot Strip Mill Main Drive Motor').closest('button')
     if (!assetButton) throw new Error('Missing asset button')
     fireEvent.click(assetButton)
-    fireEvent.click(await screen.findByText('Diagnose'))
+    fireEvent.click(await screen.findByText('Run Morpheus'))
 
+    expect(await screen.findByText(/Morpheus is diagnosing/)).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getAllByText('Reduce load or schedule controlled shutdown.').length).toBeGreaterThan(0)
     })
@@ -694,8 +1282,9 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('77%')).toBeInTheDocument()
     expect(screen.getByText('Hot Strip Mill Main Drive Vibration SOP')).toBeInTheDocument()
     const recommendationHeading = screen.getByRole('heading', { name: 'Recommendation' })
-    const engineerQueryHeading = screen.getByRole('heading', { name: 'Engineer Query' })
-    expect(Boolean(engineerQueryHeading.compareDocumentPosition(recommendationHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    const diagnosisHeading = screen.getByRole('heading', { name: 'Diagnosis and recommendation' })
+    expect(Boolean(diagnosisHeading.compareDocumentPosition(recommendationHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(screen.queryByRole('heading', { name: 'Engineer Query' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /export report/i })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: /create work order/i }).length).toBeGreaterThan(0)
   })
@@ -707,7 +1296,7 @@ describe('Maintenance Wizard dashboard', () => {
     const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText('Hot Strip Mill Main Drive Motor').closest('button')
     if (!assetButton) throw new Error('Missing asset button')
     fireEvent.click(assetButton)
-    fireEvent.click(await screen.findByText('Diagnose'))
+    fireEvent.click(await screen.findByText('Run Morpheus'))
     await screen.findByText('Actual Root Cause')
     fireEvent.change(screen.getByLabelText('Actual Root Cause'), { target: { value: 'Loose foundation bolt resonance' } })
     fireEvent.change(screen.getByLabelText('Action Taken'), { target: { value: 'Retorqued foundation bolts' } })
@@ -738,13 +1327,12 @@ describe('Maintenance Wizard dashboard', () => {
     const centerPane = screen.getByLabelText('Work order center pane')
     const rightPane = screen.getByLabelText('Work order right pane')
     expect(screen.getByText('Work Order 8304')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Smith' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
-    const assistantUnavailable = within(centerPane).getByText('Smith and Trinity are available to technician and supervisor accounts.')
+    expect(screen.queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
+    const assistantUnavailable = within(centerPane).getByText('Neo is available to technician and supervisor accounts.')
     const workOrdersHeading = screen.getByRole('heading', { name: 'WOs with follow up actions' })
     expect(assistantUnavailable).toBeInTheDocument()
     expect(Boolean(assistantUnavailable.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-    expect(within(rightPane).queryByText('Smith and Trinity are available to technician and supervisor accounts.')).not.toBeInTheDocument()
+    expect(within(rightPane).queryByText('Neo is available to technician and supervisor accounts.')).not.toBeInTheDocument()
 
     expect(screen.getByRole('button', { name: 'Approve WO-8297' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve WO-8275' })).not.toBeInTheDocument()
@@ -775,13 +1363,12 @@ describe('Maintenance Wizard dashboard', () => {
     expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
     const centerPane = screen.getByLabelText('Work order center pane')
     const rightPane = screen.getByLabelText('Work order right pane')
-    const smithHeading = within(centerPane).getByRole('heading', { name: 'Smith' })
+    const neoHeading = within(centerPane).getByRole('heading', { name: 'Neo' })
     const workOrdersHeading = screen.getByRole('heading', { name: 'WOs with follow up actions' })
-    expect(smithHeading).toBeInTheDocument()
-    expect(Boolean(smithHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(neoHeading).toBeInTheDocument()
+    expect(Boolean(neoHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(within(centerPane).getByText('Technician AI assistant with shared LLM configuration')).toBeInTheDocument()
-    expect(within(rightPane).queryByRole('heading', { name: 'Smith' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
+    expect(within(rightPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
     expect(within(centerPane).getByRole('button', { name: 'WO-8304' })).toBeInTheDocument()
     expect(within(centerPane).queryByRole('button', { name: 'WO-8297' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Start WO-8304' }))
@@ -795,9 +1382,9 @@ describe('Maintenance Wizard dashboard', () => {
       target: { value: 'Connections 3 and 5 were loose.' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    expect(within(screen.getByLabelText('Smith technician chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
-    expect(await within(screen.getByLabelText('Smith technician chat')).findByText(/Thinking/)).toBeInTheDocument()
-    expect(await screen.findByText(/Smith recommends verifying torque/)).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Neo technician chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Neo technician chat')).findByText(/Thinking/)).toBeInTheDocument()
+    expect(await screen.findByText(/Neo recommends verifying torque/)).toBeInTheDocument()
     expect(await screen.findByText('Verify torque on bolted connections.')).toBeInTheDocument()
     expect(screen.getByText(/Connections were tightened to spec./)).toBeInTheDocument()
     expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
@@ -815,21 +1402,20 @@ describe('Maintenance Wizard dashboard', () => {
     expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
     const centerPane = screen.getByLabelText('Work order center pane')
     const rightPane = screen.getByLabelText('Work order right pane')
-    expect(screen.queryByRole('heading', { name: 'Smith' })).not.toBeInTheDocument()
-    const trinityHeading = within(centerPane).getByRole('heading', { name: 'Trinity' })
+    const neoHeading = within(centerPane).getByRole('heading', { name: 'Neo' })
     const workOrdersHeading = screen.getByRole('heading', { name: 'WOs with follow up actions' })
-    expect(trinityHeading).toBeInTheDocument()
-    expect(Boolean(trinityHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(neoHeading).toBeInTheDocument()
+    expect(Boolean(neoHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(within(centerPane).getByText('Supervisor AI assistant with shared LLM configuration')).toBeInTheDocument()
-    expect(within(rightPane).queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
+    expect(within(rightPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('Assign WO-8304')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approve WO-8297' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve WO-8275' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    expect(within(screen.getByLabelText('Trinity supervisor chat')).getByText('Summarize follow-up actions for completed work orders.')).toBeInTheDocument()
-    expect(await within(screen.getByLabelText('Trinity supervisor chat')).findByText(/Thinking/)).toBeInTheDocument()
-    expect(await screen.findByText(/Trinity reviewed 2 work orders/)).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Neo supervisor chat')).getByText('Summarize follow-up actions for completed work orders.')).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Neo supervisor chat')).findByText(/Thinking/)).toBeInTheDocument()
+    expect(await screen.findByText(/Neo reviewed 2 work orders/)).toBeInTheDocument()
     expect(screen.getByText('Review WO-8297 brake shoe replacement planning.')).toBeInTheDocument()
     expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
   })
@@ -910,6 +1496,50 @@ describe('Maintenance Wizard dashboard', () => {
     )
   })
 
+  it('lets reviewers score and export LLM-as-a-Judge learning examples', async () => {
+    render(<App />)
+    await signIn('reliability@plant.local')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Learning' }))
+
+    expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
+    expect(screen.getByText(/Review approved human feedback/)).toBeInTheDocument()
+    expect(screen.getByText('RAG vector DB')).toBeInTheDocument()
+    expect(screen.getByText('qdrant · ready')).toBeInTheDocument()
+    expect(screen.getByText('82% · training worthy')).toBeInTheDocument()
+    expect(screen.getByText('Live LLM judge · openai')).toBeInTheDocument()
+    expect(screen.getByText(/Specific, outcome-backed feedback/)).toBeInTheDocument()
+    expect(screen.getByText('Passed')).toBeInTheDocument()
+    expect(screen.getByText('Quality')).toBeInTheDocument()
+    expect(screen.getByText('dataset snapshot')).toBeInTheDocument()
+    expect(screen.getByText(/completed ·/)).toBeInTheDocument()
+    expect(screen.getByText('peft training manifest')).toBeInTheDocument()
+    expect(screen.getByText('sha256 abcdef123456')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Judge' }))
+    expect(await screen.findByText('Judge scored feedback at 91%')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove approval' }))
+    expect(await screen.findByText('feedback example removed from approved set')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh examples' }))
+    expect(await screen.findByText('Refreshed 1 learning example')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create JSONL snapshot' }))
+    expect(await screen.findByText('Created dataset snapshot with 1 approved example')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'JSONL' }).length).toBeGreaterThan(0)
+
+    fireEvent.change(screen.getByLabelText('Adapter path'), { target: { value: 'file:///models/qwen2.5-lora' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Register adapter' }))
+    expect(await screen.findByText('Registered adapter candidate qwen2.5-7b-instruct-lora-candidate')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run dataset evaluation' }))
+    expect(await screen.findByText('Evaluation passed with quality 0.81')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Queue PEFT tuning job' }))
+    expect(await screen.findByText('Queued PEFT tuning job LJOB-PEFT-1 with status queued')).toBeInTheDocument()
+  })
+
   it('hides restricted actions for operators', async () => {
     render(<App />)
     await signIn('operator@plant.local')
@@ -917,8 +1547,16 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Shift Operator')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Ingestion' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Users' })).not.toBeInTheDocument()
-    expect(screen.queryByText('Diagnose')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Learning' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Run Morpheus')).not.toBeInTheDocument()
     expect(screen.queryByText('Engineer Query')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create work order/i })).not.toBeInTheDocument()
+
+    const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText('Hot Strip Mill Main Drive Motor').closest('button')
+    if (!assetButton) throw new Error('Missing asset button')
+    fireEvent.click(assetButton)
+    expect(await screen.findByRole('heading', { name: 'Hot Strip Mill Main Drive Motor' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /create work order/i })).not.toBeInTheDocument()
   })
 
   it('lets admins open the users view and create a user', async () => {

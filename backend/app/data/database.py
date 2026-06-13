@@ -5,61 +5,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from app.core.config import get_settings
-from app.core.security import hash_password
 from app.data.sample_loader import load_sample_data
-
-
-DEMO_USER_PASSWORD = "DemoPass123!"
-DEMO_USERS = [
-    {
-        "id": "USER-ADMIN",
-        "email": "admin@plant.local",
-        "display_name": "Plant Admin",
-        "role": "admin",
-    },
-    {
-        "id": "USER-MAINTENANCE",
-        "email": "maintenance@plant.local",
-        "display_name": "Maintenance Engineer",
-        "role": "maintenance_engineer",
-    },
-    {
-        "id": "USER-TECHNICIAN",
-        "email": "technician@plant.local",
-        "display_name": "Maintenance Technician",
-        "role": "maintenance_technician",
-    },
-    {
-        "id": "USER-SUPERVISOR",
-        "email": "supervisor@plant.local",
-        "display_name": "Maintenance Supervisor",
-        "role": "maintenance_supervisor",
-    },
-    {
-        "id": "USER-RELIABILITY",
-        "email": "reliability@plant.local",
-        "display_name": "Reliability Engineer",
-        "role": "reliability_engineer",
-    },
-    {
-        "id": "USER-PLANNER",
-        "email": "planner@plant.local",
-        "display_name": "Maintenance Planner",
-        "role": "planner",
-    },
-    {
-        "id": "USER-OPERATOR",
-        "email": "operator@plant.local",
-        "display_name": "Shift Operator",
-        "role": "operator",
-    },
-    {
-        "id": "USER-IOT-SERVICE",
-        "email": "iot-service@plant.local",
-        "display_name": "IoT Service Account",
-        "role": "iot_service",
-    },
-]
 
 
 SCHEMA_STATEMENTS = [
@@ -77,6 +23,82 @@ SCHEMA_STATEMENTS = [
         process TEXT NOT NULL,
         criticality INTEGER NOT NULL,
         status TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS asset_profiles (
+        equipment_id TEXT PRIMARY KEY,
+        asset_type TEXT NOT NULL,
+        location_code TEXT NOT NULL,
+        location_name TEXT NOT NULL,
+        parent_system TEXT NOT NULL,
+        manufacturer TEXT NOT NULL,
+        model TEXT NOT NULL,
+        serial_number TEXT NOT NULL,
+        installed_at TEXT NOT NULL,
+        owner_team TEXT NOT NULL,
+        supervisor TEXT NOT NULL,
+        description TEXT NOT NULL,
+        last_updated TEXT NOT NULL,
+        FOREIGN KEY (equipment_id) REFERENCES equipment(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS asset_metric_snapshots (
+        id TEXT PRIMARY KEY,
+        equipment_id TEXT NOT NULL,
+        metric_key TEXT NOT NULL,
+        label TEXT NOT NULL,
+        value REAL NOT NULL,
+        unit TEXT NOT NULL,
+        target_value REAL,
+        status TEXT NOT NULL,
+        trend TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        captured_at TEXT NOT NULL,
+        sort_order INTEGER NOT NULL,
+        FOREIGN KEY (equipment_id) REFERENCES equipment(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS asset_recommendations (
+        id TEXT PRIMARY KEY,
+        equipment_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        priority INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        sort_order INTEGER NOT NULL,
+        FOREIGN KEY (equipment_id) REFERENCES equipment(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS asset_subsystems (
+        id TEXT PRIMARY KEY,
+        equipment_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        component TEXT NOT NULL,
+        condition TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        sort_order INTEGER NOT NULL,
+        FOREIGN KEY (equipment_id) REFERENCES equipment(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS asset_reliability_metrics (
+        id TEXT PRIMARY KEY,
+        equipment_id TEXT NOT NULL,
+        metric_name TEXT NOT NULL,
+        value REAL NOT NULL,
+        unit TEXT NOT NULL,
+        target_value REAL,
+        status TEXT NOT NULL,
+        trend TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        sort_order INTEGER NOT NULL,
+        FOREIGN KEY (equipment_id) REFERENCES equipment(id)
     )
     """,
     """
@@ -273,9 +295,144 @@ SCHEMA_STATEMENTS = [
         FOREIGN KEY (user_id) REFERENCES users(id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS learning_interactions (
+        id TEXT PRIMARY KEY,
+        assistant TEXT NOT NULL,
+        interaction_type TEXT NOT NULL,
+        user_id TEXT,
+        user_role TEXT,
+        equipment_id TEXT,
+        work_order_id TEXT,
+        prompt TEXT NOT NULL,
+        response TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'mock',
+        used_live_provider INTEGER NOT NULL DEFAULT 0,
+        prompt_version TEXT NOT NULL DEFAULT 'default',
+        model_version TEXT NOT NULL DEFAULT 'default',
+        source_refs TEXT NOT NULL DEFAULT '[]',
+        approved_for_learning INTEGER NOT NULL DEFAULT 0,
+        outcome_status TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS learning_examples (
+        id TEXT PRIMARY KEY,
+        source_type TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        equipment_id TEXT,
+        work_order_id TEXT,
+        instruction TEXT NOT NULL,
+        input_text TEXT NOT NULL,
+        expected_output TEXT NOT NULL,
+        metadata TEXT NOT NULL DEFAULT '{}',
+        approved INTEGER NOT NULL DEFAULT 0,
+        judge_score REAL NOT NULL DEFAULT 0,
+        judge_label TEXT NOT NULL DEFAULT 'not_scored',
+        judge_rationale TEXT,
+        judge_provider TEXT NOT NULL DEFAULT 'not_scored',
+        judge_used_live_provider INTEGER NOT NULL DEFAULT 0,
+        judged_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(source_type, source_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS learning_dataset_snapshots (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        example_count INTEGER NOT NULL,
+        approved_only INTEGER NOT NULL DEFAULT 1,
+        jsonl_content TEXT NOT NULL,
+        created_by TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS learning_model_versions (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        base_model TEXT,
+        adapter_path TEXT,
+        status TEXT NOT NULL DEFAULT 'candidate',
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS learning_prompt_versions (
+        id TEXT PRIMARY KEY,
+        assistant TEXT NOT NULL,
+        version TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'candidate',
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(assistant, version)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS learning_evaluation_runs (
+        id TEXT PRIMARY KEY,
+        dataset_id TEXT,
+        model_version_id TEXT,
+        prompt_version_id TEXT,
+        metrics TEXT NOT NULL,
+        notes TEXT,
+        passed INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS learning_jobs (
+        id TEXT PRIMARY KEY,
+        job_type TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        requested_by TEXT,
+        correlation_id TEXT NOT NULL,
+        input_refs TEXT NOT NULL DEFAULT '{}',
+        output_refs TEXT NOT NULL DEFAULT '{}',
+        error TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS learning_artifacts (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        artifact_type TEXT NOT NULL,
+        uri TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        metadata TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (job_id) REFERENCES learning_jobs(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS learning_model_promotions (
+        id TEXT PRIMARY KEY,
+        model_version_id TEXT NOT NULL,
+        previous_active_model_id TEXT,
+        evaluation_run_id TEXT NOT NULL,
+        dataset_id TEXT NOT NULL,
+        prompt_version_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        reviewer_email TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (model_version_id) REFERENCES learning_model_versions(id),
+        FOREIGN KEY (evaluation_run_id) REFERENCES learning_evaluation_runs(id)
+    )
+    """,
 ]
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "12"
 
 
 def get_database_path() -> Path:
@@ -300,6 +457,14 @@ def initialize_database(seed: bool = True) -> None:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
         _ensure_column(connection, "feedback", "equipment_id", "TEXT")
+        _ensure_column(connection, "learning_examples", "judge_score", "REAL NOT NULL DEFAULT 0")
+        _ensure_column(connection, "learning_examples", "judge_label", "TEXT NOT NULL DEFAULT 'not_scored'")
+        _ensure_column(connection, "learning_examples", "judge_rationale", "TEXT")
+        _ensure_column(connection, "learning_examples", "judge_provider", "TEXT NOT NULL DEFAULT 'not_scored'")
+        _ensure_column(connection, "learning_examples", "judge_used_live_provider", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "learning_examples", "judged_at", "TEXT")
+        _ensure_column(connection, "learning_jobs", "output_refs", "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(connection, "learning_jobs", "retry_count", "INTEGER NOT NULL DEFAULT 0")
         connection.execute(
             """
             INSERT INTO schema_metadata (key, value)
@@ -308,10 +473,11 @@ def initialize_database(seed: bool = True) -> None:
             """,
             (SCHEMA_VERSION,),
         )
+        _seed_learning_defaults(connection)
         if seed:
             seed_from_sample_data(connection)
             if get_settings().auth_seed_demo_users:
-                seed_demo_users(connection)
+                _execute_seed_sql(connection, "users_seed.sql")
 
 
 def seed_from_sample_data(connection: sqlite3.Connection) -> None:
@@ -353,6 +519,7 @@ def seed_from_sample_data(connection: sqlite3.Connection) -> None:
         data["documents"],
     )
     seed_demo_work_orders(connection)
+    _execute_seed_sql(connection, "asset_detail_seed.sql")
     from app.data.repository import rebuild_document_chunks
 
     rebuild_document_chunks(connection)
@@ -476,34 +643,6 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
     )
 
 
-def seed_demo_users(connection: sqlite3.Connection) -> None:
-    password_hash = hash_password(DEMO_USER_PASSWORD)
-    connection.executemany(
-        """
-        INSERT INTO users (
-            id,
-            email,
-            display_name,
-            role,
-            password_hash,
-            is_active
-        )
-        VALUES (?, ?, ?, ?, ?, 1)
-        ON CONFLICT(email) DO NOTHING
-        """,
-        [
-            (
-                user["id"],
-                user["email"],
-                user["display_name"],
-                user["role"],
-                password_hash,
-            )
-            for user in DEMO_USERS
-        ],
-    )
-
-
 def reset_database() -> None:
     db_path = get_database_path()
     if db_path.exists():
@@ -515,6 +654,11 @@ def database_status() -> dict[str, Any]:
     initialize_database(seed=False)
     tables = [
         "equipment",
+        "asset_profiles",
+        "asset_metric_snapshots",
+        "asset_recommendations",
+        "asset_subsystems",
+        "asset_reliability_metrics",
         "alerts",
         "sensor_readings",
         "spares",
@@ -529,6 +673,15 @@ def database_status() -> dict[str, Any]:
         "streaming_messages",
         "users",
         "auth_audit_events",
+        "learning_interactions",
+        "learning_examples",
+        "learning_dataset_snapshots",
+        "learning_model_versions",
+        "learning_prompt_versions",
+        "learning_evaluation_runs",
+        "learning_jobs",
+        "learning_artifacts",
+        "learning_model_promotions",
     ]
     with connect() as connection:
         version_row = connection.execute(
@@ -568,3 +721,69 @@ def _ensure_column(connection: sqlite3.Connection, table: str, column: str, defi
     existing = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in existing:
         connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _execute_seed_sql(connection: sqlite3.Connection, filename: str) -> None:
+    seed_path = get_settings().data_dir / filename
+    if seed_path.exists():
+        connection.executescript(seed_path.read_text(encoding="utf-8"))
+
+
+def _seed_learning_defaults(connection: sqlite3.Connection) -> None:
+    settings = get_settings()
+    model_name = settings.ollama_model if settings.llm_provider == "ollama" else settings.openai_model
+    connection.executemany(
+        """
+        INSERT INTO learning_model_versions (
+            id, provider, model_name, base_model, adapter_path, status, notes
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO NOTHING
+        """,
+        [
+            (
+                "model-local-qwen2.5-current",
+                settings.llm_provider,
+                model_name,
+                "qwen2.5-instruct",
+                None,
+                "active",
+                "Current locally configured OpenAI-compatible model endpoint.",
+            )
+        ],
+    )
+    connection.executemany(
+        """
+        INSERT INTO learning_prompt_versions (
+            id, assistant, version, prompt, status, notes
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(assistant, version) DO NOTHING
+        """,
+        [
+            (
+                "prompt-neo-default",
+                "neo",
+                "default",
+                "Role-aware dashboard assistant prompt with deterministic role and action guards.",
+                "active",
+                "Used for dashboard, asset, user, and work-order assistance.",
+            ),
+            (
+                "prompt-morpheus-default",
+                "morpheus",
+                "default",
+                "Diagnosis and recommendation prompt grounded in health, work history, and retrieved evidence.",
+                "active",
+                "Used for streamed diagnosis and recommendation review.",
+            ),
+            (
+                "prompt-smith-default",
+                "smith",
+                "default",
+                "Failure prediction prompt grounded in asset profile, reliability metrics, probability, RUL, and drivers.",
+                "active",
+                "Used for streamed reliability prediction.",
+            ),
+        ],
+    )
