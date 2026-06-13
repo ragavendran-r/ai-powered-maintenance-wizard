@@ -899,7 +899,7 @@ async function signIn(email = 'admin@plant.local') {
     fireEvent.change(await screen.findByLabelText('Email'), { target: { value: email } })
   }
   fireEvent.click(await screen.findByRole('button', { name: /sign in/i }))
-  await screen.findByText('API connected')
+  await screen.findByRole('button', { name: 'Logout' })
 }
 
 beforeEach(() => {
@@ -1437,7 +1437,7 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn()
 
-    expect(await screen.findByText('API connected')).toBeInTheDocument()
+    expect(screen.queryByText('API connected')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Assets at risk' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Work queues' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Equipment efficiency' })).toBeInTheDocument()
@@ -1667,10 +1667,21 @@ describe('Maintenance Wizard dashboard', () => {
     expect(Boolean(neoHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(within(centerPane).getByText('Technician AI assistant with shared LLM configuration')).toBeInTheDocument()
     expect(within(rightPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
+    const executionWorkflow = within(centerPane).getByLabelText('Technician execution workflow')
+    expect(within(executionWorkflow).getByRole('heading', { name: 'Technician Execution' })).toBeInTheDocument()
+    expect(within(executionWorkflow).getByText('Approved')).toBeInTheDocument()
+    expect(within(executionWorkflow).getByText('The work order is approved and ready for technician execution.')).toBeInTheDocument()
+    expect(within(executionWorkflow).getByText('1')).toBeInTheDocument()
+    expect(within(executionWorkflow).getByText('Confirm readiness')).toBeInTheDocument()
+    expect(within(executionWorkflow).getByText('Start field execution')).toBeInTheDocument()
+    expect(within(executionWorkflow).getByText('Capture observations')).toBeInTheDocument()
+    expect(within(executionWorkflow).getByText('Apply guided action')).toBeInTheDocument()
+    expect(within(executionWorkflow).getByText('Submit completion')).toBeInTheDocument()
     expect(within(centerPane).getByRole('button', { name: 'WO-8304' })).toBeInTheDocument()
     expect(within(centerPane).queryByRole('button', { name: 'WO-8297' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Start WO-8304' }))
     await screen.findByText('WO-8304 started')
+    expect(await within(screen.getByLabelText('Technician execution workflow')).findByText('In progress')).toBeInTheDocument()
     const startCall = vi
       .mocked(fetch)
       .mock.calls.find(([url, init]) => url.toString().includes('/api/work-orders/WO-8304') && init?.method === 'PATCH')
@@ -1682,13 +1693,12 @@ describe('Maintenance Wizard dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(within(screen.getByLabelText('Neo technician chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
     expect(await within(screen.getByLabelText('Neo technician chat')).findByText(/Thinking/)).toBeInTheDocument()
-    expect(await screen.findByText(/Neo recommends verifying torque/)).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Neo technician chat')).findByText(/Neo recommends verifying torque/)).toBeInTheDocument()
     expect(await screen.findByText('Verify torque on bolted connections.')).toBeInTheDocument()
-    expect(screen.getByText(/Connections were tightened to spec./)).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Technician execution workflow')).getByText(/Connections were tightened to spec./)).toBeInTheDocument()
     expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
-    const submitCompleted = screen.getByRole('button', { name: 'Submit completed work' })
-    const workOrderButton = within(centerPane).getByRole('button', { name: 'WO-8304' })
-    expect(Boolean(workOrderButton.compareDocumentPosition(submitCompleted) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    const submitCompleted = within(screen.getByLabelText('Technician execution workflow')).getByRole('button', { name: 'Submit completed work' })
+    expect(submitCompleted).toBeEnabled()
   })
 
   it('shows only the supervisor LLM assistant to supervisor users', async () => {

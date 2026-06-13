@@ -10,6 +10,8 @@
   --button-soft-border: #b9d7de;
   --button-soft-color: #174f58;
   --button-radius: 6px;
+  --content-font-size: 12px;
+  --content-line-height: 1.45;
   color: #182029;
   background: #eef2f4;
   font-family:
@@ -1627,20 +1629,20 @@ h3 {
   align-items: stretch;
   display: grid;
   gap: 6px;
-  grid-template-columns: minmax(66px, 0.62fr) minmax(110px, 0.95fr) minmax(140px, 1.25fr) minmax(58px, 0.52fr) minmax(62px, 0.55fr);
+  grid-template-columns: minmax(66px, 0.55fr) minmax(110px, 0.82fr) minmax(130px, 1.05fr) minmax(166px, 0.95fr) minmax(62px, 0.42fr);
   min-width: 0;
   padding: 9px 10px;
 }
 
 .workOrderTable.assignable .workOrderHead,
 .workOrderTable.assignable .workOrderRow {
-  grid-template-columns: minmax(54px, 0.55fr) minmax(78px, 0.9fr) minmax(92px, 1.18fr) minmax(52px, 0.52fr) minmax(52px, 0.52fr) minmax(86px, 0.82fr);
+  grid-template-columns: minmax(54px, 0.46fr) minmax(78px, 0.74fr) minmax(92px, 0.92fr) minmax(166px, 0.95fr) minmax(52px, 0.38fr) minmax(86px, 0.68fr);
   min-width: 0;
 }
 
 .workOrderTable.compact .workOrderHead,
 .workOrderTable.compact .workOrderRow {
-  grid-template-columns: minmax(66px, 0.75fr) minmax(120px, 1.35fr) minmax(62px, 0.65fr) minmax(70px, 0.7fr);
+  grid-template-columns: minmax(66px, 0.62fr) minmax(120px, 1.05fr) minmax(166px, 0.95fr) minmax(70px, 0.52fr);
   min-width: 0;
 }
 
@@ -1687,6 +1689,54 @@ h3 {
   align-content: start;
   display: grid;
   gap: 5px;
+}
+
+.workOrderStatusCell small {
+  color: #667682;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  max-width: 156px;
+}
+
+.workOrderStatusBadge {
+  align-items: center;
+  background: #edf6f8;
+  border: 1px solid #bddae1;
+  border-radius: 6px;
+  color: #174f58;
+  display: inline-flex;
+  justify-content: center;
+  line-height: 1.15;
+  min-height: 42px;
+  padding: 6px 8px;
+  text-align: center;
+  width: 156px;
+}
+
+.workOrderStatusBadge strong {
+  font-size: 0.72rem;
+  font-weight: 900;
+  max-width: 100%;
+}
+
+.workOrderStatusBadge.status-wappr,
+.workOrderStatusBadge.status-wmatl {
+  background: #fff7e6;
+  border-color: #e8c979;
+  color: #6f4b00;
+}
+
+.workOrderStatusBadge.status-inprg {
+  background: #eaf2ff;
+  border-color: #adc8f4;
+  color: #234f9b;
+}
+
+.workOrderStatusBadge.status-comp,
+.workOrderStatusBadge.status-close {
+  background: #ecf8ef;
+  border-color: #a9d9b6;
+  color: #236236;
 }
 
 .miniActionButton {
@@ -2246,6 +2296,18 @@ h3 {
   display: grid;
   gap: 6px;
   justify-items: start;
+  min-width: 0;
+}
+
+.statusTimeline strong {
+  color: #26343c;
+  font-size: 0.74rem;
+  line-height: 1.15;
+}
+
+.statusTimeline small {
+  font-size: 0.68rem;
+  font-weight: 800;
 }
 
 .statusTimeline i {
@@ -2258,6 +2320,105 @@ h3 {
 .statusTimeline span.active i {
   background: #356ff0;
   border-color: #356ff0;
+}
+
+.statusDescription {
+  color: #52636e;
+  font-size: 0.86rem;
+  margin: 4px 0 10px;
+}
+
+.technicianExecutionCard {
+  background: #ffffff;
+  border: 1px solid #dce5ea;
+  border-radius: 6px;
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 14px;
+}
+
+.executionStatusLine {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.executionStatusLine > span:last-child {
+  color: #52636e;
+  font-size: 0.84rem;
+}
+
+.executionSteps {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.executionSteps li {
+  align-items: start;
+  border: 1px solid #e0e7eb;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 28px 1fr;
+  padding: 10px;
+}
+
+.executionSteps li > span {
+  align-items: center;
+  background: #edf1f4;
+  border-radius: 999px;
+  color: #52636e;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 900;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.executionSteps strong {
+  color: #1f2a31;
+  display: block;
+  font-size: 0.88rem;
+  margin-bottom: 3px;
+}
+
+.executionSteps p {
+  color: #52636e;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.executionSteps li.done {
+  background: #f4fbf6;
+  border-color: #b9dfc2;
+}
+
+.executionSteps li.done > span {
+  background: #2f8f4e;
+  color: #ffffff;
+}
+
+.executionSteps li.current {
+  background: #f5f9ff;
+  border-color: #a9c4f2;
+}
+
+.executionSteps li.current > span {
+  background: #356ff0;
+  color: #ffffff;
+}
+
+.executionActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .workOrderSummary dl {
@@ -2467,19 +2628,29 @@ h3 {
   .workOrderRow,
   .workOrderTable.compact .workOrderHead,
   .workOrderTable.compact .workOrderRow {
-    grid-template-columns: 92px minmax(0, 1fr) 74px;
+    grid-template-columns: 92px minmax(0, 1fr) 166px;
     min-width: 0;
   }
 
   .workOrderTable.assignable .workOrderHead,
   .workOrderTable.assignable .workOrderRow {
-    grid-template-columns: 92px minmax(0, 1fr) 74px minmax(140px, 0.8fr);
+    grid-template-columns: 92px minmax(0, 1fr) 166px minmax(140px, 0.8fr);
   }
 
   .workOrderHead span:nth-child(3),
   .workOrderHead span:nth-child(5),
   .workOrderRow span:nth-child(3),
   .workOrderRow span:nth-child(5) {
+    display: none;
+  }
+
+  .workOrderTable.compact .workOrderHead span:nth-child(3),
+  .workOrderTable.compact .workOrderRow span:nth-child(3) {
+    display: grid;
+  }
+
+  .workOrderTable.compact .workOrderHead span:nth-child(4),
+  .workOrderTable.compact .workOrderRow span:nth-child(4) {
     display: none;
   }
 
@@ -2510,4 +2681,26 @@ h3 {
     gap: 12px;
   }
 
+}
+
+.appShell :where(
+  .detailPanel,
+  .metricsGrid,
+  .dashboardKpiBand,
+  .neoPanel,
+  .workOrderTable,
+  .assetDetailGrid,
+  .assetsView,
+  .learningView,
+  .ingestionView
+) :where(p, li, dd, dt, span, small, button, input, select, textarea, strong),
+.loginShell :where(
+  .loginPanel
+) :where(p, li, dd, dt, span, small, button, input, select, textarea, strong) {
+  font-size: var(--content-font-size) !important;
+  line-height: var(--content-line-height);
+}
+
+.appShell :where(h1, h2, h3, .leftNav, .leftNav *, .sectionHeader h2, .pageHeader *) {
+  line-height: normal;
 }
