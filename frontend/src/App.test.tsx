@@ -666,6 +666,20 @@ const learningArtifactCleanupResult = {
   errors: [],
 }
 
+const learningEmbeddingProfile = {
+  id: 'emb-maintenance-hash-v1-64',
+  provider: 'deterministic_hash',
+  model: 'maintenance-hash-v1',
+  version: '1',
+  dimensions: 64,
+  distance: 'Cosine',
+  status: 'active',
+  notes: 'Default local deterministic embedding profile.',
+  metadata: {},
+  created_at: '2026-06-13T09:00:00+05:30',
+  updated_at: '2026-06-13T09:00:00+05:30',
+}
+
 function learningSummaryPayload(
   examples = [learningExample],
   datasets = [learningDataset],
@@ -759,8 +773,10 @@ function learningSummaryPayload(
       store: 'qdrant',
       enabled: true,
       collection: 'maintenance_wizard_documents',
+      collection_alias: null,
       url: 'http://localhost:6333',
       embedding_profile: {
+        ...learningEmbeddingProfile,
         provider: 'deterministic_hash',
         model: 'maintenance-hash-v1',
         version: '1',
@@ -768,10 +784,13 @@ function learningSummaryPayload(
         configured_dimensions: 64,
         distance: 'Cosine',
         state: 'ready',
+        warning: null,
       },
       points_count: 42,
       collection_vector_size: 64,
+      collection_distance: 'Cosine',
       migration_required: false,
+      migration_reasons: [],
       state: 'ready',
       error: null,
     },
@@ -1052,6 +1071,82 @@ beforeEach(() => {
               subject: 'maintenance.learning.peft.requested',
               status: 'queued',
               output_refs: { dispatch: 'disabled' },
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.endsWith('/api/learning/rag/embedding-profiles')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse((init.body as string) ?? '{}')
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                ...learningEmbeddingProfile,
+                id: 'emb-candidate',
+                provider: body.provider,
+                model: body.model,
+                version: body.version,
+                dimensions: body.dimensions,
+                distance: body.distance,
+                status: 'candidate',
+                notes: body.notes,
+              }),
+              { status: 200 },
+            ),
+          )
+        }
+        return Promise.resolve(new Response(JSON.stringify([learningEmbeddingProfile]), { status: 200 }))
+      }
+      if (url.includes('/api/learning/rag/embedding-profiles/') && url.endsWith('/activate')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...learningJob,
+              id: 'LJOB-EMBED-1',
+              job_type: 'rag_embedding_profile',
+              subject: 'maintenance.learning.rag.embedding.profile.requested',
+              status: 'completed',
+              output_refs: { active_profile_id: learningEmbeddingProfile.id },
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.endsWith('/api/learning/rag/migration/preview')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              dry_run: true,
+              store: 'qdrant',
+              source_collection: 'maintenance_wizard_documents',
+              target_collection: 'maintenance_wizard_documents_v1',
+              active_profile: learningEmbeddingProfile,
+              target_profile: learningEmbeddingProfile,
+              migration_required: false,
+              will_activate_profile: false,
+              will_recreate_collection: false,
+              reasons: ['Existing collection matches the selected embedding profile.'],
+              status: learningSummaryPayload().vector_store,
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.endsWith('/api/learning/rag/migration')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...learningJob,
+              id: 'LJOB-RAG-MIGRATE-1',
+              job_type: 'rag_migration',
+              subject: 'maintenance.learning.rag.migration.requested',
+              status: 'completed',
+              output_refs: {
+                document_count: 6,
+                chunk_count: 14,
+                target_collection: 'maintenance_wizard_documents_v1',
+              },
             }),
             { status: 200 },
           ),
@@ -1700,8 +1795,11 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText(/Review approved human feedback/)).toBeInTheDocument()
     expect(screen.getByText('RAG vector DB')).toBeInTheDocument()
     expect(screen.getByText('qdrant · ready')).toBeInTheDocument()
-    expect(screen.getByText('Embedding')).toBeInTheDocument()
-    expect(screen.getByText('maintenance-hash-v1 · v1')).toBeInTheDocument()
+    expect(screen.getByText('Active embedding')).toBeInTheDocument()
+    expect(screen.getByText('deterministic_hash · maintenance-hash-v1 · v1')).toBeInTheDocument()
+    expect(screen.getByText('Embedding profile')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Preview migration' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run Qdrant migration' })).toBeInTheDocument()
     expect(screen.getByText('Migration')).toBeInTheDocument()
     expect(screen.getByText('Current')).toBeInTheDocument()
     expect(screen.getByText('Serving LLM')).toBeInTheDocument()
@@ -1775,12 +1873,16 @@ describe('Maintenance Wizard dashboard', () => {
       artifact_uri: 'file:///models/qwen2.5-lora',
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reindex RAG' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview migration' }))
+    expect(await screen.findByText('Previewed RAG migration to maintenance_wizard_documents_v1')).toBeInTheDocument()
+    expect(screen.getByText('Migration preview')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reindex current profile' }))
     expect(await screen.findByText('Reindexed 14 RAG chunks with status completed')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Promote adapter' }))
     expect(await screen.findByText('Promoted adapter qwen2.5-7b-instruct-lora-candidate with audit record LPROMO-NEW')).toBeInTheDocument()
-  })
+  }, 10_000)
 
   it('hides restricted actions for operators', async () => {
     render(<App />)

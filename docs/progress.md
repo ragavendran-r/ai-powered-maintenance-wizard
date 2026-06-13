@@ -24,20 +24,25 @@ Implement a working AI-powered Maintenance Wizard prototype in `/Users/ragaven/w
 
 ## Latest Session Update
 
+- Continued G-016 on `codex/rag-migration-controls`: added schema version 14 RAG embedding profiles, embedding metadata on document chunks, active-profile filtering for retrieval fallback, OpenAI-compatible embedding profile configuration hooks, Qdrant collection shape/status checks, migration preview/run APIs, reviewer-audited profile activation/reindex/migration jobs, and Learning Review controls for selecting profiles, previewing migrations, running Qdrant migrations, and reindexing the current profile.
+- Fixed a local Mac runtime migration issue where SQLite could not add `document_chunks.embedded_at` with `DEFAULT CURRENT_TIMESTAMP` on existing databases; the migration now adds a nullable column and backfills it. Cleared stale local pytest/uvicorn processes that were holding the current SQLite database and port 8000, then restarted the existing local stack on its original ports.
+- Moved Postgres migration, object-store lifecycle/access-policy hardening, and environment-specific LM Studio/Ollama adapter-loader automation out of active G-016 completion scope and into future production phases so the current goal remains production-aligned but implementable on the local Mac stack.
+- Verification passed for this slice with backend compile, backend API tests on an isolated SQLite database (`91 passed`), frontend unit tests (`17 passed`), frontend build, and Playwright E2E outside the sandbox against the current local app (`1 passed`).
+
 - Continued G-016 with learning artifact lifecycle hardening. Added DB-backed cleanup preview/apply support for registered `learning_artifacts`, protected active/candidate/promoted model and verified deployment artifact references, kept non-filesystem stores read-only, role-gated destructive cleanup to admin/reliability-engineer with `LEARNING_ARTIFACT_CLEANUP_ENABLED=true`, and audited cleanup attempts as learning jobs.
 - Added Learning Review artifact-store retention visibility and a dry-run cleanup preview showing eligible, protected, deleted, and warning states without exposing browser-side deletion controls.
 - Tightened durable collaboration rules so split-safe work uses parallel agents whenever the tool is available, not only for large tasks.
-- Updated README, RAG+PEFT+NATS design notes, and the goal tracker to reflect registry-first artifact cleanup and remaining object-bucket lifecycle/access policy work.
+- Updated README, RAG+PEFT+NATS design notes, and the goal tracker to reflect registry-first artifact cleanup.
 - Verification passed for the artifact lifecycle slice: `PYTHONPYCACHEPREFIX=.pycache python3 -m compileall backend/app`, `backend/.venv/bin/pytest backend/tests/test_api.py -q` with 88 tests, `npm --prefix frontend run test` with 17 tests, `npm --prefix frontend run build`, `git diff --check`, and `npm --prefix frontend run test:e2e` after browser-launch escalation. The local stack health check passed with backend, frontend, NATS, Qdrant, and the learning worker running.
 
 - Continued G-016 with adapter runtime deployment tracking and promotion gating. Schema version 13 adds `learning_model_deployments`; Learning Review can queue adapter deployment jobs; the learning worker verifies manual/OpenAI-compatible/Ollama runtime deployments; adapter promotion now requires a verified runtime deployment when the model has an adapter artifact; and active real LLM serving resolution prefers verified deployment metadata such as served model, runtime provider, health status, and base URL.
 - Updated Learning Review UI/API types to display runtime deployments, deploy candidates, and show verified deployment details in the serving-model status panel.
-- Updated README, architecture, RAG+PEFT+NATS design, and goal tracker to reflect in-app runtime deployment tracking/gating while keeping environment-specific LM Studio/Ollama loader integration as remaining production work.
+- Updated README, architecture, RAG+PEFT+NATS design, and goal tracker to reflect in-app runtime deployment tracking/gating.
 - Added a durable NATS learning worker for G-016. The worker processes persisted learning job messages for refresh, judge, dataset, evaluation, and PEFT preparation paths; moves jobs through running/completed/failed states; publishes malformed jobs to DLQ; and can run as `python -m app.learning_worker`.
 - Added schema version 11 with `learning_artifacts`, repository helpers, artifact counts, and Learning Review API/UI visibility for recent worker artifacts.
 - Added local PEFT artifact preparation: queued PEFT jobs now produce a JSONL dataset artifact and training manifest with SHA-256 hashes and `training_status=awaiting_external_peft_trainer` when no trainer is configured, giving external LoRA/QLoRA trainers an auditable handoff without claiming model training happened inside the web app.
 - Updated local stack to start the learning worker with NATS/Qdrant/backend/frontend, and updated local Kubernetes to run the worker as a backend sidecar sharing local SQLite state.
-- Updated README, architecture, RAG+PEFT+NATS design, and goal tracker to reflect the worker and artifact registry. Remaining G-016 work is bundled trainer templates, production embeddings/Qdrant migration controls, environment-specific adapter loader integration, artifact lifecycle/access hardening, and Postgres migration.
+- Updated README, architecture, RAG+PEFT+NATS design, and goal tracker to reflect the worker and artifact registry. Remaining G-016 work is bundled trainer templates and production embeddings/Qdrant migration controls.
 - Verification passed for the adapter runtime deployment slice: `PYTHONPYCACHEPREFIX=.pycache python3 -m compileall backend/app`, `backend/.venv/bin/pytest backend/tests/test_api.py` with 85 tests, `npm --prefix frontend run test` with 17 tests, `npm --prefix frontend run build`, `npm --prefix frontend run test:e2e` after browser-launch escalation, and `git diff --check`.
 
 - Treated the app as production-targeted by default and persisted that rule in `docs/rules.md`.
@@ -59,14 +64,12 @@ Checks run:
 - `git diff --check`
 - Completion notification attempted with both local and repository helpers; delivery failed because `ntfy.sh` could not be resolved in this environment.
 
-Next production hardening items:
+Next G-016 implementation items:
 
 - Add durable NATS learning workers for judge, dataset, evaluation, and PEFT jobs.
-- Add artifact lifecycle, retention, and access-policy hardening for production object buckets.
 - Add bundled PEFT trainer templates for local Qwen/SLM LoRA or QLoRA training.
-- Configure environment-specific adapter loader integration after PEFT training so approved adapter artifacts can be loaded by LM Studio/Ollama or another serving runtime; adapter runtime deployment tracking/gating is handled in-app.
 - Add production embedding model selection/versioning and Qdrant collection migration controls.
-- Move learning state from SQLite to Postgres for multi-worker production.
+- Track object-store bucket hardening, Postgres migration, and environment-specific LM Studio/Ollama loader integration as future production phases outside the current local-Mac-constrained G-016 scope.
 
 ## Current Status
 

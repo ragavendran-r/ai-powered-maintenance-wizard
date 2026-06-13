@@ -306,8 +306,23 @@ def get_document(document_id: str) -> Optional[dict[str, Any]]:
     return _fetch_one("SELECT * FROM documents WHERE id = ?", (document_id,))
 
 
-def list_document_chunks(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
+def list_document_chunks(equipment_id: Optional[str] = None, current_profile_only: bool = False) -> list[dict[str, Any]]:
+    profile_id: Optional[str] = None
+    if current_profile_only:
+        from app.services.embeddings import current_embedding_profile
+
+        profile_id = current_embedding_profile().id
     if equipment_id:
+        if profile_id:
+            return _fetch_all(
+                """
+                SELECT * FROM document_chunks
+                WHERE (equipment_id = ? OR equipment_id IS NULL)
+                  AND embedding_profile_id = ?
+                ORDER BY source_type, title, chunk_index
+                """,
+                (equipment_id, profile_id),
+            )
         return _fetch_all(
             """
             SELECT * FROM document_chunks
@@ -316,16 +331,33 @@ def list_document_chunks(equipment_id: Optional[str] = None) -> list[dict[str, A
             """,
             (equipment_id,),
         )
+    if profile_id:
+        return _fetch_all(
+            """
+            SELECT * FROM document_chunks
+            WHERE embedding_profile_id = ?
+            ORDER BY source_type, title, chunk_index
+            """,
+            (profile_id,),
+        )
     return _fetch_all("SELECT * FROM document_chunks ORDER BY source_type, title, chunk_index")
 
 
-def rebuild_all_document_chunks() -> dict[str, Any]:
+def rebuild_all_document_chunks(
+    *,
+    collection_name: Optional[str] = None,
+    recreate_collection: bool = False,
+) -> dict[str, Any]:
     ensure_ready()
     with connect() as connection:
         documents = [dict(row) for row in connection.execute("SELECT * FROM documents ORDER BY source_type, title").fetchall()]
         connection.execute("DELETE FROM document_chunks")
         chunk_rows = upsert_document_chunks(connection, documents)
-    index_result = index_document_chunks(chunk_rows)
+    index_result = index_document_chunks(
+        chunk_rows,
+        collection_name=collection_name,
+        recreate_collection=recreate_collection,
+    )
     return {
         "document_count": len(documents),
         "chunk_count": len(chunk_rows),
@@ -453,9 +485,16 @@ def upsert_document_chunks(connection: sqlite3.Connection, documents: list[dict[
             equipment_id,
             title,
             content,
-            embedding
+            embedding,
+            embedding_profile_id,
+            embedding_provider,
+            embedding_model,
+            embedding_version,
+            embedding_dimensions,
+            embedding_distance,
+            embedded_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(id) DO UPDATE SET
             document_id=excluded.document_id,
             chunk_index=excluded.chunk_index,
@@ -463,7 +502,14 @@ def upsert_document_chunks(connection: sqlite3.Connection, documents: list[dict[
             equipment_id=excluded.equipment_id,
             title=excluded.title,
             content=excluded.content,
-            embedding=excluded.embedding
+            embedding=excluded.embedding,
+            embedding_profile_id=excluded.embedding_profile_id,
+            embedding_provider=excluded.embedding_provider,
+            embedding_model=excluded.embedding_model,
+            embedding_version=excluded.embedding_version,
+            embedding_dimensions=excluded.embedding_dimensions,
+            embedding_distance=excluded.embedding_distance,
+            embedded_at=CURRENT_TIMESTAMP
         """,
         [
             (
@@ -475,6 +521,12 @@ def upsert_document_chunks(connection: sqlite3.Connection, documents: list[dict[
                 chunk["title"],
                 chunk["content"],
                 chunk["embedding"],
+                chunk["embedding_profile_id"],
+                chunk["embedding_provider"],
+                chunk["embedding_model"],
+                chunk["embedding_version"],
+                chunk["embedding_dimensions"],
+                chunk["embedding_distance"],
             )
             for chunk in chunk_rows
         ],
@@ -1092,6 +1144,111 @@ def list_learning_model_versions() -> list[dict[str, Any]]:
     return _fetch_all("SELECT * FROM learning_model_versions ORDER BY created_at DESC")
 
 
+def save_rag_embedding_profile(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    profile_id = payload["id"]
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO rag_embedding_profiles (
+                id,
+                provider,
+                model,
+                version,
+                dimensions,
+                distance,
+                status,
+                notes,
+                metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                provider=excluded.provider,
+                model=excluded.model,
+                version=excluded.version,
+                dimensions=excluded.dimensions,
+                distance=excluded.distance,
+                status=excluded.status,
+                notes=excluded.notes,
+                metadata=excluded.metadata,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                profile_id,
+                payload["provider"],
+                payload["model"],
+                payload["version"],
+                int(payload["dimensions"]),
+                payload["distance"],
+                payload.get("status") or "candidate",
+                payload.get("notes"),
+                _json_dump_any(payload.get("metadata", {})),
+            ),
+        )
+    profile = get_rag_embedding_profile(profile_id)
+    if not profile:
+        raise RuntimeError("RAG embedding profile was not persisted")
+    return profile
+
+
+def list_rag_embedding_profiles() -> list[dict[str, Any]]:
+    rows = _fetch_all(
+        """
+        SELECT * FROM rag_embedding_profiles
+        ORDER BY
+          CASE status WHEN 'active' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END,
+          updated_at DESC,
+          created_at DESC
+        """
+    )
+    return [_decode_rag_embedding_profile(row) for row in rows]
+
+
+def get_rag_embedding_profile(profile_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM rag_embedding_profiles WHERE id = ?", (profile_id,))
+    return _decode_rag_embedding_profile(row) if row else None
+
+
+def get_active_rag_embedding_profile() -> Optional[dict[str, Any]]:
+    row = _fetch_one(
+        """
+        SELECT * FROM rag_embedding_profiles
+        WHERE status = 'active'
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+        """
+    )
+    return _decode_rag_embedding_profile(row) if row else None
+
+
+def activate_rag_embedding_profile(profile_id: str) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    profile = get_rag_embedding_profile(profile_id)
+    if not profile:
+        return None
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE rag_embedding_profiles
+            SET status = 'candidate',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE status = 'active'
+              AND id <> ?
+            """,
+            (profile_id,),
+        )
+        connection.execute(
+            """
+            UPDATE rag_embedding_profiles
+            SET status = 'active',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (profile_id,),
+        )
+    return get_rag_embedding_profile(profile_id)
+
+
 def get_active_learning_model_version() -> Optional[dict[str, Any]]:
     row = _fetch_one(
         """
@@ -1594,6 +1751,8 @@ def learning_counts() -> dict[str, int]:
         SELECT 'deployments' AS name, COUNT(*) AS count FROM learning_model_deployments
         UNION ALL
         SELECT 'promotions' AS name, COUNT(*) AS count FROM learning_model_promotions
+        UNION ALL
+        SELECT 'embedding_profiles' AS name, COUNT(*) AS count FROM rag_embedding_profiles
         """
     )
     return {row["name"]: int(row["count"]) for row in rows}
@@ -1710,6 +1869,13 @@ def _decode_learning_job(row: dict[str, Any]) -> dict[str, Any]:
 
 def _decode_learning_artifact(row: dict[str, Any]) -> dict[str, Any]:
     decoded = dict(row)
+    decoded["metadata"] = _json_load_dict(decoded.get("metadata"))
+    return decoded
+
+
+def _decode_rag_embedding_profile(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["dimensions"] = int(decoded.get("dimensions") or 0)
     decoded["metadata"] = _json_load_dict(decoded.get("metadata"))
     return decoded
 

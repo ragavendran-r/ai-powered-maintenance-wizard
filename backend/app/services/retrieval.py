@@ -51,7 +51,7 @@ def retrieve_evidence(
             )
         )
 
-    for chunk in repository.list_document_chunks(equipment_id):
+    for chunk in repository.list_document_chunks(equipment_id, current_profile_only=True):
         if chunk["id"] in seen_sources:
             continue
         text = f"{chunk['title']} {chunk['content']}"

@@ -7,7 +7,8 @@ from typing import Any, Optional
 import httpx
 
 from app.core.config import get_settings
-from app.services.vector_index import VECTOR_DIMENSIONS, decode_embedding, embed_text
+from app.services.embeddings import EmbeddingProfile, current_embedding_profile, embedding_profile_id, supported_embedding_provider
+from app.services.vector_index import decode_embedding, embed_text
 
 
 @dataclass
@@ -25,39 +26,64 @@ def configured_vector_store_name() -> str:
 
 
 def embedding_profile_status(settings: Optional[Any] = None) -> dict[str, Any]:
-    settings = settings or get_settings()
-    provider = str(getattr(settings, "rag_embedding_provider", "deterministic_hash") or "deterministic_hash")
-    configured_dimensions = int(getattr(settings, "rag_embedding_dimensions", VECTOR_DIMENSIONS) or VECTOR_DIMENSIONS)
+    if settings is not None:
+        provider = settings.rag_embedding_provider
+        model = settings.rag_embedding_model
+        version = settings.rag_embedding_version
+        dimensions = int(settings.rag_embedding_dimensions)
+        distance = settings.rag_embedding_distance
+        profile = EmbeddingProfile(
+            id=embedding_profile_id(provider, model, version, dimensions, distance),
+            provider=provider,
+            model=model,
+            version=version,
+            dimensions=dimensions,
+            distance=distance,
+            status="settings",
+        )
+    else:
+        profile = current_embedding_profile()
     profile = {
-        "provider": provider,
-        "model": getattr(settings, "rag_embedding_model", "maintenance-hash-v1"),
-        "version": getattr(settings, "rag_embedding_version", "1"),
-        "dimensions": VECTOR_DIMENSIONS,
-        "configured_dimensions": configured_dimensions,
-        "distance": getattr(settings, "rag_embedding_distance", "Cosine"),
+        "id": profile.id,
+        "provider": profile.provider,
+        "model": profile.model,
+        "version": profile.version,
+        "dimensions": profile.dimensions,
+        "configured_dimensions": profile.dimensions,
+        "distance": profile.distance,
+        "status": profile.status,
         "state": "ready",
     }
-    if provider != "deterministic_hash":
+    if not supported_embedding_provider(profile["provider"]):
         profile["state"] = "unsupported_provider_fallback"
-        profile["warning"] = "Only deterministic_hash embeddings are implemented in-app; configure an external embedding worker before switching providers."
-    elif configured_dimensions != VECTOR_DIMENSIONS:
+        profile["warning"] = (
+            f"Embedding provider {profile['provider']} requires an external embedding worker or OpenAI-compatible "
+            "embedding endpoint before Qdrant indexing can use it."
+        )
+    elif settings is not None and profile["provider"] == "deterministic_hash" and profile["dimensions"] != 64:
         profile["state"] = "dimension_mismatch"
-        profile["warning"] = f"Configured dimensions {configured_dimensions} do not match active dimensions {VECTOR_DIMENSIONS}."
+        profile["warning"] = (
+            f"Configured dimensions {profile['dimensions']} do not match the deterministic hash embedding dimension 64."
+        )
     return profile
 
 
 def vector_store_status() -> dict[str, Any]:
     settings = get_settings()
     store = configured_vector_store_name()
-    embedding_profile = embedding_profile_status(settings)
+    active_profile = current_embedding_profile()
+    embedding_profile = embedding_profile_status()
     status = {
         "store": store,
         "enabled": store == "qdrant",
         "collection": settings.rag_qdrant_collection,
+        "collection_alias": settings.rag_qdrant_collection_alias,
         "url": settings.rag_qdrant_url,
         "embedding_profile": embedding_profile,
         "points_count": None,
         "collection_vector_size": None,
+        "collection_distance": None,
+        "migration_reasons": [],
         "migration_required": embedding_profile["state"] != "ready",
         "state": "fallback",
         "error": None,
@@ -76,9 +102,19 @@ def vector_store_status() -> dict[str, Any]:
             if status["points_count"] is None:
                 status["points_count"] = collection.get("vectors_count")
             vector_size = _collection_vector_size(collection)
+            distance = _collection_distance(collection)
             status["collection_vector_size"] = vector_size
-            if vector_size is not None and vector_size != VECTOR_DIMENSIONS:
+            status["collection_distance"] = distance
+            if vector_size is not None and vector_size != active_profile.dimensions:
                 status["migration_required"] = True
+                status["migration_reasons"].append(
+                    f"Collection vector size {vector_size} does not match active profile dimensions {active_profile.dimensions}."
+                )
+            if distance and distance.lower() != active_profile.distance.lower():
+                status["migration_required"] = True
+                status["migration_reasons"].append(
+                    f"Collection distance {distance} does not match active profile distance {active_profile.distance}."
+                )
             status["state"] = "ready"
     except Exception as exc:
         status["state"] = "unavailable"
@@ -86,34 +122,45 @@ def vector_store_status() -> dict[str, Any]:
     return status
 
 
-def index_document_chunks(chunks: list[dict[str, Any]]) -> dict[str, Any]:
+def index_document_chunks(
+    chunks: list[dict[str, Any]],
+    *,
+    collection_name: Optional[str] = None,
+    recreate_collection: bool = False,
+) -> dict[str, Any]:
+    settings = get_settings()
+    collection = collection_name or settings.rag_qdrant_collection
+    profile = current_embedding_profile()
     if configured_vector_store_name() != "qdrant" or not chunks:
         return {
             "store": configured_vector_store_name(),
-            "collection": get_settings().rag_qdrant_collection,
+            "collection": collection,
+            "embedding_profile_id": profile.id,
             "indexed": 0,
             "state": "skipped",
         }
     try:
-        _ensure_qdrant_collection()
+        _ensure_qdrant_collection(collection, profile, recreate_collection=recreate_collection)
         points = [_chunk_to_point(chunk) for chunk in chunks]
         with _client() as client:
             response = client.put(
-                f"/collections/{get_settings().rag_qdrant_collection}/points",
+                f"/collections/{collection}/points",
                 params={"wait": "true"},
                 json={"points": points},
             )
         response.raise_for_status()
         return {
             "store": "qdrant",
-            "collection": get_settings().rag_qdrant_collection,
+            "collection": collection,
+            "embedding_profile_id": profile.id,
             "indexed": len(points),
             "state": "indexed",
         }
     except Exception as exc:
         return {
             "store": "qdrant",
-            "collection": get_settings().rag_qdrant_collection,
+            "collection": collection,
+            "embedding_profile_id": profile.id,
             "indexed": 0,
             "state": "fallback",
             "error": str(exc),
@@ -123,13 +170,22 @@ def index_document_chunks(chunks: list[dict[str, Any]]) -> dict[str, Any]:
 def search_document_chunks(query: str, equipment_id: Optional[str], limit: int) -> list[VectorStoreHit]:
     if configured_vector_store_name() != "qdrant":
         return []
+    profile = current_embedding_profile()
     try:
-        _ensure_qdrant_collection()
+        _ensure_qdrant_collection(get_settings().rag_qdrant_collection, profile)
         candidate_limit = max(limit * 4, limit, 1)
         body: dict[str, Any] = {
             "vector": embed_text(query),
             "limit": candidate_limit,
             "with_payload": True,
+            "filter": {
+                "must": [
+                    {
+                        "key": "embedding_profile_id",
+                        "match": {"value": profile.id},
+                    }
+                ]
+            },
         }
         with _client() as client:
             response = client.post(
@@ -164,6 +220,52 @@ def search_document_chunks(query: str, equipment_id: Optional[str], limit: int) 
     return hits
 
 
+def plan_qdrant_migration(profile_id: Optional[str] = None, target_collection: Optional[str] = None) -> dict[str, Any]:
+    from app.data import repository
+
+    active_profile = current_embedding_profile()
+    target_profile = active_profile
+    if profile_id:
+        stored_profile = repository.get_rag_embedding_profile(profile_id)
+        if not stored_profile:
+            raise ValueError(f"RAG embedding profile {profile_id} was not found")
+        target_profile = EmbeddingProfile(
+            id=stored_profile["id"],
+            provider=stored_profile["provider"],
+            model=stored_profile["model"],
+            version=stored_profile["version"],
+            dimensions=int(stored_profile["dimensions"]),
+            distance=stored_profile["distance"],
+            status=stored_profile["status"],
+            notes=stored_profile.get("notes"),
+            metadata=stored_profile.get("metadata"),
+        )
+    if not supported_embedding_provider(target_profile.provider):
+        raise ValueError(f"Embedding provider {target_profile.provider} is not supported by this runtime")
+    status = vector_store_status()
+    collection = target_collection or _default_target_collection(target_profile)
+    reasons = list(status.get("migration_reasons") or [])
+    if target_profile.id != active_profile.id:
+        reasons.append(f"Selected profile {target_profile.id} differs from active profile {active_profile.id}.")
+    if not reasons and status.get("state") == "missing_collection":
+        reasons.append("Qdrant collection is missing.")
+    if not reasons:
+        reasons.append("Reindex current profile without collection migration.")
+    return {
+        "dry_run": True,
+        "store": configured_vector_store_name(),
+        "source_collection": get_settings().rag_qdrant_collection,
+        "target_collection": collection,
+        "active_profile": _profile_payload(active_profile),
+        "target_profile": _profile_payload(target_profile),
+        "migration_required": bool(status.get("migration_required") or target_profile.id != active_profile.id),
+        "will_activate_profile": target_profile.id != active_profile.id,
+        "will_recreate_collection": collection == get_settings().rag_qdrant_collection,
+        "reasons": reasons,
+        "status": status,
+    }
+
+
 def _client() -> httpx.Client:
     settings = get_settings()
     headers = {}
@@ -176,19 +278,38 @@ def _client() -> httpx.Client:
     )
 
 
-def _ensure_qdrant_collection() -> None:
-    settings = get_settings()
+def _ensure_qdrant_collection(
+    collection_name: str,
+    profile: EmbeddingProfile,
+    *,
+    recreate_collection: bool = False,
+) -> None:
     with _client() as client:
-        response = client.get(f"/collections/{settings.rag_qdrant_collection}")
+        if recreate_collection:
+            delete_response = client.delete(f"/collections/{collection_name}")
+            if delete_response.status_code not in (200, 202, 404):
+                delete_response.raise_for_status()
+        response = client.get(f"/collections/{collection_name}")
         if response.status_code != 404:
             response.raise_for_status()
+            collection = response.json().get("result") or {}
+            vector_size = _collection_vector_size(collection)
+            distance = _collection_distance(collection)
+            if vector_size is not None and vector_size != profile.dimensions:
+                raise ValueError(
+                    f"Qdrant collection {collection_name} has vector size {vector_size}; profile {profile.id} requires {profile.dimensions}."
+                )
+            if distance and distance.lower() != profile.distance.lower():
+                raise ValueError(
+                    f"Qdrant collection {collection_name} has distance {distance}; profile {profile.id} requires {profile.distance}."
+                )
             return
         create_response = client.put(
-            f"/collections/{settings.rag_qdrant_collection}",
+            f"/collections/{collection_name}",
             json={
                 "vectors": {
-                    "size": VECTOR_DIMENSIONS,
-                    "distance": settings.rag_embedding_distance,
+                    "size": profile.dimensions,
+                    "distance": profile.distance,
                 }
             },
         )
@@ -196,7 +317,6 @@ def _ensure_qdrant_collection() -> None:
 
 
 def _chunk_to_point(chunk: dict[str, Any]) -> dict[str, Any]:
-    settings = get_settings()
     return {
         "id": str(uuid.uuid5(uuid.NAMESPACE_URL, chunk["id"])),
         "vector": decode_embedding(chunk["embedding"]),
@@ -208,10 +328,12 @@ def _chunk_to_point(chunk: dict[str, Any]) -> dict[str, Any]:
             "equipment_id": chunk.get("equipment_id"),
             "title": chunk["title"],
             "content": chunk["content"],
-            "embedding_provider": settings.rag_embedding_provider,
-            "embedding_model": settings.rag_embedding_model,
-            "embedding_version": settings.rag_embedding_version,
-            "embedding_dimensions": VECTOR_DIMENSIONS,
+            "embedding_profile_id": chunk.get("embedding_profile_id"),
+            "embedding_provider": chunk.get("embedding_provider"),
+            "embedding_model": chunk.get("embedding_model"),
+            "embedding_version": chunk.get("embedding_version"),
+            "embedding_dimensions": chunk.get("embedding_dimensions"),
+            "embedding_distance": chunk.get("embedding_distance"),
         },
     }
 
@@ -225,3 +347,36 @@ def _collection_vector_size(collection: dict[str, Any]) -> Optional[int]:
             if isinstance(value, dict) and "size" in value:
                 return int(value["size"])
     return None
+
+
+def _collection_distance(collection: dict[str, Any]) -> Optional[str]:
+    vectors = (((collection.get("config") or {}).get("params") or {}).get("vectors") or {})
+    if isinstance(vectors, dict) and "distance" in vectors:
+        return str(vectors["distance"])
+    if isinstance(vectors, dict):
+        for value in vectors.values():
+            if isinstance(value, dict) and "distance" in value:
+                return str(value["distance"])
+    return None
+
+
+def _default_target_collection(profile: EmbeddingProfile) -> str:
+    settings = get_settings()
+    active_profile = current_embedding_profile()
+    if profile.id == active_profile.id:
+        return settings.rag_qdrant_collection
+    return f"{settings.rag_qdrant_collection}_{profile.id.replace('-', '_')}"
+
+
+def _profile_payload(profile: EmbeddingProfile) -> dict[str, Any]:
+    return {
+        "id": profile.id,
+        "provider": profile.provider,
+        "model": profile.model,
+        "version": profile.version,
+        "dimensions": profile.dimensions,
+        "distance": profile.distance,
+        "status": profile.status,
+        "notes": profile.notes,
+        "metadata": profile.metadata or {},
+    }

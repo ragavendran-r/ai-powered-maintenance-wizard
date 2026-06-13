@@ -198,13 +198,15 @@ Engineer feedback is persisted with equipment context and then reused through a 
 - Learning notes appear in recommendations and Markdown reports.
 - Prediction drivers include feedback count, confirmed root causes, outcomes, normalized maintenance labels, and bounded risk adjustments.
 
-This is not automated online self-training. The prototype supports auditable RAG reuse, PEFT-ready dataset preparation, persisted learning jobs, NATS worker execution, local or S3-compatible PEFT artifact storage, artifact hashes, optional external PEFT trainer execution, and PEFT job queueing; production training remains an explicit NATS-backed offline/admin-controlled workflow with bundled trainer templates, object bucket lifecycle controls, evaluation, and promotion gates.
+This is not automated online self-training. The prototype supports auditable RAG reuse, PEFT-ready dataset preparation, persisted learning jobs, NATS worker execution, local or S3-compatible PEFT artifact storage, artifact hashes, optional external PEFT trainer execution, and PEFT job queueing; production training remains an explicit NATS-backed offline/admin-controlled workflow with bundled trainer templates, evaluation, and promotion gates.
+
+The active continuous-learning implementation is production-aligned but scoped to local Mac constraints. Postgres migration, bucket-native object-store hardening, and environment-specific adapter-loader automation are tracked as future production phases rather than current G-016 blockers.
 
 ## Current Prototype Limits
 
 - Retrieval now defaults to Qdrant for production-grade vector storage while retaining deterministic local embeddings and SQLite fallback for offline tests. A stronger embedding model remains a production hardening item, and LLM/SLM reranking improves ordering when configured.
 - LLM providers are optional at runtime. Invalid provider responses, missing credentials, or network failures fall back to deterministic reasoning.
-- SQLite persistence is implemented for the prototype data model. A lightweight startup migration exists for `feedback.equipment_id`; full migration tooling is still a production hardening item.
+- SQLite persistence is implemented for the local/demo data model with lightweight startup migrations.
 - NATS JetStream ingestion is implemented as a production runtime path and requires an external NATS server when `STREAMING_ENABLED=true` or `LEARNING_ASYNC_ENABLED=true`.
 - Authentication and role-based authorization use local SQLite users and JWT bearer tokens. Production SSO remains a hardening item.
 - Live LLM calls are available through provider adapters when configured; deterministic fallback output remains the default local-demo behavior.
