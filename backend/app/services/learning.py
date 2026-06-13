@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
+import shlex
 import ssl
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -158,8 +161,21 @@ def learning_summary() -> LearningSummary:
         recent_promotions=repository.list_learning_model_promotions(limit=10),
         serving_model=active_llm_serving_config().public_dict(),
         artifact_store=artifact_store_status(),
+        peft_trainer=peft_trainer_status(),
         vector_store=vector_store_status(),
     )
+
+
+def peft_trainer_status(settings: Optional[Any] = None) -> dict[str, Any]:
+    settings = settings or get_settings()
+    command = str(getattr(settings, "learning_peft_trainer_command", "") or "").strip()
+    output_dir = getattr(settings, "learning_peft_output_dir", None)
+    return {
+        "mode": "external_command" if command else "prepared_artifacts",
+        "configured": bool(command),
+        "timeout_seconds": int(getattr(settings, "learning_peft_trainer_timeout_seconds", 900) or 900),
+        "output_dir": str(output_dir) if output_dir else None,
+    }
 
 
 def register_model_version(request: LearningModelVersionCreateRequest, current_user: UserPublic) -> dict[str, Any]:
@@ -521,12 +537,175 @@ def prepare_peft_artifacts(job: dict[str, Any]) -> dict[str, Any]:
             "base_model": base_model,
         },
     )
+    trainer_output = _run_external_peft_trainer(
+        job=job,
+        artifact_dir=artifact_dir,
+        dataset_path=dataset_path,
+        manifest_path=manifest_path,
+        adapter_name=adapter_name,
+        base_model=base_model,
+        source_model=model,
+    )
     return {
-        "execution_mode": "prepared_artifacts",
-        "training_status": "awaiting_external_peft_trainer",
+        "execution_mode": trainer_output.get("trainer_mode", "prepared_artifacts"),
+        "training_status": trainer_output.get("training_status", "awaiting_external_peft_trainer"),
         "artifact_dir": str(artifact_dir),
-        "artifacts": [dataset_artifact, manifest_artifact],
+        "artifacts": [dataset_artifact, manifest_artifact, *trainer_output.get("artifacts", [])],
+        **{key: value for key, value in trainer_output.items() if key not in {"artifacts", "training_status"}},
     }
+
+
+def _run_external_peft_trainer(
+    *,
+    job: dict[str, Any],
+    artifact_dir: Path,
+    dataset_path: Path,
+    manifest_path: Path,
+    adapter_name: str,
+    base_model: str,
+    source_model: dict[str, Any],
+) -> dict[str, Any]:
+    settings = get_settings()
+    command = str(getattr(settings, "learning_peft_trainer_command", "") or "").strip()
+    if not command:
+        return {
+            "trainer_mode": "prepared_artifacts",
+            "training_status": "awaiting_external_peft_trainer",
+        }
+
+    command_args = shlex.split(command)
+    if not command_args:
+        raise ValueError("LEARNING_PEFT_TRAINER_COMMAND did not contain an executable")
+
+    output_root = getattr(settings, "learning_peft_output_dir", None)
+    output_dir = (_safe_output_root(output_root) / _safe_name(job["id"])) if output_root else artifact_dir / "adapter_output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timeout_seconds = int(getattr(settings, "learning_peft_trainer_timeout_seconds", 900) or 900)
+    env = {
+        **os.environ,
+        "MW_PEFT_JOB_ID": job["id"],
+        "MW_PEFT_DATASET_PATH": str(dataset_path),
+        "MW_PEFT_MANIFEST_PATH": str(manifest_path),
+        "MW_PEFT_OUTPUT_DIR": str(output_dir),
+        "MW_PEFT_ADAPTER_NAME": adapter_name,
+        "MW_PEFT_BASE_MODEL": base_model,
+    }
+    started_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    try:
+        completed = subprocess.run(
+            command_args,
+            cwd=str(Path(__file__).resolve().parents[3]),
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise TimeoutError(f"External PEFT trainer timed out after {timeout_seconds} seconds") from exc
+
+    log_path = artifact_dir / "trainer_output.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                f"started_at={started_at}",
+                f"completed_at={datetime.utcnow().isoformat(timespec='seconds')}Z",
+                f"return_code={completed.returncode}",
+                "",
+                "[stdout]",
+                completed.stdout or "",
+                "",
+                "[stderr]",
+                completed.stderr or "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    log_artifact = _register_file_artifact(
+        job_id=job["id"],
+        artifact_type="peft_training_log",
+        path=log_path,
+        metadata={"adapter_name": adapter_name, "return_code": completed.returncode},
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"External PEFT trainer failed with exit code {completed.returncode}")
+
+    adapter_manifest_path = output_dir / "adapter_manifest.json"
+    adapter_manifest = _read_adapter_manifest(adapter_manifest_path)
+    registered_model = repository.save_learning_model_version(
+        {
+            "provider": adapter_manifest.get("provider") or source_model["provider"],
+            "model_name": adapter_manifest.get("model_name") or f"{adapter_name}-trained",
+            "base_model": adapter_manifest.get("base_model") or base_model,
+            "adapter_path": adapter_manifest.get("adapter_path") or str(output_dir),
+            "status": "candidate",
+            "notes": adapter_manifest.get("notes")
+            or f"Candidate adapter generated by external PEFT trainer for job {job['id']}.",
+        }
+    )
+    registry_path = artifact_dir / "adapter_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "job_id": job["id"],
+                "adapter_name": adapter_name,
+                "trainer_command_configured": True,
+                "output_dir": str(output_dir),
+                "adapter_manifest": adapter_manifest,
+                "registered_model_version": registered_model,
+                "registered_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    registry_artifact = _register_file_artifact(
+        job_id=job["id"],
+        artifact_type="peft_adapter_registry",
+        path=registry_path,
+        metadata={"model_version_id": registered_model["id"], "adapter_name": adapter_name},
+    )
+    output_refs: dict[str, Any] = {
+        "trainer_mode": "external_command",
+        "training_status": "adapter_candidate_registered",
+        "trainer_return_code": completed.returncode,
+        "adapter_output_dir": str(output_dir),
+        "registered_model_version_id": registered_model["id"],
+        "artifacts": [log_artifact, registry_artifact],
+    }
+    if adapter_manifest_path.exists():
+        manifest_artifact = _register_file_artifact(
+            job_id=job["id"],
+            artifact_type="peft_adapter_manifest",
+            path=adapter_manifest_path,
+            metadata={"model_version_id": registered_model["id"], "adapter_name": adapter_name},
+        )
+        output_refs["artifacts"].append(manifest_artifact)
+    return output_refs
+
+
+def _read_adapter_manifest(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"External PEFT trainer wrote invalid adapter_manifest.json: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("External PEFT trainer adapter_manifest.json must be a JSON object")
+    return payload
+
+
+def _safe_output_root(path: Any) -> Path:
+    root = Path(path)
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _safe_name(value: str) -> str:
+    return "".join(character for character in value if character.isalnum() or character in {"-", "_"}) or "learning-job"
 
 
 def _validate_dataset_model_prompt(dataset_id: str, model_version_id: str, prompt_version_id: str) -> None:

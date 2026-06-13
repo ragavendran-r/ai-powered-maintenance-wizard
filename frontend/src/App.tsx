@@ -2565,6 +2565,22 @@ export function App() {
           </span>
         )}
       </div>
+      <div className="peftTrainerStatus">
+        <span>
+          <strong>PEFT trainer</strong>
+          <small>
+            {String(learningSummary?.peft_trainer?.mode ?? 'unknown')} · {String(learningSummary?.peft_trainer?.configured ? 'configured' : 'not configured')}
+          </small>
+        </span>
+        <span>
+          <small>Timeout</small>
+          <strong>{String(learningSummary?.peft_trainer?.timeout_seconds ?? 'not checked')}s</strong>
+        </span>
+        <span>
+          <small>Output</small>
+          <strong>{String(learningSummary?.peft_trainer?.output_dir ?? 'not configured')}</strong>
+        </span>
+      </div>
       <div className="learningGrid">
         <section className="learningPanel">
           <h3>Approved Controls</h3>

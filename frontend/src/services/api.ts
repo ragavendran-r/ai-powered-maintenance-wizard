@@ -659,6 +659,7 @@ export interface LearningSummary {
   recent_promotions: LearningModelPromotion[]
   serving_model: LearningServingModel
   artifact_store: Record<string, unknown>
+  peft_trainer: Record<string, unknown>
   vector_store: {
     store?: string
     enabled?: boolean

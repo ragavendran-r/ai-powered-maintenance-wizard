@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     learning_artifact_s3_prefix: str = Field(default="maintenance-wizard/learning", alias="LEARNING_ARTIFACT_S3_PREFIX")
     learning_artifact_s3_endpoint_url: Optional[str] = Field(default=None, alias="LEARNING_ARTIFACT_S3_ENDPOINT_URL")
     learning_artifact_s3_region: str = Field(default="us-east-1", alias="LEARNING_ARTIFACT_S3_REGION")
+    learning_peft_trainer_command: Optional[str] = Field(default=None, alias="LEARNING_PEFT_TRAINER_COMMAND")
+    learning_peft_trainer_timeout_seconds: int = Field(default=900, ge=1, alias="LEARNING_PEFT_TRAINER_TIMEOUT_SECONDS")
+    learning_peft_output_dir: Path = Field(
+        default=Path(__file__).resolve().parents[2] / "data" / "learning_adapters",
+        alias="LEARNING_PEFT_OUTPUT_DIR",
+    )
     rag_vector_store: str = Field(default="qdrant", alias="RAG_VECTOR_STORE")
     rag_qdrant_url: str = Field(default="http://localhost:6333", alias="RAG_QDRANT_URL")
     rag_qdrant_collection: str = Field(default="maintenance_wizard_documents", alias="RAG_QDRANT_COLLECTION")

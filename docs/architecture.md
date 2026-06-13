@@ -170,7 +170,7 @@ flowchart LR
 13. Feedback is stored in SQLite, normalized into labels, and reused in future recommendation prompts, deterministic action/root-cause ranking, learning notes, reports, and prediction drivers.
 14. Candidate training examples are built from feedback, labels, completed work orders, approved assistant interactions, and ingested documents, then scored by LLM-as-a-Judge with deterministic fallback.
 15. Approved examples with judge scores at or above the configured threshold feed retrieval/prompt context immediately and can be exported as JSONL snapshots for offline PEFT/LoRA tuning.
-16. Production learning jobs publish to NATS JetStream for asynchronous judge, dataset, evaluation, and PEFT workers; workers persist job status, artifacts, metrics, and candidate model versions before any adapter is promoted. The current PEFT worker stage prepares audited filesystem or S3-compatible artifacts for an external trainer instead of claiming adapter training is complete.
+16. Production learning jobs publish to NATS JetStream for asynchronous judge, dataset, evaluation, and PEFT workers; workers persist job status, artifacts, metrics, and candidate model versions before any adapter is promoted. The PEFT worker prepares audited filesystem or S3-compatible artifacts and can invoke a configured external trainer with bounded timeout, then registers produced adapters as `candidate` model versions only.
 
 ## LLM Boundaries
 
@@ -197,7 +197,7 @@ Engineer feedback is persisted with equipment context and then reused through a 
 - Learning notes appear in recommendations and Markdown reports.
 - Prediction drivers include feedback count, confirmed root causes, outcomes, normalized maintenance labels, and bounded risk adjustments.
 
-This is not automated online self-training. The prototype supports auditable RAG reuse, PEFT-ready dataset preparation, persisted learning jobs, NATS worker execution, local or S3-compatible PEFT artifact storage, artifact hashes, and PEFT job queueing; production training remains an explicit NATS-backed offline/admin-controlled workflow with external trainer execution, object bucket lifecycle controls, evaluation, and promotion gates.
+This is not automated online self-training. The prototype supports auditable RAG reuse, PEFT-ready dataset preparation, persisted learning jobs, NATS worker execution, local or S3-compatible PEFT artifact storage, artifact hashes, optional external PEFT trainer execution, and PEFT job queueing; production training remains an explicit NATS-backed offline/admin-controlled workflow with bundled trainer templates, object bucket lifecycle controls, evaluation, and promotion gates.
 
 ## Current Prototype Limits
 

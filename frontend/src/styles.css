@@ -797,7 +797,8 @@ h3 {
 
 .vectorStoreStatus,
 .servingModelStatus,
-.artifactStoreStatus {
+.artifactStoreStatus,
+.peftTrainerStatus {
   align-items: center;
   background: #f7fafb;
   border: 1px solid #dce6eb;
@@ -811,26 +812,30 @@ h3 {
 
 .vectorStoreStatus span,
 .servingModelStatus span,
-.artifactStoreStatus span {
+.artifactStoreStatus span,
+.peftTrainerStatus span {
   display: grid;
   gap: 2px;
 }
 
 .vectorStoreStatus small,
 .servingModelStatus small,
-.artifactStoreStatus small {
+.artifactStoreStatus small,
+.peftTrainerStatus small {
   color: #60717c;
   font-weight: 700;
 }
 
 .servingModelStatus,
-.artifactStoreStatus {
+.artifactStoreStatus,
+.peftTrainerStatus {
   align-items: start;
   justify-content: start;
 }
 
 .servingModelStatus strong,
-.artifactStoreStatus strong {
+.artifactStoreStatus strong,
+.peftTrainerStatus strong {
   overflow-wrap: anywhere;
 }
 

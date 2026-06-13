@@ -663,6 +663,7 @@ class LearningSummary(BaseModel):
     recent_promotions: list[LearningModelPromotion] = []
     serving_model: dict[str, Any] = Field(default_factory=dict)
     artifact_store: dict[str, Any] = Field(default_factory=dict)
+    peft_trainer: dict[str, Any] = Field(default_factory=dict)
     vector_store: dict[str, Any] = Field(default_factory=dict)
 
 

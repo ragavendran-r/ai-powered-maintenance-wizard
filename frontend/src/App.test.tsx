@@ -694,6 +694,12 @@ function learningSummaryPayload(
       local_dir: 'backend/data/learning_artifacts',
       state: 'ready',
     },
+    peft_trainer: {
+      mode: 'prepared_artifacts',
+      configured: false,
+      timeout_seconds: 900,
+      output_dir: 'backend/data/learning_adapters',
+    },
     vector_store: {
       store: 'qdrant',
       enabled: true,
@@ -1566,6 +1572,8 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('model-local-qwen2.5-current')).toBeInTheDocument()
     expect(screen.getByText('Artifact store')).toBeInTheDocument()
     expect(screen.getByText('filesystem · ready')).toBeInTheDocument()
+    expect(screen.getByText('PEFT trainer')).toBeInTheDocument()
+    expect(screen.getByText('prepared_artifacts · not configured')).toBeInTheDocument()
     expect(screen.getByText('82% · training worthy')).toBeInTheDocument()
     expect(screen.getByText('Live LLM judge · openai')).toBeInTheDocument()
     expect(screen.getByText(/Specific, outcome-backed feedback/)).toBeInTheDocument()

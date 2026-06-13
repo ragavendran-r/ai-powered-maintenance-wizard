@@ -115,7 +115,8 @@ Current implementation:
 - `LEARNING_ASYNC_ENABLED=true` is the production default. The API ensures the `MW_LEARNING` stream and publishes the job envelope to NATS.
 - `LEARNING_ASYNC_ENABLED=false` is allowed only for deterministic tests, disconnected development, or emergency fallback; PEFT jobs remain persisted as queued local jobs in that mode.
 - `python -m app.learning_worker` runs the durable worker process. The local stack starts it automatically, and the local Kubernetes runner deploys it as a backend sidecar for shared local SQLite state.
-- Worker-executed PEFT jobs currently prepare a JSONL dataset artifact and training manifest, persist `learning_artifacts` rows with content hashes, and mark the job completed with `training_status=awaiting_external_peft_trainer`. Artifacts can be stored on the local filesystem for offline runs or uploaded to S3-compatible object storage such as MinIO by setting `LEARNING_ARTIFACT_STORE=s3`.
+- Worker-executed PEFT jobs prepare a JSONL dataset artifact and training manifest, persist `learning_artifacts` rows with content hashes, and mark the job as awaiting a trainer when no trainer command is configured. Artifacts can be stored on the local filesystem for offline runs or uploaded to S3-compatible object storage such as MinIO by setting `LEARNING_ARTIFACT_STORE=s3`.
+- When `LEARNING_PEFT_TRAINER_COMMAND` is configured, the worker invokes the command without a shell, passes dataset/manifest/output paths through environment variables, enforces `LEARNING_PEFT_TRAINER_TIMEOUT_SECONDS`, stores trainer logs and adapter manifests, and registers the result as a `candidate` model version. The promotion gate still requires a passing evaluation and human reviewer action.
 
 ## Vector Store
 
@@ -161,10 +162,10 @@ The local stack starts Qdrant with NATS and the app. The local Kubernetes runner
 
 **PEFT worker**
 
-- Runs LoRA/QLoRA training outside the web request path.
+- Runs configured external LoRA/QLoRA training outside the web request path.
 - Stores adapter artifacts and training logs.
 - Registers the adapter as `candidate`, never automatically `active`.
-- Current implementation prepares hashed dataset and manifest artifacts for an external PEFT trainer; trainer execution and adapter artifact registration remain explicit follow-up stages.
+- Current implementation provides the safe external-command orchestration hook and adapter registration path; bundled Qwen/SLM LoRA/QLoRA trainer templates remain a follow-up stage.
 
 ## Persistence
 
@@ -213,6 +214,6 @@ Production should track:
 3. Keep `learning_jobs`, `learning_artifacts`, and NATS publishing enabled for production-like runs.
 4. Run the learning worker process against NATS JetStream.
 5. Configure S3-compatible artifact storage for production-like runs and add bucket retention/access policies.
-6. Add PEFT worker integration for local Qwen/SLM LoRA jobs.
+6. Add bundled PEFT worker templates for local Qwen/SLM LoRA jobs.
 7. Add production registry integration so PEFT adapter outputs are deployed into the serving runtime without manual path changes.
 8. Move prototype SQLite learning state to Postgres for multi-worker production use.
