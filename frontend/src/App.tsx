@@ -66,6 +66,7 @@ import {
   type UserRole,
   type WorkOrder,
   type WorkOrderCreateRequest,
+  type WorkOrderStatus,
 } from './services/api'
 import { getUserPermissions } from './permissions'
 
@@ -146,6 +147,39 @@ const diagnosisAssistantName = 'Morpheus'
 const reliabilityAssistantName = 'Smith'
 const technicianAssistantName = 'Neo'
 const supervisorAssistantName = 'Neo'
+
+const workOrderStatusDetails: Record<WorkOrderStatus, { label: string; description: string }> = {
+  WAPPR: {
+    label: 'Waiting for approval',
+    description: 'Supervisor approval is required before field work can start.',
+  },
+  APPR: {
+    label: 'Approved',
+    description: 'The work order is approved and ready for technician execution.',
+  },
+  INPRG: {
+    label: 'In progress',
+    description: 'The assigned technician has started field execution.',
+  },
+  WMATL: {
+    label: 'Waiting for material',
+    description: 'Execution is blocked until required parts or consumables are available.',
+  },
+  COMP: {
+    label: 'Completed',
+    description: 'Technician work is complete and ready for closeout review.',
+  },
+  CLOSE: {
+    label: 'Closed',
+    description: 'The work order has been reviewed and closed.',
+  },
+}
+
+const workOrderStatusFlow: WorkOrderStatus[] = ['WAPPR', 'APPR', 'INPRG', 'WMATL', 'COMP', 'CLOSE']
+
+function workOrderStatusDetail(status: WorkOrderStatus) {
+  return workOrderStatusDetails[status]
+}
 
 const fallbackWorkOrders: WorkOrder[] = [
   {
@@ -2256,97 +2290,108 @@ export function App() {
       <section className="workOrderCenterColumn" aria-label="Work order center pane">
         <section className="detailPanel workOrderAssistantPanel">
           {selectedWorkOrder ? (
-            <div className={canTechnicianAssistant && canSupervisorAssistant ? 'assistantSplit' : 'assistantSplit singleAssistant'}>
+            <>
               {canTechnicianAssistant && (
-                <section className="assistantBox technician" aria-busy={technicianLoading}>
-                  <div className="sectionHeader">
-                    <Bot size={18} />
-                    <div>
-                      <h2>{technicianAssistantName}</h2>
-                      <small>Technician AI assistant with shared LLM configuration</small>
+                <TechnicianExecutionCard
+                  assistant={technicianAssistant}
+                  isLoading={technicianLoading}
+                  onComplete={completeSelectedWorkOrder}
+                  onStart={startWorkOrder}
+                  workOrder={selectedWorkOrder}
+                />
+              )}
+              <div className={canTechnicianAssistant && canSupervisorAssistant ? 'assistantSplit' : 'assistantSplit singleAssistant'}>
+                {canTechnicianAssistant && (
+                  <section className="assistantBox technician" aria-busy={technicianLoading}>
+                    <div className="sectionHeader">
+                      <Bot size={18} />
+                      <div>
+                        <h2>{technicianAssistantName}</h2>
+                        <small>Technician AI assistant with shared LLM configuration</small>
+                      </div>
                     </div>
-                  </div>
-                  <div className="assistantTranscript" aria-label={`${technicianAssistantName} technician chat`}>
-                    {technicianChat.map((turn) => (
-                      <div className={`chatBubble ${turn.role}`} key={turn.id}>
-                        <span>{turn.role === 'assistant' ? technicianAssistantName : 'You'}</span>
-                        {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
-                        <AssistantMessageContent turn={turn} />
-                        {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
-                      </div>
-                    ))}
-                    {technicianLoading && !technicianStreaming && (
-                      <div className="chatBubble assistant" aria-live="polite">
-                        <span>{technicianAssistantName}</span>
-                        <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
-                      </div>
-                    )}
-                  </div>
-                  <form className="assistantComposer" onSubmit={(event) => {
-                    event.preventDefault()
-                    runTechnicianAssistant()
-                  }}>
-                    <textarea
-                      aria-label="Technician observation"
-                      value={technicianObservation}
-                      disabled={technicianLoading}
-                      onChange={(event) => setTechnicianObservation(event.target.value)}
-                    />
-                    <button className="textButton" type="submit" disabled={technicianLoading}>
-                      {technicianLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
-                      Send
-                    </button>
-                  </form>
-                </section>
-              )}
-              {canSupervisorAssistant && (
-                <section className="assistantBox supervisor" aria-busy={supervisorLoading}>
-                  <div className="sectionHeader">
-                    <Bot size={18} />
-                    <div>
-                      <h2>{supervisorAssistantName}</h2>
-                      <small>Supervisor AI assistant with shared LLM configuration</small>
+                    <div className="assistantTranscript" aria-label={`${technicianAssistantName} technician chat`}>
+                      {technicianChat.map((turn) => (
+                        <div className={`chatBubble ${turn.role}`} key={turn.id}>
+                          <span>{turn.role === 'assistant' ? technicianAssistantName : 'You'}</span>
+                          {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
+                          <AssistantMessageContent turn={turn} />
+                          {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+                        </div>
+                      ))}
+                      {technicianLoading && !technicianStreaming && (
+                        <div className="chatBubble assistant" aria-live="polite">
+                          <span>{technicianAssistantName}</span>
+                          <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                  <div className="assistantTranscript" aria-label={`${supervisorAssistantName} supervisor chat`}>
-                    {supervisorChat.map((turn) => (
-                      <div className={`chatBubble ${turn.role}`} key={turn.id}>
-                        <span>{turn.role === 'assistant' ? supervisorAssistantName : 'You'}</span>
-                        {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
-                        <AssistantMessageContent turn={turn} />
-                        {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+                    <form className="assistantComposer" onSubmit={(event) => {
+                      event.preventDefault()
+                      runTechnicianAssistant()
+                    }}>
+                      <textarea
+                        aria-label="Technician observation"
+                        value={technicianObservation}
+                        disabled={technicianLoading}
+                        onChange={(event) => setTechnicianObservation(event.target.value)}
+                      />
+                      <button className="textButton" type="submit" disabled={technicianLoading}>
+                        {technicianLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
+                        Send
+                      </button>
+                    </form>
+                  </section>
+                )}
+                {canSupervisorAssistant && (
+                  <section className="assistantBox supervisor" aria-busy={supervisorLoading}>
+                    <div className="sectionHeader">
+                      <Bot size={18} />
+                      <div>
+                        <h2>{supervisorAssistantName}</h2>
+                        <small>Supervisor AI assistant with shared LLM configuration</small>
                       </div>
-                    ))}
-                    {supervisorLoading && !supervisorStreaming && (
-                      <div className="chatBubble assistant" aria-live="polite">
-                        <span>{supervisorAssistantName}</span>
-                        <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
-                      </div>
-                    )}
-                  </div>
-                  <form className="assistantComposer" onSubmit={(event) => {
-                    event.preventDefault()
-                    runSupervisorAssistant(selectedWorkOrder.id)
-                  }}>
-                    <textarea
-                      aria-label="Supervisor question"
-                      value={supervisorQuestion}
-                      disabled={supervisorLoading}
-                      onChange={(event) => setSupervisorQuestion(event.target.value)}
-                    />
-                    <button className="textButton" type="submit" disabled={supervisorLoading}>
-                      {supervisorLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
-                      Send
-                    </button>
-                  </form>
-                </section>
-              )}
-              {!canTechnicianAssistant && !canSupervisorAssistant && (
-                <section className="assistantBox">
-                  <p className="emptyState">Neo is available to technician and supervisor accounts.</p>
-                </section>
-              )}
-            </div>
+                    </div>
+                    <div className="assistantTranscript" aria-label={`${supervisorAssistantName} supervisor chat`}>
+                      {supervisorChat.map((turn) => (
+                        <div className={`chatBubble ${turn.role}`} key={turn.id}>
+                          <span>{turn.role === 'assistant' ? supervisorAssistantName : 'You'}</span>
+                          {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
+                          <AssistantMessageContent turn={turn} />
+                          {turn.details && <ul>{turn.details.map((item) => <li key={item}>{item}</li>)}</ul>}
+                        </div>
+                      ))}
+                      {supervisorLoading && !supervisorStreaming && (
+                        <div className="chatBubble assistant" aria-live="polite">
+                          <span>{supervisorAssistantName}</span>
+                          <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
+                        </div>
+                      )}
+                    </div>
+                    <form className="assistantComposer" onSubmit={(event) => {
+                      event.preventDefault()
+                      runSupervisorAssistant(selectedWorkOrder.id)
+                    }}>
+                      <textarea
+                        aria-label="Supervisor question"
+                        value={supervisorQuestion}
+                        disabled={supervisorLoading}
+                        onChange={(event) => setSupervisorQuestion(event.target.value)}
+                      />
+                      <button className="textButton" type="submit" disabled={supervisorLoading}>
+                        {supervisorLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
+                        Send
+                      </button>
+                    </form>
+                  </section>
+                )}
+                {!canTechnicianAssistant && !canSupervisorAssistant && (
+                  <section className="assistantBox">
+                    <p className="emptyState">Neo is available to technician and supervisor accounts.</p>
+                  </section>
+                )}
+              </div>
+            </>
           ) : (
             <p className="emptyState">Select a work order to use the assistant.</p>
           )}
@@ -2367,16 +2412,6 @@ export function App() {
             onApprove={approveWorkOrder}
             onStart={startWorkOrder}
           />
-          {canTechnicianAssistant && selectedWorkOrder && (
-            <button
-              className="textButton completeWorkOrderButton"
-              type="button"
-              disabled={technicianLoading || !technicianAssistant}
-              onClick={completeSelectedWorkOrder}
-            >
-              Submit completed work
-            </button>
-          )}
           {workOrderMessage && <p className="inlineStatus">{workOrderMessage}</p>}
         </section>
       </section>
@@ -2391,7 +2426,8 @@ export function App() {
               <StatusTimeline status={selectedWorkOrder.status} />
               <div className="workOrderSummary">
                 <span className="statusPill connected">Priority {selectedWorkOrder.priority}</span>
-                <span className="statusPill fallback">{selectedWorkOrder.status}</span>
+                <StatusBadge status={selectedWorkOrder.status} />
+                <p className="statusDescription">{workOrderStatusDetail(selectedWorkOrder.status).description}</p>
                 <p>{selectedWorkOrder.description}</p>
                 <dl>
                   <dt>Assigned to</dt>
@@ -3343,7 +3379,6 @@ export function App() {
         </div>
         <div className="statusCluster">
           <div className={`statusPill ${apiState}`}>
-            <Database size={16} />
             {apiState === 'connected' ? 'API connected' : 'Sample view'}
           </div>
           <div className="userPill">
@@ -3842,6 +3877,105 @@ function KnowledgeEvidenceList({ evidence }: { evidence: AssetDetail['knowledge'
   )
 }
 
+function StatusBadge({ status }: { status: WorkOrderStatus }) {
+  const detail = workOrderStatusDetail(status)
+  return (
+    <span className={`workOrderStatusBadge status-${status.toLowerCase()}`} title={`${status}: ${detail.description}`}>
+      <strong>{detail.label}</strong>
+    </span>
+  )
+}
+
+function TechnicianExecutionCard({
+  assistant,
+  isLoading,
+  onComplete,
+  onStart,
+  workOrder,
+}: {
+  assistant: TechnicianAssistantResponse | null
+  isLoading: boolean
+  onComplete: () => void
+  onStart: (workOrderId: string) => void
+  workOrder: WorkOrder
+}) {
+  const statusDetail = workOrderStatusDetail(workOrder.status)
+  const canStart = ['APPR', 'WMATL'].includes(workOrder.status)
+  const canComplete = Boolean(assistant) && !['COMP', 'CLOSE'].includes(workOrder.status)
+  const steps = [
+    {
+      title: 'Confirm readiness',
+      detail: `${statusDetail.label}: ${statusDetail.description}`,
+      state: ['WAPPR'].includes(workOrder.status) ? 'current' : 'done',
+    },
+    {
+      title: 'Start field execution',
+      detail: canStart ? 'Move this approved work order to in progress before executing field work.' : 'Field execution has already moved past the start gate.',
+      state: ['APPR', 'WMATL'].includes(workOrder.status) ? 'current' : ['INPRG', 'COMP', 'CLOSE'].includes(workOrder.status) ? 'done' : 'pending',
+    },
+    {
+      title: 'Capture observations',
+      detail: assistant ? assistant.next_prompt : 'Use Neo to record abnormal conditions, measurements, and evidence from the asset.',
+      state: assistant ? 'done' : ['INPRG'].includes(workOrder.status) ? 'current' : 'pending',
+    },
+    {
+      title: 'Apply guided action',
+      detail: assistant?.recommendations[0] ?? workOrder.recommended_action,
+      state: assistant ? 'current' : 'pending',
+    },
+    {
+      title: 'Submit completion',
+      detail: assistant?.completion_summary ?? 'Completion unlocks after Neo provides the problem code, failure class, and summary.',
+      state: ['COMP', 'CLOSE'].includes(workOrder.status) ? 'done' : assistant ? 'current' : 'pending',
+    },
+  ]
+
+  return (
+    <section className="technicianExecutionCard" aria-label="Technician execution workflow">
+      <div className="sectionHeader">
+        <ClipboardList size={18} />
+        <div>
+          <h2>Technician Execution</h2>
+          <small>{workOrder.id} · {workOrder.title}</small>
+        </div>
+      </div>
+      <div className="executionStatusLine">
+        <StatusBadge status={workOrder.status} />
+        <span>{statusDetail.description}</span>
+      </div>
+      <ol className="executionSteps">
+        {steps.map((step, index) => (
+          <li className={step.state} key={step.title}>
+            <span>{index + 1}</span>
+            <div>
+              <strong>{step.title}</strong>
+              <p>{step.detail}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div className="executionActions">
+        <button
+          className="outlineButton"
+          type="button"
+          disabled={!canStart || isLoading}
+          onClick={() => onStart(workOrder.id)}
+        >
+          Start work
+        </button>
+        <button
+          className="textButton"
+          type="button"
+          disabled={!canComplete || isLoading}
+          onClick={onComplete}
+        >
+          Submit completed work
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function WorkOrderTable({
   workOrders,
   onOpen,
@@ -3900,7 +4034,8 @@ function WorkOrderTable({
             </button>
             {!compact && <span>{order.recommended_action}</span>}
             <span className="workOrderStatusCell">
-              <span>{order.status}</span>
+              <StatusBadge status={order.status} />
+              {!compact && <small>{workOrderStatusDetail(order.status).description}</small>}
               {canApproveOrder && (
                 <button
                   aria-label={`Approve ${order.id}`}
@@ -3966,15 +4101,14 @@ function MiniBars({ values }: { values: number[] }) {
   )
 }
 
-function StatusTimeline({ status }: { status: string }) {
-  const statuses = ['WAPPR', 'WMATL', 'APPR', 'INPRG', 'COMP', 'CLOSE']
-  const activeIndex = Math.max(0, statuses.indexOf(status))
+function StatusTimeline({ status }: { status: WorkOrderStatus }) {
+  const activeIndex = Math.max(0, workOrderStatusFlow.indexOf(status))
   return (
     <div className="statusTimeline" aria-label="Work order status">
-      {statuses.map((item, index) => (
+      {workOrderStatusFlow.map((item, index) => (
         <span className={index <= activeIndex ? 'active' : ''} key={item}>
           <i />
-          {item}
+          <strong>{workOrderStatusDetail(item).label}</strong>
         </span>
       ))}
     </div>
