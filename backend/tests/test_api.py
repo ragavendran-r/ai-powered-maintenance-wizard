@@ -1207,6 +1207,30 @@ def test_retrieval_uses_vector_store_hits(monkeypatch):
     assert evidence[0].relevance_reason == "Matched by qdrant vector search."
 
 
+def test_retrieval_uses_qdrant_learning_example_hits(monkeypatch):
+    monkeypatch.setattr("app.services.retrieval.configured_vector_store_name", lambda: "qdrant")
+    monkeypatch.setattr("app.services.retrieval.search_document_chunks", lambda query, equipment_id, limit: [])
+    monkeypatch.setattr(
+        "app.services.retrieval.search_learning_examples",
+        lambda query, equipment_id, limit: [
+            VectorStoreHit(
+                source_id="LEX-QDRANT",
+                title="Approved learning: feedback",
+                content="Root cause: loose foundation bolts. Action: retorque and recheck alignment.",
+                source_type="learning_example",
+                equipment_id="RM-DRIVE-01",
+                score=0.93,
+            )
+        ],
+    )
+
+    evidence = retrieve_evidence("loose foundation bolts", "RM-DRIVE-01", limit=1, use_reranker=False)
+
+    assert evidence[0].source_type == "learning_example"
+    assert evidence[0].source_id == "LEX-QDRANT"
+    assert evidence[0].relevance_reason == "Matched by qdrant approved learning example search."
+
+
 def test_learning_model_registration_rejects_active_status():
     headers = auth_headers("reliability@plant.local")
     response = client.post(
@@ -1303,6 +1327,63 @@ def test_rag_embedding_profile_and_migration_controls_are_audited():
     reindex_job = reindex_response.json()
     assert reindex_job["job_type"] == "rag_reindex"
     assert reindex_job["input_refs"]["target_collection"] == "maintenance_wizard_documents_v2"
+
+
+def test_rag_reindex_syncs_approved_learning_examples(monkeypatch):
+    headers = auth_headers("maintenance@plant.local")
+    client.post(
+        "/api/recommendations/rec-qdrant-learning-sync/feedback",
+        json={
+            "equipment_id": "RM-DRIVE-01",
+            "status": "accepted",
+            "actual_root_cause": "Loose foundation bolt resonance",
+            "action_taken": "Retorque foundation bolts and recheck alignment",
+            "outcome": "Vibration normalized after bolt retorque",
+        },
+        headers=headers,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_index_document_chunks(chunks, *, collection_name=None, recreate_collection=False):
+        return {
+            "store": "qdrant",
+            "collection": collection_name,
+            "embedding_profile_id": "test-profile",
+            "indexed": len(chunks),
+            "state": "indexed",
+        }
+
+    def fake_sync_learning_examples(examples, *, collection_name=None, min_judge_score=0.65):
+        captured["collection_name"] = collection_name
+        captured["examples"] = examples
+        captured["min_judge_score"] = min_judge_score
+        return {
+            "store": "qdrant",
+            "collection": collection_name,
+            "embedding_profile_id": "test-profile",
+            "eligible": len(examples),
+            "indexed": len(examples),
+            "deleted": 0,
+            "state": "synced",
+        }
+
+    monkeypatch.setattr(repository, "index_document_chunks", fake_index_document_chunks)
+    monkeypatch.setattr(repository, "sync_learning_examples_index", fake_sync_learning_examples)
+
+    response = client.post(
+        "/api/learning/rag/reindex",
+        json={"target_collection": "maintenance_wizard_documents_learning", "recreate_collection": False},
+        headers=auth_headers("reliability@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job_type"] == "rag_reindex"
+    assert payload["output_refs"]["learning_index_result"]["state"] == "synced"
+    assert captured["collection_name"] == "maintenance_wizard_documents_learning"
+    examples = captured["examples"]
+    assert isinstance(examples, list)
+    assert any(example["source_type"] == "feedback" and example["approved"] for example in examples)
 
 
 def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):

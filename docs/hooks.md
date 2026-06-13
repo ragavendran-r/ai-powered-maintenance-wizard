@@ -109,6 +109,8 @@ scripts/notify-complete.sh "Maintenance Wizard" "Task complete."
 
 For mobile delivery, set `MOBILE_NTFY_TOPIC` to an ntfy topic subscribed from the user's phone. If desktop or mobile notification delivery is unavailable, not configured, or fails, note that in the final response.
 
+In the same completion update, list the active goal's remaining in-progress and pending tasks with practical ETA ranges so the user can track what is left.
+
 Before demo or handoff:
 
 ```bash

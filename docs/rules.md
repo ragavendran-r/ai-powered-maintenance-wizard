@@ -26,6 +26,7 @@ Use this file for durable product and engineering rules. Use `docs/hooks.md` for
 - Documentation-only changes require a link/path sanity check for touched docs.
 - Update `docs/progress.md` at the end of each implementation session with completed work, checks run, next steps, blockers, and decisions.
 - Send desktop and mobile notifications when a requested task is complete.
+- Whenever a task is completed, include a short pending-task update for the active goal with estimated time to complete the remaining work.
 
 ## Completion Notifications
 
@@ -40,6 +41,7 @@ Use this file for durable product and engineering rules. Use `docs/hooks.md` for
   osascript -e 'display notification "Task complete." with title "Maintenance Wizard"'
   ```
 - If desktop or mobile notification fails or is unavailable, mention that in the final response.
+- In the same completion response, include the active goal's remaining in-progress/pending tasks and practical ETA ranges.
 
 ## Product Behavior
 

@@ -8,7 +8,7 @@ import uuid
 from app.core.security import hash_password
 from app.data.database import connect, initialize_database
 from app.services.vector_index import build_chunks_for_document
-from app.services.vector_store import index_document_chunks
+from app.services.vector_store import index_document_chunks, sync_learning_examples_index
 
 
 _READY = False
@@ -358,10 +358,17 @@ def rebuild_all_document_chunks(
         collection_name=collection_name,
         recreate_collection=recreate_collection,
     )
+    learning_examples = list_learning_examples(limit=10000)
+    learning_index_result = sync_learning_examples_index(
+        learning_examples,
+        collection_name=collection_name,
+    )
     return {
         "document_count": len(documents),
         "chunk_count": len(chunk_rows),
         "index_result": index_result,
+        "learning_example_count": len(learning_examples),
+        "learning_index_result": learning_index_result,
     }
 
 

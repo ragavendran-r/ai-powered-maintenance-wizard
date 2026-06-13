@@ -10,7 +10,7 @@ The production design combines three layers:
 - **PEFT** for controlled offline/local adapter tuning from curated JSONL snapshots.
 - **NATS JetStream** for asynchronous learning jobs, retries, durable progress tracking, and eventual scale-out beyond one FastAPI process.
 
-Production RAG requires a real vector database. Maintenance Wizard uses Qdrant as the default open-source vector store for document chunks and approved knowledge. SQLite/local-vector retrieval exists only for tests, disconnected development, or emergency fallback. The active implementation scope is production-aligned but constrained to the local Mac stack; Postgres migration, bucket-native object-store hardening, and environment-specific adapter-loader automation are future phases.
+Production RAG requires a real vector database. Maintenance Wizard uses Qdrant as the default open-source vector store for document chunks and approved, judge-qualified learning examples. SQLite/local-vector retrieval exists only for tests, disconnected development, or emergency fallback. The active implementation scope is production-aligned but constrained to the local Mac stack; Postgres migration, bucket-native object-store hardening, and environment-specific adapter-loader automation are future phases.
 
 ## Architecture
 
@@ -129,7 +129,9 @@ Qdrant is the production vector store for RAG:
 - `RAG_QDRANT_URL=http://localhost:6333`
 - `RAG_QDRANT_COLLECTION=maintenance_wizard_documents`
 
-Uploaded and seeded document chunks are indexed into Qdrant after SQLite persistence. Retrieval queries Qdrant first, filters hits by asset context, and falls back to SQLite/local-vector scoring only when Qdrant is unavailable or explicitly disabled for tests.
+Uploaded and seeded document chunks are indexed into Qdrant after SQLite persistence. Approved, judge-qualified learning examples are synchronized into the same collection as separate RAG entries during learning refresh, reviewer approval changes, rejudge, and full RAG reindex flows. The payload carries a RAG kind so document chunks and learning examples can be searched separately while sharing the active embedding profile and collection migration controls.
+
+Retrieval queries Qdrant first for document evidence and approved learning examples, filters hits by asset context, deduplicates sources, and falls back to SQLite/local-vector scoring only when Qdrant is unavailable or explicitly disabled for tests.
 
 Learning Review exposes the active embedding profile, collection vector shape, migration reasons, profile activation, migration preview, Qdrant migration execution, and current-profile reindex controls. Document chunks persist the embedding profile id/provider/model/version/dimensions/distance so retrieval can avoid mixing incompatible embedding spaces during fallback and migration windows.
 

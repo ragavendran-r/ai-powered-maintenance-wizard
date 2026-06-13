@@ -81,7 +81,7 @@ Keep `docs/progress.md` updated at the end of each implementation session. Recor
 
 ## Project Rules And Hooks
 
-Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/hooks.md` for branch, pull request, verification, notification, UI validation, and demo handoff guardrails. In particular, do not commit or push directly to `main`; use a feature branch and raise a pull request targeting `main`. For UI layout, streaming, navigation, role visibility, or interaction changes, use the Playwright validation flow documented in `docs/hooks.md`. Send desktop and mobile notifications whenever a requested task is complete; if either notification channel is unavailable, not configured, or fails, mention that in the final response.
+Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/hooks.md` for branch, pull request, verification, notification, UI validation, and demo handoff guardrails. In particular, do not commit or push directly to `main`; use a feature branch and raise a pull request targeting `main`. For UI layout, streaming, navigation, role visibility, or interaction changes, use the Playwright validation flow documented in `docs/hooks.md`. Send desktop and mobile notifications whenever a requested task is complete; if either notification channel is unavailable, not configured, or fails, mention that in the final response. Include remaining active-goal tasks and ETA ranges whenever a task is completed. Spawn subagents for cleanly parallelizable work when appropriate, and close them as soon as their result has been consumed.
 
 ## Latest Session Progress
 

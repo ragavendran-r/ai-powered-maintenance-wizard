@@ -11,6 +11,10 @@ from app.services.embeddings import EmbeddingProfile, current_embedding_profile,
 from app.services.vector_index import decode_embedding, embed_text
 
 
+RAG_KIND_DOCUMENT_CHUNK = "document_chunk"
+RAG_KIND_LEARNING_EXAMPLE = "learning_example"
+
+
 @dataclass
 class VectorStoreHit:
     source_id: str
@@ -167,6 +171,69 @@ def index_document_chunks(
         }
 
 
+def sync_learning_examples_index(
+    examples: list[dict[str, Any]],
+    *,
+    collection_name: Optional[str] = None,
+    min_judge_score: float = 0.65,
+) -> dict[str, Any]:
+    settings = get_settings()
+    collection = collection_name or settings.rag_qdrant_collection
+    profile = current_embedding_profile()
+    eligible = [
+        _learning_example_to_point(example, profile)
+        for example in examples
+        if _indexable_learning_example(example, min_judge_score)
+    ]
+    stale_point_ids = [
+        _learning_example_point_id(example["id"], profile)
+        for example in examples
+        if not _indexable_learning_example(example, min_judge_score)
+    ]
+    if configured_vector_store_name() != "qdrant":
+        return {
+            "store": configured_vector_store_name(),
+            "collection": collection,
+            "embedding_profile_id": profile.id,
+            "eligible": len(eligible),
+            "indexed": 0,
+            "deleted": 0,
+            "state": "skipped",
+        }
+    try:
+        _ensure_qdrant_collection(collection, profile)
+        if eligible:
+            with _client() as client:
+                response = client.put(
+                    f"/collections/{collection}/points",
+                    params={"wait": "true"},
+                    json={"points": eligible},
+                )
+            response.raise_for_status()
+        if stale_point_ids:
+            _delete_points(collection, stale_point_ids)
+        return {
+            "store": "qdrant",
+            "collection": collection,
+            "embedding_profile_id": profile.id,
+            "eligible": len(eligible),
+            "indexed": len(eligible),
+            "deleted": len(stale_point_ids),
+            "state": "synced",
+        }
+    except Exception as exc:
+        return {
+            "store": "qdrant",
+            "collection": collection,
+            "embedding_profile_id": profile.id,
+            "eligible": len(eligible),
+            "indexed": 0,
+            "deleted": 0,
+            "state": "fallback",
+            "error": str(exc),
+        }
+
+
 def search_document_chunks(query: str, equipment_id: Optional[str], limit: int) -> list[VectorStoreHit]:
     if configured_vector_store_name() != "qdrant":
         return []
@@ -174,19 +241,7 @@ def search_document_chunks(query: str, equipment_id: Optional[str], limit: int) 
     try:
         _ensure_qdrant_collection(get_settings().rag_qdrant_collection, profile)
         candidate_limit = max(limit * 4, limit, 1)
-        body: dict[str, Any] = {
-            "vector": embed_text(query),
-            "limit": candidate_limit,
-            "with_payload": True,
-            "filter": {
-                "must": [
-                    {
-                        "key": "embedding_profile_id",
-                        "match": {"value": profile.id},
-                    }
-                ]
-            },
-        }
+        body = _search_body(query, profile, candidate_limit)
         with _client() as client:
             response = client.post(
                 f"/collections/{get_settings().rag_qdrant_collection}/points/search",
@@ -202,6 +257,9 @@ def search_document_chunks(query: str, equipment_id: Optional[str], limit: int) 
         source_id = str(payload.get("source_id") or "")
         if not source_id:
             continue
+        rag_kind = payload.get("rag_kind")
+        if rag_kind not in (None, "", RAG_KIND_DOCUMENT_CHUNK):
+            continue
         hit_equipment_id = payload.get("equipment_id")
         if equipment_id and hit_equipment_id not in (equipment_id, None, ""):
             continue
@@ -211,6 +269,49 @@ def search_document_chunks(query: str, equipment_id: Optional[str], limit: int) 
                 title=str(payload.get("title") or "Document chunk"),
                 content=str(payload.get("content") or ""),
                 source_type=str(payload.get("source_type") or "document"),
+                equipment_id=hit_equipment_id,
+                score=float(result.get("score") or 0),
+            )
+        )
+        if len(hits) >= limit:
+            break
+    return hits
+
+
+def search_learning_examples(query: str, equipment_id: Optional[str], limit: int) -> list[VectorStoreHit]:
+    if configured_vector_store_name() != "qdrant":
+        return []
+    profile = current_embedding_profile()
+    try:
+        _ensure_qdrant_collection(get_settings().rag_qdrant_collection, profile)
+        candidate_limit = max(limit * 4, limit, 1)
+        body = _search_body(query, profile, candidate_limit, rag_kind=RAG_KIND_LEARNING_EXAMPLE)
+        with _client() as client:
+            response = client.post(
+                f"/collections/{get_settings().rag_qdrant_collection}/points/search",
+                json=body,
+            )
+        response.raise_for_status()
+        results = response.json().get("result", [])
+    except Exception:
+        return []
+    hits: list[VectorStoreHit] = []
+    for result in results:
+        payload = result.get("payload") or {}
+        if payload.get("rag_kind") != RAG_KIND_LEARNING_EXAMPLE:
+            continue
+        source_id = str(payload.get("source_id") or "")
+        if not source_id:
+            continue
+        hit_equipment_id = payload.get("equipment_id")
+        if equipment_id and hit_equipment_id not in (equipment_id, None, ""):
+            continue
+        hits.append(
+            VectorStoreHit(
+                source_id=source_id,
+                title=str(payload.get("title") or "Approved learning example"),
+                content=str(payload.get("content") or ""),
+                source_type=RAG_KIND_LEARNING_EXAMPLE,
                 equipment_id=hit_equipment_id,
                 score=float(result.get("score") or 0),
             )
@@ -316,11 +417,35 @@ def _ensure_qdrant_collection(
         create_response.raise_for_status()
 
 
+def _search_body(
+    query: str,
+    profile: EmbeddingProfile,
+    limit: int,
+    *,
+    rag_kind: Optional[str] = None,
+) -> dict[str, Any]:
+    must = [
+        {
+            "key": "embedding_profile_id",
+            "match": {"value": profile.id},
+        }
+    ]
+    if rag_kind:
+        must.append({"key": "rag_kind", "match": {"value": rag_kind}})
+    return {
+        "vector": embed_text(query, profile),
+        "limit": limit,
+        "with_payload": True,
+        "filter": {"must": must},
+    }
+
+
 def _chunk_to_point(chunk: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(uuid.uuid5(uuid.NAMESPACE_URL, chunk["id"])),
         "vector": decode_embedding(chunk["embedding"]),
         "payload": {
+            "rag_kind": RAG_KIND_DOCUMENT_CHUNK,
             "source_id": chunk["id"],
             "document_id": chunk["document_id"],
             "chunk_index": chunk["chunk_index"],
@@ -336,6 +461,64 @@ def _chunk_to_point(chunk: dict[str, Any]) -> dict[str, Any]:
             "embedding_distance": chunk.get("embedding_distance"),
         },
     }
+
+
+def _indexable_learning_example(example: dict[str, Any], min_judge_score: float) -> bool:
+    return (
+        bool(example.get("approved"))
+        and float(example.get("judge_score") or 0) >= min_judge_score
+    )
+
+
+def _learning_example_point_id(example_id: str, profile: EmbeddingProfile) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"learning-example:{profile.id}:{example_id}"))
+
+
+def _learning_example_to_point(example: dict[str, Any], profile: EmbeddingProfile) -> dict[str, Any]:
+    text = "\n".join(
+        [
+            str(example.get("instruction") or ""),
+            str(example.get("input_text") or ""),
+            str(example.get("expected_output") or ""),
+        ]
+    )
+    source_type = str(example.get("source_type") or "learning")
+    return {
+        "id": _learning_example_point_id(str(example["id"]), profile),
+        "vector": embed_text(text, profile),
+        "payload": {
+            "rag_kind": RAG_KIND_LEARNING_EXAMPLE,
+            "source_id": example["id"],
+            "learning_source_type": source_type,
+            "learning_source_id": example.get("source_id"),
+            "work_order_id": example.get("work_order_id"),
+            "source_type": RAG_KIND_LEARNING_EXAMPLE,
+            "equipment_id": example.get("equipment_id"),
+            "title": f"Approved learning: {source_type}",
+            "content": example.get("expected_output") or "",
+            "instruction": example.get("instruction"),
+            "judge_score": example.get("judge_score"),
+            "judge_label": example.get("judge_label"),
+            "embedding_profile_id": profile.id,
+            "embedding_provider": profile.provider,
+            "embedding_model": profile.model,
+            "embedding_version": profile.version,
+            "embedding_dimensions": profile.dimensions,
+            "embedding_distance": profile.distance,
+        },
+    }
+
+
+def _delete_points(collection: str, point_ids: list[str]) -> None:
+    if not point_ids:
+        return
+    with _client() as client:
+        response = client.post(
+            f"/collections/{collection}/points/delete",
+            params={"wait": "true"},
+            json={"points": point_ids},
+        )
+    response.raise_for_status()
 
 
 def _collection_vector_size(collection: dict[str, Any]) -> Optional[int]:
