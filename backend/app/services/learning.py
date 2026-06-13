@@ -44,6 +44,7 @@ LEARNING_JOB_SUBJECTS = {
     "adapter_registered": "adapter.registered",
     "model_promotion": "adapter.promoted",
     "rag_reindex": "rag.reindex.requested",
+    "artifact_cleanup": "artifact.cleanup.requested",
 }
 
 
@@ -379,12 +380,14 @@ def queue_adapter_deployment_job(
         raise ValueError("Learning model version not found")
     if model.get("status") == "active":
         raise ValueError("Active model versions are already serving and cannot be deployed as candidates")
+    artifact_uri = request.artifact_uri or model.get("adapter_path")
+    _validate_artifact_reference(artifact_uri, request.artifact_hash)
     input_refs = {
         "model_version_id": model["id"],
         "runtime_provider": request.runtime_provider,
         "served_model_name": request.served_model_name or model.get("model_name"),
         "base_url": request.base_url,
-        "artifact_uri": request.artifact_uri or model.get("adapter_path"),
+        "artifact_uri": artifact_uri,
         "artifact_hash": request.artifact_hash,
         "notes": request.notes,
     }
@@ -447,12 +450,7 @@ def _validated_runtime_deployment(model: dict[str, Any]) -> Optional[dict[str, A
     artifact_uri = deployment.get("artifact_uri")
     if artifact_uri and artifact_uri != model.get("adapter_path"):
         raise ValueError("Verified runtime deployment artifact URI does not match the model adapter path")
-    artifact_hash = deployment.get("artifact_hash")
-    if artifact_hash:
-        artifacts = repository.list_learning_artifacts(limit=100)
-        known_hashes = {artifact.get("content_hash") for artifact in artifacts if artifact.get("content_hash")}
-        if known_hashes and artifact_hash not in known_hashes:
-            raise ValueError("Verified runtime deployment artifact hash does not match a persisted learning artifact")
+    _validate_artifact_reference(artifact_uri, deployment.get("artifact_hash"))
     return deployment
 
 
@@ -473,6 +471,29 @@ def _validated_promotion_evaluation(evaluation_run_id: str, model_version_id: st
 
 def _append_note(existing: Optional[str], note: str) -> str:
     return "\n".join(part for part in [existing, note.strip()] if part)
+
+
+def _validate_artifact_reference(artifact_uri: Optional[str], artifact_hash: Optional[str]) -> None:
+    if not artifact_uri and not artifact_hash:
+        return
+    artifacts = repository.list_learning_artifacts(limit=1000)
+    if not artifacts:
+        return
+    uri_matches = [artifact for artifact in artifacts if artifact_uri and artifact_uri in _artifact_reference_uris(artifact)]
+    hash_matches = [artifact for artifact in artifacts if artifact_hash and artifact.get("content_hash") == artifact_hash]
+    if artifact_hash and not hash_matches:
+        raise ValueError("Adapter artifact hash does not match a persisted learning artifact")
+    if artifact_uri and artifact_hash and uri_matches:
+        if not any(artifact.get("content_hash") == artifact_hash for artifact in uri_matches):
+            raise ValueError("Adapter artifact hash does not match the artifact URI")
+    if artifact_uri and artifact_hash and hash_matches:
+        if not any(artifact_uri in _artifact_reference_uris(artifact) for artifact in hash_matches):
+            raise ValueError("Adapter artifact URI does not match the artifact hash")
+
+
+def _artifact_reference_uris(artifact: dict[str, Any]) -> set[str]:
+    metadata = artifact.get("metadata") or {}
+    return {str(value) for value in {artifact.get("uri"), metadata.get("local_path")} if value}
 
 
 def record_learning_job(

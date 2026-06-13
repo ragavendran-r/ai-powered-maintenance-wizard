@@ -21,6 +21,7 @@ import {
   Send,
   ShieldAlert,
   Sparkles,
+  Trash2,
   Upload,
   UserPlus,
   Users,
@@ -45,6 +46,7 @@ import {
   type LearningEvaluationRun,
   type LearningExample,
   type LearningArtifact,
+  type LearningArtifactCleanupResult,
   type LearningJob,
   type LearningModelDeployment,
   type LearningModelPromotion,
@@ -422,6 +424,7 @@ export function App() {
   const [learningExamples, setLearningExamples] = useState<LearningExample[]>([])
   const [learningDatasets, setLearningDatasets] = useState<LearningDatasetSnapshot[]>([])
   const [learningDeployments, setLearningDeployments] = useState<LearningModelDeployment[]>([])
+  const [artifactCleanupResult, setArtifactCleanupResult] = useState<LearningArtifactCleanupResult | null>(null)
   const [learningMessage, setLearningMessage] = useState('')
   const [learningLoading, setLearningLoading] = useState(false)
   const [learningDatasetName, setLearningDatasetName] = useState('maintenance-wizard-learning-snapshot')
@@ -486,6 +489,7 @@ export function App() {
     setLearningExamples([])
     setLearningDatasets([])
     setLearningDeployments([])
+    setArtifactCleanupResult(null)
     setLearningMessage('')
     setLearningLoading(false)
     setAdapterProvider('openai')
@@ -2439,6 +2443,9 @@ export function App() {
   const learningArtifacts: LearningArtifact[] = learningSummary?.recent_artifacts ?? []
   const learningPromotions: LearningModelPromotion[] = learningSummary?.recent_promotions ?? []
   const learningDeploymentRecords = mergeLearningDeployments(learningDeployments, learningSummary?.recent_deployments ?? [])
+  const artifactRetention = learningSummary?.artifact_store?.retention ?? {}
+  const artifactRetentionState = String(artifactRetention.state ?? 'not configured')
+  const artifactRetentionDays = String(artifactRetention.retention_days ?? 'unknown')
   const latestDeploymentForModel = (modelId: string) =>
     learningDeploymentRecords.find((deployment) => deployment.model_version_id === modelId)
   const latestVerifiedDeploymentForModel = (modelId: string) =>
@@ -2514,6 +2521,28 @@ export function App() {
       setLearningMessage(`Deployment job ${job.id} requested with status ${job.status}`)
     } catch {
       setLearningMessage('Adapter deployment could not be queued')
+    } finally {
+      setLearningLoading(false)
+    }
+  }
+
+  async function previewLearningArtifactCleanup() {
+    setLearningLoading(true)
+    setLearningMessage('')
+    try {
+      const result = await api.cleanupLearningArtifacts({
+        dry_run: true,
+        notes: `Lifecycle preview requested from Learning Review by ${currentUser?.email ?? 'reviewer'}.`,
+      })
+      const summary = await api.learningSummary()
+      setArtifactCleanupResult(result)
+      setLearningSummary(summary)
+      const issueSuffix = result.errors.length ? ` ${result.errors.join(' ')}` : ''
+      setLearningMessage(
+        `Artifact cleanup preview found ${result.expired_count} eligible and ${result.protected_count} protected artifact(s).${issueSuffix}`,
+      )
+    } catch {
+      setLearningMessage('Artifact cleanup preview could not be completed')
     } finally {
       setLearningLoading(false)
     }
@@ -2652,7 +2681,65 @@ export function App() {
             <strong>{String(learningSummary?.artifact_store?.prefix)}</strong>
           </span>
         )}
+        <span>
+          <small>Retention</small>
+          <strong>{artifactRetentionState} · {artifactRetentionDays} days</strong>
+        </span>
+        <button className="outlineButton" onClick={previewLearningArtifactCleanup} disabled={learningLoading}>
+          {learningLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Trash2 size={16} />}
+          Preview cleanup
+        </button>
       </div>
+      {artifactCleanupResult && (
+        <div className={`artifactCleanupResult ${artifactCleanupResult.errors.length ? 'warning' : ''}`}>
+          <span>
+            <strong>Artifact lifecycle preview</strong>
+            <small>
+              {artifactCleanupResult.store} · {artifactCleanupResult.dry_run ? 'dry run' : 'apply'} ·
+              {artifactCleanupResult.cleanup_enabled ? ' cleanup enabled' : ' cleanup disabled'}
+            </small>
+          </span>
+          <div className="artifactCleanupStats">
+            <span>
+              <small>Eligible</small>
+              <strong>{artifactCleanupResult.expired_count}</strong>
+            </span>
+            <span>
+              <small>Protected</small>
+              <strong>{artifactCleanupResult.protected_count}</strong>
+            </span>
+            <span>
+              <small>Deleted</small>
+              <strong>{artifactCleanupResult.deleted_count}</strong>
+            </span>
+          </div>
+          {artifactCleanupResult.errors.length > 0 && (
+            <p>{artifactCleanupResult.errors.join(' ')}</p>
+          )}
+          {artifactCleanupResult.candidates.length > 0 && (
+            <div className="artifactCleanupList">
+              <small>Cleanup candidates</small>
+              {artifactCleanupResult.candidates.slice(0, 4).map((item) => (
+                <span key={String(item.artifact_id ?? item.path ?? JSON.stringify(item))}>
+                  <strong>{String(item.artifact_type ?? 'artifact')}</strong>
+                  <small>{String(item.path ?? item.uri ?? item.artifact_id ?? 'registered artifact')}</small>
+                </span>
+              ))}
+            </div>
+          )}
+          {artifactCleanupResult.protected.length > 0 && (
+            <div className="artifactCleanupList">
+              <small>Protected artifacts</small>
+              {artifactCleanupResult.protected.slice(0, 4).map((item) => (
+                <span key={String(item.artifact_id ?? item.path ?? JSON.stringify(item))}>
+                  <strong>{String(item.artifact_type ?? 'artifact')}</strong>
+                  <small>{String(item.protected_reason ?? 'protected by lifecycle policy')}</small>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="peftTrainerStatus">
         <span>
           <strong>PEFT trainer</strong>

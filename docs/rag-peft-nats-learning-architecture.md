@@ -119,6 +119,7 @@ Current implementation:
 - Worker-executed PEFT jobs prepare a JSONL dataset artifact and training manifest, persist `learning_artifacts` rows with content hashes, and mark the job as awaiting a trainer when no trainer command is configured. Artifacts can be stored on the local filesystem for offline runs or uploaded to S3-compatible object storage such as MinIO by setting `LEARNING_ARTIFACT_STORE=s3`.
 - When `LEARNING_PEFT_TRAINER_COMMAND` is configured, the worker invokes the command without a shell, passes dataset/manifest/output paths through environment variables, enforces `LEARNING_PEFT_TRAINER_TIMEOUT_SECONDS`, stores trainer logs and adapter manifests, and registers the result as a `candidate` model version. The promotion gate still requires a passing evaluation and human reviewer action.
 - The bundled `scripts/peft/train_qwen_lora.py` template provides an optional local Qwen/SLM LoRA or QLoRA path. It consumes the worker-provided `MW_PEFT_DATASET_PATH`, `MW_PEFT_MANIFEST_PATH`, `MW_PEFT_OUTPUT_DIR`, `MW_PEFT_ADAPTER_NAME`, and `MW_PEFT_BASE_MODEL` variables, imports heavy trainer dependencies only during real training, and writes `adapter_manifest.json` in the registration format the backend consumes.
+- Artifact cleanup is registry-first. The cleanup API only evaluates rows in `learning_artifacts`, refuses to sweep arbitrary filesystem paths, protects active/candidate/promoted model adapter references and verified deployment artifacts, and exposes dry-run previews to Learning Review. Deletion requires both a non-dry-run admin or reliability-engineer request and `LEARNING_ARTIFACT_CLEANUP_ENABLED=true`; S3-compatible stores are intentionally read-only until bucket-native lifecycle and access policies are configured.
 
 ## Vector Store
 
@@ -186,7 +187,7 @@ Required production tables:
 - `learning_dataset_members`
 - `learning_artifacts`
 
-`learning_jobs` tracks queued/running/completed/failed state, retry count, error message, requested user, timestamps, and input/output references. `learning_artifacts` tracks worker-produced dataset, manifest, and future adapter artifacts by job id, type, URI, metadata, and content hash.
+`learning_jobs` tracks queued/running/completed/failed state, retry count, error message, requested user, timestamps, and input/output references. `learning_artifacts` tracks worker-produced dataset, manifest, and future adapter artifacts by job id, type, URI, metadata, and content hash. Artifact cleanup previews and apply attempts are also audited as completed `artifact_cleanup` learning jobs.
 
 ## Operational Controls
 
@@ -216,7 +217,7 @@ Production should track:
 2. Keep Qdrant and NATS enabled in dev, local Kubernetes, and production-like runs.
 3. Keep `learning_jobs`, `learning_artifacts`, and NATS publishing enabled for production-like runs.
 4. Run the learning worker process against NATS JetStream.
-5. Configure S3-compatible artifact storage for production-like runs and add bucket retention/access policies.
+5. Configure S3-compatible artifact storage for production-like runs and add bucket retention/access policies; keep app-side deletion disabled for object stores until those controls are reviewed.
 6. Validate the bundled PEFT trainer template on the target CUDA or LoRA training host before enabling it in shared environments.
 7. Configure the environment-specific adapter loader for LM Studio, Ollama, or the hosted serving runtime, using the app's adapter deployment records and gates as the audit/control plane.
 8. Move prototype SQLite learning state to Postgres for multi-worker production use.

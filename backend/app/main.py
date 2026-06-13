@@ -42,6 +42,9 @@ from app.models.schemas import (
     LearningEvaluationRun,
     LearningExample,
     LearningExampleUpdateRequest,
+    LearningArtifact,
+    LearningArtifactCleanupRequest,
+    LearningArtifactCleanupResult,
     LearningJob,
     LearningModelPromotion,
     LearningModelDeployment,
@@ -76,6 +79,7 @@ from app.models.schemas import (
 from app.services.assets import get_asset_detail as load_asset_detail
 from app.services.assets import list_assets as load_assets
 from app.services.assets import stream_asset_reliability_prediction
+from app.services.artifact_store import cleanup_registered_learning_artifacts
 from app.services.document_intelligence import analyze_documents, document_intelligence
 from app.services.iot_streaming import StreamingIngestionService
 from app.services.learning import (
@@ -111,6 +115,7 @@ from app.services.work_order_assistant import (
 
 
 LEARNING_REVIEW_ROLES = ("admin", "maintenance_engineer", "reliability_engineer")
+LEARNING_ARTIFACT_CLEANUP_ROLES = {"admin", "reliability_engineer"}
 
 
 @asynccontextmanager
@@ -727,6 +732,47 @@ def learning_dataset_jsonl(dataset_id: str):
         media_type="application/jsonl",
         headers={"Content-Disposition": f'attachment; filename="{dataset_id}.jsonl"'},
     )
+
+
+@app.get(
+    "/api/learning/artifacts",
+    response_model=list[LearningArtifact],
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_artifacts():
+    return repository.list_learning_artifacts(limit=100)
+
+
+@app.post(
+    "/api/learning/artifacts/cleanup",
+    response_model=LearningArtifactCleanupResult,
+)
+def cleanup_learning_artifacts(
+    request: LearningArtifactCleanupRequest,
+    current_user: UserPublic = Depends(require_roles(*LEARNING_REVIEW_ROLES)),
+):
+    if not request.dry_run and current_user.role not in LEARNING_ARTIFACT_CLEANUP_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role permissions")
+    try:
+        result = cleanup_registered_learning_artifacts(dry_run=request.dry_run)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_learning_job(
+        "artifact_cleanup",
+        current_user,
+        input_refs={"dry_run": request.dry_run, "notes": request.notes},
+        output_refs={
+            "dry_run": result["dry_run"],
+            "deletion_allowed": result["deletion_allowed"],
+            "expired_count": result["expired_count"],
+            "protected_count": result["protected_count"],
+            "deleted_count": result["deleted_count"],
+            "store": result["store"],
+            "errors": result["errors"],
+        },
+        status="completed",
+    )
+    return result
 
 
 @app.post(

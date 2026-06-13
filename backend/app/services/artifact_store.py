@@ -7,6 +7,7 @@ from typing import Any, Optional
 from dotenv import dotenv_values
 
 from app.core.config import Settings, get_settings
+from app.data import repository
 
 
 FILESYSTEM_STORES = {"", "filesystem", "file", "local"}
@@ -209,6 +210,96 @@ def cleanup_expired_filesystem_artifacts(
     }
 
 
+def cleanup_registered_learning_artifacts(
+    *,
+    settings: Optional[Settings] = None,
+    reference_time: Optional[datetime] = None,
+    dry_run: bool = True,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    settings = settings or get_settings()
+    policy = learning_artifact_retention_policy(settings)
+    store = settings.learning_artifact_store.lower().strip() or "filesystem"
+    result = {
+        "dry_run": dry_run,
+        "cleanup_enabled": policy.cleanup_enabled,
+        "deletion_allowed": False,
+        "store": store,
+        "retention": policy.status_dict(),
+        "expired_count": 0,
+        "protected_count": 0,
+        "deleted_count": 0,
+        "deleted_paths": [],
+        "candidates": [],
+        "protected": [],
+        "errors": [],
+    }
+    if policy.errors:
+        raise ValueError(f"Invalid learning artifact lifecycle config: {'; '.join(policy.errors)}")
+    if store not in FILESYSTEM_STORES:
+        result["errors"].append("Registered artifact cleanup is read-only for non-filesystem stores")
+        return result
+    if not policy.enabled:
+        return result
+
+    root = Path(settings.learning_artifact_dir).resolve()
+    if not root.exists() or not root.is_dir():
+        return result
+
+    now = _utc(reference_time or datetime.now(timezone.utc))
+    cutoff = now - timedelta(days=policy.retention_days)
+    protected_refs = _protected_artifact_refs()
+    artifacts = repository.list_learning_artifacts(limit=limit)
+    candidates: list[dict[str, Any]] = []
+    protected: list[dict[str, Any]] = []
+
+    for artifact in artifacts:
+        artifact_path = _artifact_path(artifact)
+        if not artifact_path:
+            continue
+        path = artifact_path.resolve()
+        if root not in path.parents or path.is_symlink() or not path.is_file():
+            continue
+        stat = path.stat()
+        modified_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+        if modified_at >= cutoff:
+            continue
+        entry = _artifact_cleanup_entry(
+            artifact=artifact,
+            root=root,
+            path=path,
+            stat=stat,
+            modified_at=modified_at,
+            now=now,
+        )
+        protected_reason = _artifact_protected_reason(artifact, protected_refs)
+        if protected_reason:
+            protected.append({**entry, "cleanup_eligible": False, "protected_reason": protected_reason})
+        else:
+            candidates.append({**entry, "cleanup_eligible": True})
+
+    result["candidates"] = candidates
+    result["protected"] = protected
+    result["expired_count"] = len(candidates)
+    result["protected_count"] = len(protected)
+    delete_requested = not dry_run
+    deletion_allowed = policy.cleanup_enabled and delete_requested
+    result["deletion_allowed"] = deletion_allowed
+
+    if deletion_allowed:
+        deleted_paths: list[str] = []
+        for candidate in candidates:
+            path = (root / candidate["relative_path"]).resolve()
+            if root not in path.parents or path.is_symlink() or not path.is_file():
+                continue
+            path.unlink()
+            deleted_paths.append(candidate["relative_path"])
+        result["deleted_paths"] = deleted_paths
+        result["deleted_count"] = len(deleted_paths)
+
+    return result
+
+
 def store_learning_artifact_file(
     *,
     job_id: str,
@@ -291,6 +382,77 @@ def _artifact_object_key(prefix: str, job_id: str, artifact_type: str, filename:
     safe_artifact_type = "".join(character for character in artifact_type if character.isalnum() or character in {"-", "_"})
     parts = [part for part in [safe_prefix, safe_job_id, safe_artifact_type, filename] if part]
     return "/".join(parts)
+
+
+def _artifact_path(artifact: dict[str, Any]) -> Optional[Path]:
+    metadata = artifact.get("metadata") or {}
+    storage_backend = str(metadata.get("storage_backend") or "").lower().strip()
+    if storage_backend and storage_backend not in FILESYSTEM_STORES:
+        return None
+    local_path = metadata.get("local_path") or artifact.get("uri")
+    if not local_path or str(local_path).startswith("s3://"):
+        return None
+    return Path(str(local_path))
+
+
+def _artifact_cleanup_entry(
+    *,
+    artifact: dict[str, Any],
+    root: Path,
+    path: Path,
+    stat: os.stat_result,
+    modified_at: datetime,
+    now: datetime,
+) -> dict[str, Any]:
+    return {
+        "artifact_id": artifact["id"],
+        "job_id": artifact["job_id"],
+        "artifact_type": artifact["artifact_type"],
+        "relative_path": str(path.relative_to(root)),
+        "size_bytes": stat.st_size,
+        "modified_at": modified_at.isoformat(),
+        "age_days": max(0, (now - modified_at).days),
+        "content_hash": artifact.get("content_hash"),
+    }
+
+
+def _protected_artifact_refs() -> dict[str, set[str]]:
+    uris: set[str] = set()
+    hashes: set[str] = set()
+    promoted_model_ids = {
+        promotion["model_version_id"]
+        for promotion in repository.list_learning_model_promotions(limit=1000)
+        if promotion.get("model_version_id")
+    }
+    for model in repository.list_learning_model_versions():
+        adapter_path = model.get("adapter_path")
+        if adapter_path and (model.get("status") in {"active", "candidate"} or model.get("id") in promoted_model_ids):
+            uris.add(str(adapter_path))
+    for deployment in repository.list_learning_model_deployments(limit=1000):
+        if deployment.get("status") == "verified":
+            if deployment.get("artifact_uri"):
+                uris.add(str(deployment["artifact_uri"]))
+            if deployment.get("artifact_hash"):
+                hashes.add(str(deployment["artifact_hash"]))
+    return {"uris": uris, "hashes": hashes}
+
+
+def _artifact_protected_reason(artifact: dict[str, Any], protected_refs: dict[str, set[str]]) -> Optional[str]:
+    metadata = artifact.get("metadata") or {}
+    uris = {
+        str(value)
+        for value in {
+            artifact.get("uri"),
+            metadata.get("local_path"),
+        }
+        if value
+    }
+    if uris & protected_refs["uris"]:
+        return "Referenced by an active/candidate/promoted model or verified deployment"
+    content_hash = artifact.get("content_hash")
+    if content_hash and str(content_hash) in protected_refs["hashes"]:
+        return "Referenced by a verified runtime deployment hash"
+    return None
 
 
 def _s3_client(settings: Settings):

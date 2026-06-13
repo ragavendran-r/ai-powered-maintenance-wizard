@@ -635,6 +635,36 @@ const learningDeployment = {
 }
 
 let learningDeploymentResponses = [learningDeployment]
+let learningArtifactCleanupRequests: unknown[] = []
+
+const learningArtifactCleanupResult = {
+  dry_run: true,
+  cleanup_enabled: false,
+  deletion_allowed: false,
+  store: 'filesystem',
+  retention: { state: 'disabled', retention_days: 7, cleanup_enabled: false },
+  expired_count: 1,
+  protected_count: 1,
+  deleted_count: 0,
+  candidates: [
+    {
+      artifact_id: 'artifact-expired',
+      artifact_type: 'dataset_snapshot',
+      path: 'LJOB-OLD/dataset.jsonl',
+      age_days: 14,
+    },
+  ],
+  protected: [
+    {
+      artifact_id: 'artifact-1',
+      artifact_type: 'peft_training_manifest',
+      path: 'LJOB-PEFT-1/training-manifest.json',
+      protected_reason: 'active/candidate/promoted model reference',
+    },
+  ],
+  deleted_paths: [],
+  errors: [],
+}
 
 function learningSummaryPayload(
   examples = [learningExample],
@@ -717,6 +747,7 @@ function learningSummaryPayload(
       store: 'filesystem',
       local_dir: 'backend/data/learning_artifacts',
       state: 'ready',
+      retention: { state: 'disabled', retention_days: 7, cleanup_enabled: false },
     },
     peft_trainer: {
       mode: 'prepared_artifacts',
@@ -856,6 +887,7 @@ beforeEach(() => {
   neoResponseDelayMs = 0
   assistantResponseDelayMs = 0
   learningDeploymentResponses = [learningDeployment]
+  learningArtifactCleanupRequests = []
   window.sessionStorage.clear()
   api.setSession(null)
   api.onUnauthorized(null)
@@ -937,6 +969,10 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/learning/model-deployments')) {
         return Promise.resolve(new Response(JSON.stringify(learningDeploymentResponses), { status: 200 }))
+      }
+      if (url.endsWith('/api/learning/artifacts/cleanup')) {
+        learningArtifactCleanupRequests.push(JSON.parse((init?.body as string) ?? '{}'))
+        return Promise.resolve(new Response(JSON.stringify(learningArtifactCleanupResult), { status: 200 }))
       }
       if (url.includes('/api/learning/model-versions/') && url.endsWith('/deploy')) {
         const body = JSON.parse((init?.body as string) ?? '{}')
@@ -1673,6 +1709,7 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('model-local-qwen2.5-current')).toBeInTheDocument()
     expect(screen.getByText('Artifact store')).toBeInTheDocument()
     expect(screen.getByText('filesystem · ready')).toBeInTheDocument()
+    expect(screen.getByText('disabled · 7 days')).toBeInTheDocument()
     expect(screen.getByText('PEFT trainer')).toBeInTheDocument()
     expect(screen.getByText('prepared_artifacts · not configured')).toBeInTheDocument()
     expect(screen.getByText('82% · training worthy')).toBeInTheDocument()
@@ -1691,6 +1728,13 @@ describe('Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Adapter Runtime Deployments')).toBeInTheDocument()
     expect(screen.getByText('verified')).toBeInTheDocument()
     expect(screen.getByText('health healthy')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview cleanup' }))
+    expect(await screen.findByText('Artifact cleanup preview found 1 eligible and 1 protected artifact(s).')).toBeInTheDocument()
+    expect(screen.getByText('Artifact lifecycle preview')).toBeInTheDocument()
+    expect(screen.getByText('LJOB-OLD/dataset.jsonl')).toBeInTheDocument()
+    expect(screen.getByText('active/candidate/promoted model reference')).toBeInTheDocument()
+    expect(learningArtifactCleanupRequests.at(-1)).toMatchObject({ dry_run: true })
 
     fireEvent.click(screen.getByRole('button', { name: 'Judge' }))
     expect(await screen.findByText('Judge scored feedback at 91%')).toBeInTheDocument()

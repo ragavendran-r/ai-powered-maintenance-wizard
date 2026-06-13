@@ -1795,6 +1795,202 @@ def test_learning_artifact_lifecycle_reports_invalid_config(tmp_path):
         find_expired_filesystem_artifacts(settings=settings)
 
 
+def test_learning_artifact_cleanup_api_is_db_backed_audited_and_role_guarded(monkeypatch, tmp_path):
+    reference_time = datetime.now(timezone.utc) - timedelta(days=1)
+    expired_file = tmp_path / "LJOB-CLEAN" / "dataset.jsonl"
+    protected_file = tmp_path / "LJOB-PROTECTED" / "adapter.bin"
+    fresh_file = tmp_path / "LJOB-FRESH" / "manifest.json"
+    for artifact_file in [expired_file, protected_file, fresh_file]:
+        artifact_file.parent.mkdir(parents=True, exist_ok=True)
+        artifact_file.write_text(artifact_file.name, encoding="utf-8")
+    expired_time = (reference_time - timedelta(days=10)).timestamp()
+    fresh_time = (reference_time - timedelta(days=2)).timestamp()
+    os.utime(expired_file, (expired_time, expired_time))
+    os.utime(protected_file, (expired_time, expired_time))
+    os.utime(fresh_file, (fresh_time, fresh_time))
+    expired_artifact = repository.save_learning_artifact(
+        {
+            "job_id": "LJOB-CLEAN",
+            "artifact_type": "peft_dataset_jsonl",
+            "uri": str(expired_file),
+            "content_hash": "hash-clean",
+            "metadata": {"storage_backend": "filesystem", "local_path": str(expired_file)},
+        }
+    )
+    protected_artifact = repository.save_learning_artifact(
+        {
+            "job_id": "LJOB-PROTECTED",
+            "artifact_type": "peft_adapter_manifest",
+            "uri": str(protected_file),
+            "content_hash": "hash-protected",
+            "metadata": {"storage_backend": "filesystem", "local_path": str(protected_file)},
+        }
+    )
+    repository.save_learning_artifact(
+        {
+            "job_id": "LJOB-FRESH",
+            "artifact_type": "peft_training_manifest",
+            "uri": str(fresh_file),
+            "content_hash": "hash-fresh",
+            "metadata": {"storage_backend": "filesystem", "local_path": str(fresh_file)},
+        }
+    )
+    repository.save_learning_model_version(
+        {
+            "id": "model-protected-artifact",
+            "provider": "openai",
+            "model_name": "protected-adapter",
+            "base_model": "qwen2.5",
+            "adapter_path": str(protected_file),
+            "status": "candidate",
+            "notes": "Protect cleanup candidate.",
+        }
+    )
+    settings = SimpleNamespace(
+        learning_artifact_store="filesystem",
+        learning_artifact_dir=tmp_path,
+        learning_artifact_retention_days=7,
+        learning_artifact_cleanup_enabled=False,
+    )
+    monkeypatch.setattr("app.services.artifact_store.get_settings", lambda: settings)
+
+    forbidden = client.post(
+        "/api/learning/artifacts/cleanup",
+        json={"dry_run": True},
+        headers=auth_headers("operator@plant.local"),
+    )
+    assert forbidden.status_code == 403
+
+    artifacts_response = client.get("/api/learning/artifacts", headers=auth_headers("reliability@plant.local"))
+    assert artifacts_response.status_code == 200
+    assert any(item["id"] == expired_artifact["id"] for item in artifacts_response.json())
+
+    preview = client.post(
+        "/api/learning/artifacts/cleanup",
+        json={"dry_run": True, "notes": "preview cleanup"},
+        headers=auth_headers("reliability@plant.local"),
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    assert preview_payload["dry_run"] is True
+    assert preview_payload["deletion_allowed"] is False
+    assert preview_payload["expired_count"] == 1
+    assert preview_payload["protected_count"] == 1
+    assert preview_payload["candidates"][0]["artifact_id"] == expired_artifact["id"]
+    assert preview_payload["protected"][0]["artifact_id"] == protected_artifact["id"]
+    assert "active/candidate/promoted model" in preview_payload["protected"][0]["protected_reason"]
+    assert expired_file.exists()
+    assert protected_file.exists()
+
+    apply_forbidden = client.post(
+        "/api/learning/artifacts/cleanup",
+        json={"dry_run": False},
+        headers=auth_headers("maintenance@plant.local"),
+    )
+    assert apply_forbidden.status_code == 403
+
+    disabled_apply = client.post(
+        "/api/learning/artifacts/cleanup",
+        json={"dry_run": False},
+        headers=auth_headers("reliability@plant.local"),
+    )
+    assert disabled_apply.status_code == 200
+    assert disabled_apply.json()["deletion_allowed"] is False
+    assert expired_file.exists()
+
+    settings.learning_artifact_cleanup_enabled = True
+    applied = client.post(
+        "/api/learning/artifacts/cleanup",
+        json={"dry_run": False},
+        headers=auth_headers("admin@plant.local"),
+    )
+    assert applied.status_code == 200
+    applied_payload = applied.json()
+    assert applied_payload["deletion_allowed"] is True
+    assert applied_payload["deleted_count"] == 1
+    assert applied_payload["deleted_paths"] == ["LJOB-CLEAN/dataset.jsonl"]
+    assert not expired_file.exists()
+    assert protected_file.exists()
+    assert fresh_file.exists()
+    jobs = client.get("/api/learning/jobs", headers=auth_headers("reliability@plant.local")).json()
+    cleanup_jobs = [job for job in jobs if job["job_type"] == "artifact_cleanup"]
+    assert cleanup_jobs
+    assert any(job["output_refs"].get("deleted_count") == 1 for job in cleanup_jobs)
+
+
+def test_learning_artifact_cleanup_api_reports_invalid_and_unsupported_store(monkeypatch, tmp_path):
+    invalid_settings = SimpleNamespace(
+        learning_artifact_store="filesystem",
+        learning_artifact_dir=tmp_path,
+        learning_artifact_retention_days="forever",
+        learning_artifact_cleanup_enabled="sometimes",
+    )
+    monkeypatch.setattr("app.services.artifact_store.get_settings", lambda: invalid_settings)
+    invalid = client.post(
+        "/api/learning/artifacts/cleanup",
+        json={"dry_run": True},
+        headers=auth_headers("reliability@plant.local"),
+    )
+    assert invalid.status_code == 400
+    assert "Invalid learning artifact lifecycle config" in invalid.json()["detail"]
+
+    s3_settings = SimpleNamespace(
+        learning_artifact_store="s3",
+        learning_artifact_dir=tmp_path,
+        learning_artifact_retention_days=7,
+        learning_artifact_cleanup_enabled=True,
+    )
+    monkeypatch.setattr("app.services.artifact_store.get_settings", lambda: s3_settings)
+    unsupported = client.post(
+        "/api/learning/artifacts/cleanup",
+        json={"dry_run": True},
+        headers=auth_headers("reliability@plant.local"),
+    )
+    assert unsupported.status_code == 200
+    assert unsupported.json()["store"] == "s3"
+    assert unsupported.json()["errors"] == ["Registered artifact cleanup is read-only for non-filesystem stores"]
+
+
+def test_adapter_deployment_rejects_mismatched_artifact_hash(tmp_path):
+    headers = auth_headers("reliability@plant.local")
+    artifact_path = tmp_path / "adapter.bin"
+    artifact_path.write_text("adapter", encoding="utf-8")
+    repository.save_learning_artifact(
+        {
+            "job_id": "LJOB-ADAPTER",
+            "artifact_type": "peft_adapter_manifest",
+            "uri": str(artifact_path),
+            "content_hash": "correct-hash",
+            "metadata": {"storage_backend": "filesystem", "local_path": str(artifact_path)},
+        }
+    )
+    model = client.post(
+        "/api/learning/model-versions",
+        json={
+            "provider": "openai",
+            "model_name": "qwen2.5-7b-instruct-lora-mismatch",
+            "base_model": "qwen2.5-7b-instruct",
+            "adapter_path": str(artifact_path),
+            "status": "candidate",
+        },
+        headers=headers,
+    ).json()
+
+    response = client.post(
+        f"/api/learning/model-versions/{model['id']}/deploy",
+        json={
+            "runtime_provider": "manual",
+            "served_model_name": model["model_name"],
+            "artifact_uri": str(artifact_path),
+            "artifact_hash": "wrong-hash",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+    assert "artifact hash" in response.json()["detail"]
+
+
 def test_learning_example_can_be_scored_by_judge_endpoint():
     headers = auth_headers("reliability@plant.local")
     refresh_response = client.post("/api/learning/examples/refresh", headers=headers)

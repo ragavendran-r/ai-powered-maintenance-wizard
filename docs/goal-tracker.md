@@ -422,13 +422,14 @@ Delivered so far:
 - Evaluation-gated Learning Review controls for adapter promotion and rollback, with persisted promotion audit records.
 - Active promoted model-version resolution for real LLM serving clients, with Learning Review visibility into the selected serving model and adapter path.
 - Adapter runtime deployment tracking/gating for PEFT outputs, with deployment status kept separate from evaluation-gated promotion and active serving-model resolution.
+- DB-backed learning artifact cleanup preview and guarded filesystem deletion API, with protected model/deployment references, role gating, explicit enable flag, and cleanup audit jobs.
 - Production RAG + PEFT + NATS design document with NATS subjects, worker responsibilities, persistence, quality gates, observability, and rollout sequence.
 
 Remaining production work:
 
 - Add bundled PEFT trainer templates for local Qwen/SLM LoRA or QLoRA training beyond the generic external-command hook.
 - Add production embedding model selection/versioning and Qdrant collection migration controls.
-- Add artifact lifecycle, retention, and access policy hardening for production object buckets.
+- Add production object-bucket lifecycle and access policy hardening for S3-compatible artifact storage.
 - Configure environment-specific adapter loader integration for LM Studio/Ollama or another serving runtime; runtime deployment tracking/gating is now handled inside the app.
 - Migrate learning state from SQLite prototype tables to Postgres for multi-worker production use.
 

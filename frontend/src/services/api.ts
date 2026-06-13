@@ -679,6 +679,21 @@ export interface LearningArtifact {
   created_at: string
 }
 
+export interface LearningArtifactCleanupResult {
+  dry_run: boolean
+  cleanup_enabled: boolean
+  deletion_allowed: boolean
+  store: string
+  retention: Record<string, unknown>
+  expired_count: number
+  protected_count: number
+  deleted_count: number
+  candidates: Record<string, unknown>[]
+  protected: Record<string, unknown>[]
+  deleted_paths: string[]
+  errors: string[]
+}
+
 export interface LearningSummary {
   counts: Record<string, number>
   recent_examples: LearningExample[]
@@ -691,7 +706,15 @@ export interface LearningSummary {
   recent_promotions: LearningModelPromotion[]
   recent_deployments: LearningModelDeployment[]
   serving_model: LearningServingModel
-  artifact_store: Record<string, unknown>
+  artifact_store: {
+    store?: string
+    local_dir?: string
+    state?: string
+    bucket?: string | null
+    prefix?: string
+    retention?: Record<string, unknown>
+    [key: string]: unknown
+  }
   peft_trainer: Record<string, unknown>
   vector_store: {
     store?: string
@@ -973,6 +996,11 @@ export const api = {
   learningModelDeployments: () => request<LearningModelDeployment[]>('/api/learning/model-deployments'),
   deployLearningModelVersion: (modelId: string, payload: LearningModelDeploymentRequest) =>
     request<LearningJob>(`/api/learning/model-versions/${modelId}/deploy`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  cleanupLearningArtifacts: (payload: { dry_run?: boolean; notes?: string }) =>
+    request<LearningArtifactCleanupResult>('/api/learning/artifacts/cleanup', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
