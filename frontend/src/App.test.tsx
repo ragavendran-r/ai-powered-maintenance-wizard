@@ -58,6 +58,8 @@ const sampleFiles = [
 
 let neoResponseDelayMs = 0
 let assistantResponseDelayMs = 0
+let logoutResponseDelayMs = 0
+let supervisorAssistantRequests: Array<{ work_order_id?: string; queue_name?: string; question?: string }> = []
 
 it('shows waiting for material before in progress in the work order workflow', () => {
   render(<StatusTimeline status="WMATL" />)
@@ -101,6 +103,26 @@ function assistantStreamResponse<TResponse extends { provider: string; used_live
   return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
     status: 200,
     headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
+
+function delayedResponse(response: Response, init: RequestInit | undefined, delayMs: number) {
+  const signal = init?.signal
+  return new Promise<Response>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    const timeoutId = window.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve(response)
+    }, delayMs)
+    function onAbort() {
+      window.clearTimeout(timeoutId)
+      signal?.removeEventListener('abort', onAbort)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -1222,10 +1244,12 @@ async function signIn(email = 'admin@plant.local') {
 beforeEach(() => {
   neoResponseDelayMs = 0
   assistantResponseDelayMs = 0
+  logoutResponseDelayMs = 0
   apiWorkOrders = workOrders as WorkOrder[]
   apiPmPlans = []
   learningDeploymentResponses = [learningDeployment]
   learningArtifactCleanupRequests = []
+  supervisorAssistantRequests = []
   window.sessionStorage.clear()
   api.setSession(null)
   api.onUnauthorized(null)
@@ -1251,6 +1275,11 @@ beforeEach(() => {
         return Promise.resolve(new Response(JSON.stringify(userFor()), { status: 200 }))
       }
       if (url.endsWith('/api/auth/logout')) {
+        if (logoutResponseDelayMs > 0) {
+          return new Promise((resolve) => {
+            window.setTimeout(() => resolve(new Response(JSON.stringify({ status: 'logged_out' }), { status: 200 })), logoutResponseDelayMs)
+          })
+        }
         return Promise.resolve(new Response(JSON.stringify({ status: 'logged_out' }), { status: 200 }))
       }
       if (url.endsWith('/api/users')) {
@@ -1622,6 +1651,10 @@ beforeEach(() => {
           ),
         )
       }
+      if (url.endsWith('/api/neo/welcome/stream')) {
+        const response = neoWelcomeFor(userFromRequest(init))
+        return Promise.resolve(neoStreamResponse(response, [response.answer]))
+      }
       if (url.endsWith('/api/neo/welcome')) {
         return Promise.resolve(new Response(JSON.stringify(neoWelcomeFor(userFromRequest(init))), { status: 200 }))
       }
@@ -1688,9 +1721,7 @@ beforeEach(() => {
             [initialAnswer],
           )
           if (assistantResponseDelayMs > 0) {
-            return new Promise((resolve) => {
-              window.setTimeout(() => resolve(response), assistantResponseDelayMs)
-            })
+            return delayedResponse(response, init, assistantResponseDelayMs)
           }
           return Promise.resolve(response)
         }
@@ -1711,9 +1742,7 @@ beforeEach(() => {
           ['Neo recommends verifying torque ', 'and documenting completion.'],
         )
         if (assistantResponseDelayMs > 0) {
-          return new Promise((resolve) => {
-            window.setTimeout(() => resolve(response), assistantResponseDelayMs)
-          })
+          return delayedResponse(response, init, assistantResponseDelayMs)
         }
         return Promise.resolve(response)
       }
@@ -1738,22 +1767,30 @@ beforeEach(() => {
         )
       }
       if (url.includes('/api/work-orders/supervisor-assist/stream')) {
+        const body = JSON.parse((init?.body as string) ?? '{}')
+        supervisorAssistantRequests.push(body)
+        const approvalQueue = body.queue_name === 'waiting_approval'
+        const summary = approvalQueue
+          ? 'Waiting for approval: WO-8311 needs supervisor approval before execution.'
+          : 'Neo reviewed 2 work orders and found 2 follow-ups.'
         const response = assistantStreamResponse(
           {
-            summary: 'Neo reviewed 2 work orders and found 2 follow-ups.',
-            follow_up_actions: ['Review WO-8297 brake shoe replacement planning.'],
-            risks: ['WO-8304 remains priority 1 and APPR.'],
+            summary,
+            follow_up_actions: approvalQueue
+              ? ['Approve or reject WO-8311 for BF-BLOWER-02.']
+              : ['Review WO-8297 brake shoe replacement planning.'],
+            risks: approvalQueue
+              ? ['WO-8311 is waiting for approval.']
+              : ['WO-8304 remains priority 1 and APPR.'],
             draft_work_order: null,
-            referenced_work_orders: ['WO-8304', 'WO-8297'],
+            referenced_work_orders: approvalQueue ? ['WO-8311'] : ['WO-8304', 'WO-8297'],
             used_live_provider: false,
             provider: 'mock',
           },
-          ['Neo reviewed 2 work orders ', 'and found 2 follow-ups.'],
+          approvalQueue ? ['Waiting for approval: WO-8311 needs supervisor approval.'] : ['Neo reviewed 2 work orders ', 'and found 2 follow-ups.'],
         )
         if (assistantResponseDelayMs > 0) {
-          return new Promise((resolve) => {
-            window.setTimeout(() => resolve(response), assistantResponseDelayMs)
-          })
+          return delayedResponse(response, init, assistantResponseDelayMs)
         }
         return Promise.resolve(response)
       }
@@ -2118,7 +2155,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     )
   })
 
-  it('shows a slow LLM waiting state while technician initial context is still pending', async () => {
+  it('falls back when technician initial context does not receive an LLM token within 15 seconds', async () => {
     assistantResponseDelayMs = 20_000
     vi.useFakeTimers()
     render(<App />)
@@ -2143,11 +2180,35 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     ).toBeInTheDocument()
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(13_000)
+      await vi.advanceTimersByTimeAsync(8_100)
     })
     expect(
-      within(screen.getByLabelText('Neo technician chat')).getByText(/approved and ready for technician execution/),
+      within(screen.getByLabelText('Neo technician chat')).getByText(/could not get a live LLM response within 15 seconds/),
     ).toBeInTheDocument()
+  })
+
+  it('falls back when a submitted technician query receives no LLM token within 15 seconds', async () => {
+    render(<App />)
+    await signIn('technician@plant.local')
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
+    expect(await within(screen.getByLabelText('Neo technician chat')).findByText(/approved and ready for technician execution/)).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    assistantResponseDelayMs = 20_000
+    fireEvent.change(screen.getByLabelText('Technician observation'), {
+      target: { value: 'Connections 3 and 5 were loose.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(within(screen.getByLabelText('Neo technician chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_100)
+    })
+
+    const transcript = screen.getByLabelText('Neo technician chat')
+    expect(within(transcript).getByText(/could not get a live LLM response within 15 seconds/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled()
   })
 
   it('formats Markdown-like Neo responses into readable sections', async () => {
@@ -2420,6 +2481,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.queryByLabelText('Assign WO-8304')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approve WO-8297' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve WO-8275' })).not.toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Neo supervisor chat')).findByText(/Neo reviewed 2 work orders/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(within(screen.getByLabelText('Neo supervisor chat')).getByText('Summarize follow-up actions for completed work orders.')).toBeInTheDocument()
@@ -2430,6 +2492,37 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(supervisorTranscript.textContent).not.toContain('Risk: WO-8304 remains priority 1 and Approved.')
     expect(supervisorTranscript.textContent).not.toContain('APPR')
     expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
+  })
+
+  it('routes supervisor approval questions to the waiting approval queue', async () => {
+    render(<App />)
+    await signIn('supervisor@plant.local')
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
+    const transcript = await screen.findByLabelText('Neo supervisor chat')
+    expect(await within(transcript).findByText(/Neo reviewed 2 work orders/)).toBeInTheDocument()
+
+    const question = 'what are the work orders pending for my approval'
+    fireEvent.change(screen.getByLabelText('Supervisor question'), { target: { value: question } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await within(transcript).findByText(/Waiting for approval: WO-8311/)).toBeInTheDocument()
+    expect(supervisorAssistantRequests[supervisorAssistantRequests.length - 1]).toMatchObject({
+      queue_name: 'waiting_approval',
+      question,
+    })
+  })
+
+  it('logs out immediately even when the logout API is slow', async () => {
+    logoutResponseDelayMs = 60_000
+    render(<App />)
+    await signIn('supervisor@plant.local')
+
+    expect(await screen.findByRole('button', { name: 'Logout' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Logout' }))
+
+    expect(await screen.findByRole('button', { name: /sign in/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Logout' })).not.toBeInTheDocument()
   })
 
   it('uploads document files from the ingestion panel', async () => {

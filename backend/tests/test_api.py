@@ -832,11 +832,10 @@ def test_technician_assistant_suggests_problem_code_from_observation():
     assert response.status_code == 200
     payload = response.json()
     assert payload["work_order_id"] == "WO-8304"
-    assert payload["suggested_problem_code"] in {"LWTQCONNECT", "INSUL"}
-    assert payload["live_directions"]
-    assert any("Material status" in item for item in payload["live_directions"])
-    assert any("substitute" in item.lower() for item in payload["recommendations"])
-    assert payload["completion_summary"]
+    assert payload["suggested_problem_code"] == "BRGVIB"
+    assert payload["live_directions"] == []
+    assert payload["recommendations"] == []
+    assert "Sorry, Neo could not get a live LLM response" in payload["completion_summary"]
     assert payload["evidence"]
 
     forbidden_response = client.post(
@@ -864,7 +863,8 @@ def test_technician_assistant_streams_sse_response():
     assert '"type": "token"' in body
     assert '"type": "done"' in body
     assert "Neo" in body
-    assert "LWTQCONNECT" in body
+    assert "Sorry, Neo could not get a live LLM response" in body
+    assert "LWTQCONNECT" not in body
 
     forbidden_response = client.post(
         "/api/work-orders/technician-assist/stream",
@@ -903,7 +903,7 @@ def test_technician_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
     assert "Neo bounded guidance" in body
 
 
-def test_technician_assistant_answers_material_availability_question_directly():
+def test_technician_assistant_uses_apology_when_material_question_has_no_llm():
     headers = auth_headers("technician@plant.local")
 
     with client.stream(
@@ -915,12 +915,24 @@ def test_technician_assistant_answers_material_availability_question_directly():
         assert response.status_code == 200
         body = "".join(response.iter_text())
 
-    assert "Material Availability" in body
-    assert "Drive end spherical roller bearing" in body
-    assert "2026-07-03" in body
-    assert "21 day lead time" in body
-    assert "High-temperature coupling grease" in body
+    assert "Sorry, Neo could not get a live LLM response" in body
+    assert "Drive end spherical roller bearing" not in body
     assert "Safety:" not in body
+
+
+def test_technician_assistant_uses_apology_for_off_topic_query_without_llm():
+    with client.stream(
+        "POST",
+        "/api/work-orders/technician-assist/stream",
+        json={"work_order_id": "WO-8304", "observation": "what is the time now"},
+        headers=auth_headers("technician@plant.local"),
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert "Sorry, Neo could not get a live LLM response" in body
+    assert "Verify the current load" not in body
+    assert "Live LLM" not in body
 
 
 def test_supervisor_assistant_reviews_follow_up_queue_and_drafts_order():
@@ -934,10 +946,10 @@ def test_supervisor_assistant_reviews_follow_up_queue_and_drafts_order():
 
     assert response.status_code == 200
     payload = response.json()
-    assert "work order" in payload["summary"].lower()
-    assert payload["follow_up_actions"]
+    assert "Sorry, Neo could not get a live LLM response" in payload["summary"]
+    assert payload["follow_up_actions"] == []
     assert "WO-8297" in payload["referenced_work_orders"]
-    assert payload["draft_work_order"]["equipment_id"] == "OH-CRANE-05"
+    assert payload["draft_work_order"] is None
 
     forbidden_response = client.post(
         "/api/work-orders/supervisor-assist",
@@ -972,6 +984,56 @@ def test_supervisor_assistant_streams_sse_response():
         headers=auth_headers("technician@plant.local"),
     )
     assert forbidden_response.status_code == 403
+
+
+def test_supervisor_assistant_stream_answers_waiting_approval_queue(monkeypatch):
+    import app.services.work_order_assistant as assistant_module
+    from app.services.llm import LLMTextResponse
+
+    captured = {}
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["prompt"] = prompt
+            yield LLMTextResponse(
+                content="Waiting for approval: WO-8311 needs supervisor approval before execution.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(assistant_module, "configured_llm_client", lambda: FakeClient())
+    headers = auth_headers("supervisor@plant.local")
+    with client.stream(
+        "POST",
+        "/api/work-orders/supervisor-assist/stream",
+        json={"work_order_id": "WO-8297", "queue_name": "follow_up", "question": "what are the work orders pending for my approval"},
+        headers=headers,
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert "Waiting for approval" in body
+    assert "WO-8311" in body
+    assert "WO-8297" not in body
+    assert "Queue focus: waiting_approval" in captured["prompt"]
+
+
+def test_supervisor_assistant_uses_apology_for_off_topic_query_without_llm():
+    with client.stream(
+        "POST",
+        "/api/work-orders/supervisor-assist/stream",
+        json={"work_order_id": "WO-8297", "question": "what is the time now"},
+        headers=auth_headers("supervisor@plant.local"),
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert "Sorry, Neo could not get a live LLM response" in body
+    assert "supervisor review only" not in body
 
 
 def test_supervisor_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
@@ -1302,6 +1364,41 @@ def test_neo_chat_stream_uses_interactive_llm_timeout(monkeypatch):
     assert "Neo dashboard bounded answer" in body
 
 
+def test_neo_welcome_streams_llm_context_and_done_event(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    captured = {}
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["prompt"] = prompt
+            captured["timeout_seconds"] = timeout_seconds
+            yield LLMTextResponse(content="Supervisor welcome streamed from the LLM.", used_live_provider=True, provider="openai")
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    with client.stream(
+        "GET",
+        "/api/neo/welcome/stream",
+        headers=auth_headers("supervisor@plant.local"),
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        body = "".join(response.iter_text())
+
+    assert captured["timeout_seconds"] == 15.0
+    assert "Supervisor Attention" in captured["prompt"]
+    assert '"type": "meta"' in body
+    assert "Supervisor welcome streamed from the LLM." in body
+    assert '"type": "done"' in body
+    assert '"title": "Supervisor Attention"' in body
+    assert '"provider": "openai"' in body
+
+
 def test_neo_chat_returns_asset_table_with_llm_answer():
     response = client.post(
         "/api/neo/chat",
@@ -1359,12 +1456,11 @@ def test_neo_welcome_highlights_assigned_technician_work():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "deterministic"
+    assert payload["provider"] == "mock"
     assert payload["action"]["type"] == "neo_welcome"
     assert payload["action"]["target_id"] == "WO-8304"
-    assert "Immediate attention" in payload["answer"]
-    assert "Primary Work Order: WO-8304" in payload["answer"]
-    assert "Closeout" in payload["answer"]
+    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
+    assert "Primary Work Order: WO-8304" not in payload["answer"]
     assert payload["table"]["title"] == "Your Assigned Work"
     assert {row["Work order"] for row in payload["table"]["rows"]} == {"WO-8304"}
 
@@ -1374,9 +1470,9 @@ def test_neo_welcome_highlights_supervisor_approvals_and_followups():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "deterministic"
+    assert payload["provider"] == "mock"
     assert payload["table"]["title"] == "Supervisor Attention"
-    assert "waiting for approval" in payload["answer"]
+    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
     assert any(row["Work order"] == "WO-8311" for row in payload["table"]["rows"])
 
 
@@ -1385,9 +1481,9 @@ def test_neo_welcome_is_read_only_for_operator_attention():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "deterministic"
+    assert payload["provider"] == "mock"
     assert payload["table"]["title"] == "Operator Attention"
-    assert "read-only" in payload["answer"]
+    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
     assert payload["action"]["status"] == "completed"
 
 
@@ -1434,7 +1530,7 @@ def test_neo_technician_next_steps_use_assigned_work_order_only():
     assert payload["action"]["type"] == "work_order_next_steps"
     assert payload["action"]["target_id"] == "WO-8304"
     assert payload["table"]["rows"][0]["Work order"] == "WO-8304"
-    assert "assigned to you" in payload["answer"].lower()
+    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
 
 
 def test_neo_technician_material_question_does_not_start_blocked_work_order():
@@ -1454,9 +1550,7 @@ def test_neo_technician_material_question_does_not_start_blocked_work_order():
     assert payload["action"]["type"] == "work_order_material_status"
     assert payload["action"]["target_id"] == "WO-8304"
     assert payload["table"]["rows"][0]["Work order"] == "WO-8304"
-    assert "Drive end spherical roller bearing" in payload["answer"]
-    assert "2026-07-03" in payload["answer"]
-    assert "cannot be started" in payload["answer"].lower()
+    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
     assert repository.get_work_order("WO-8304")["status"] == "WMATL"
 
 
@@ -1472,7 +1566,7 @@ def test_neo_blocks_explicit_start_when_material_is_not_ready():
     assert payload["provider"] == "mock"
     assert payload["action"]["type"] == "update_work_order_status"
     assert payload["action"]["status"] == "not_allowed"
-    assert "cannot be started" in payload["answer"].lower()
+    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
     assert repository.get_work_order("WO-8304")["status"] == "WMATL"
 
 
@@ -1546,11 +1640,8 @@ def test_neo_general_maintenance_query_uses_evidence_fallback_when_llm_is_slow()
     assert payload["table"] is None
     assert payload["used_live_provider"] is False
     assert payload["provider"] == "mock"
-    assert "BF-BLOWER-02" in payload["answer"]
-    assert "### Safety Checks" in payload["answer"]
-    assert "### Inspection Steps" in payload["answer"]
-    assert "### Evidence Used" in payload["answer"]
-    assert "inlet guide vane" in payload["answer"].lower()
+    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
+    assert "### Safety Checks" not in payload["answer"]
     assert "Ask me to show assets" not in payload["answer"]
 
 
@@ -1567,8 +1658,8 @@ def test_neo_chat_stream_returns_token_events_for_general_queries():
     assert '"type": "meta"' in body
     assert '"type": "token"' in body
     assert '"type": "done"' in body
-    assert "BF-BLOWER-02" in body
-    assert "Safety Checks" in body
+    assert "Sorry, Neo could not get a live LLM response" in body
+    assert "Safety Checks" not in body
 
 
 def test_feedback_is_accepted():

@@ -40,8 +40,21 @@ MATERIAL_INQUIRY_TERMS = (
     "substitute",
     "when",
 )
-
-
+APPROVAL_QUEUE_TERMS = (
+    "approval",
+    "approve",
+    "pending approval",
+    "waiting approval",
+    "waiting for approval",
+    "wappr",
+)
+MATERIAL_QUEUE_TERMS = (
+    "blocked",
+    "material blocker",
+    "material blocked",
+    "procurement",
+    "spare",
+)
 class TechnicianAssistantLLMOutput(BaseModel):
     next_prompt: str
     live_directions: list[str] = Field(default_factory=list)
@@ -75,7 +88,7 @@ def technician_assistance(
     equipment = repository.get_equipment(work_order["equipment_id"])
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")
-    summary = health_summary(work_order["equipment_id"])
+    summary = health_summary(work_order["equipment_id"], include_anomaly_context=False)
     material_lines = _material_context_lines(work_order)
     learning_notes = learning_context_for_asset(work_order["equipment_id"], limit=3)
     evidence = retrieve_evidence(
@@ -114,7 +127,7 @@ def technician_assistance(
         TechnicianAssistantLLMOutput,
         _technician_system_prompt(),
         lambda provider, reason: _technician_output_from_response(
-            fallback.model_copy(update={"provider": provider, "used_live_provider": False})
+            _technician_llm_unavailable_response(work_order, evidence, provider)
         ),
     )
     assistant_response = TechnicianAssistantResponse(
@@ -149,13 +162,17 @@ def stream_technician_assistance(
     request: TechnicianAssistantRequest,
     current_user: Optional[UserPublic] = None,
 ) -> Iterator[dict[str, object]]:
+    llm_client = configured_llm_client()
+    provider = llm_client.provider_name
+    used_live_provider = provider != "mock"
     work_order = repository.get_work_order(request.work_order_id)
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
     equipment = repository.get_equipment(work_order["equipment_id"])
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")
-    summary = health_summary(work_order["equipment_id"])
+    yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+    summary = health_summary(work_order["equipment_id"], include_anomaly_context=False)
     material_lines = _material_context_lines(work_order)
     learning_notes = learning_context_for_asset(work_order["equipment_id"], limit=3)
     evidence = retrieve_evidence(
@@ -168,14 +185,11 @@ def stream_technician_assistance(
             ]
         ),
         work_order["equipment_id"],
+        use_reranker=False,
     )
     fallback = _technician_fallback(request, work_order, summary, evidence)
     prompt = _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes)
     content_parts: list[str] = []
-    llm_client = configured_llm_client()
-    provider = llm_client.provider_name
-    used_live_provider = provider != "mock"
-    yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
     last_meta = (provider, used_live_provider)
     for chunk in llm_client.stream_text(
         prompt,
@@ -203,7 +217,8 @@ def stream_technician_assistance(
         provider = "mock"
         used_live_provider = False
         yield {"type": "token", "content": answer}
-    response = fallback.model_copy(
+    base_response = fallback if used_live_provider else _technician_llm_unavailable_response(work_order, evidence, provider)
+    response = base_response.model_copy(
         update={
             "next_prompt": answer,
             "provider": provider,
@@ -229,7 +244,8 @@ def supervisor_assistance(
     request: SupervisorAssistantRequest,
     current_user: Optional[UserPublic] = None,
 ) -> SupervisorAssistantResponse:
-    work_orders = repository.list_work_orders(follow_up_only=request.queue_name == "follow_up")
+    queue_focus = _supervisor_queue_focus(request)
+    work_orders = _supervisor_work_orders_for_focus(queue_focus)
     selected = repository.get_work_order(request.work_order_id) if request.work_order_id else None
     if request.work_order_id and not selected:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -237,7 +253,7 @@ def supervisor_assistance(
     prompt = "\n".join(
         [
             f"Supervisor question: {request.question or 'Review work order status and follow-ups.'}",
-            f"Queue: {request.queue_name or 'all work orders'}",
+            f"Queue focus: {queue_focus}",
             "Selected work order:",
             _work_order_line(selected) if selected else "None selected",
             "Queue work orders:",
@@ -249,7 +265,7 @@ def supervisor_assistance(
         SupervisorAssistantLLMOutput,
         _supervisor_system_prompt(),
         lambda provider, reason: _supervisor_output_from_response(
-            fallback.model_copy(update={"provider": provider, "used_live_provider": False})
+            _supervisor_llm_unavailable_response(work_orders, selected, provider)
         ),
     )
     draft = fallback.draft_work_order if response.should_draft_follow_up else None
@@ -288,12 +304,13 @@ def stream_supervisor_assistance(
     request: SupervisorAssistantRequest,
     current_user: Optional[UserPublic] = None,
 ) -> Iterator[dict[str, object]]:
-    work_orders = repository.list_work_orders(follow_up_only=request.queue_name == "follow_up")
+    queue_focus = _supervisor_queue_focus(request)
+    work_orders = _supervisor_work_orders_for_focus(queue_focus)
     selected = repository.get_work_order(request.work_order_id) if request.work_order_id else None
     if request.work_order_id and not selected:
         raise HTTPException(status_code=404, detail="Work order not found")
-    fallback = _supervisor_fallback(request, work_orders, selected)
-    prompt = _supervisor_text_prompt(request, work_orders, selected, fallback)
+    fallback = _supervisor_fallback(request, work_orders, selected, queue_focus)
+    prompt = _supervisor_text_prompt(request, work_orders, selected, fallback, queue_focus)
     content_parts: list[str] = []
     provider = "mock"
     used_live_provider = False
@@ -326,7 +343,8 @@ def stream_supervisor_assistance(
         if not sent_meta:
             yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
         yield {"type": "token", "content": answer}
-    response = fallback.model_copy(
+    base_response = fallback if used_live_provider else _supervisor_llm_unavailable_response(work_orders, selected, provider)
+    response = base_response.model_copy(
         update={
             "summary": answer,
             "provider": provider,
@@ -403,8 +421,11 @@ def _supervisor_text_system_prompt() -> str:
     return (
         f"You are {SUPERVISOR_ASSISTANT_NAME}, a maintenance supervisor assistant. "
         "Stream a concise Markdown chat response for supervisor review. Do not return JSON. "
-        "Summarize queue state, identify follow-up actions, list risks, and say whether a draft follow-up "
-        "work order is warranted based only on supplied work-order data. Do not include table names, "
+        "Answer the supervisor's exact question first. If the question asks for waiting approval or pending "
+        "approval, list only WAPPR work orders and the required approval decision. If it asks for follow-ups, "
+        "list follow-up work. If it asks for material blockers, list material-blocked work. Then list risks "
+        "and say whether a draft follow-up work order is warranted based only on supplied work-order data. "
+        "Do not include table names, "
         "column names, row counts, or table-update metadata."
     )
 
@@ -463,11 +484,12 @@ def _technician_text_prompt(request, work_order, equipment, summary, evidence, f
     )
 
 
-def _supervisor_text_prompt(request, work_orders, selected, fallback) -> str:
+def _supervisor_text_prompt(request, work_orders, selected, fallback, queue_focus: str) -> str:
     return "\n".join(
         [
             f"Supervisor question: {request.question or 'Review work order status and follow-ups.'}",
-            f"Queue: {request.queue_name or 'all work orders'}",
+            f"Queue focus: {queue_focus}",
+            "Response objective: answer the supervisor question using only the focused queue below before adding risks.",
             "Selected work order:",
             _work_order_line(selected) if selected else "None selected",
             "Queue work orders:",
@@ -483,54 +505,44 @@ def _supervisor_text_prompt(request, work_orders, selected, fallback) -> str:
 
 
 def _technician_stream_fallback_text(response: TechnicianAssistantResponse, reason: str) -> str:
-    if response.next_prompt.startswith("Material answer:"):
-        lines = [
-            "### Material Availability",
-            response.next_prompt.removeprefix("Material answer:").strip(),
-            "",
-            "### Technician Constraints",
-            *[f"- {item}" for item in response.live_directions],
-            *[f"- {item}" for item in response.recommendations],
-            f"- Problem code: {response.suggested_problem_code}",
-            f"- Summary: {response.completion_summary}",
-        ]
-        if reason:
-            lines.append(f"- LLM fallback reason: {reason}")
-        return "\n".join(lines)
-    lines = [
-        f"### {TECHNICIAN_ASSISTANT_NAME} Guidance",
-        response.next_prompt,
-        "",
-        "### Live Directions",
-        *[f"- {item}" for item in response.live_directions],
-        "",
-        "### Recommendations",
-        *[f"- {item}" for item in response.recommendations],
-        *[f"- Safety: {item}" for item in response.safety_reminders],
-        f"- Problem code: {response.suggested_problem_code}",
-        f"- Summary: {response.completion_summary}",
-    ]
-    if reason:
-        lines.append(f"- LLM fallback reason: {reason}")
-    return "\n".join(lines)
+    return _llm_unavailable_apology()
 
 
 def _supervisor_stream_fallback_text(response: SupervisorAssistantResponse, reason: str) -> str:
-    lines = [
-        f"### {SUPERVISOR_ASSISTANT_NAME} Review",
-        response.summary,
-        "",
-        "### Follow-Ups",
-        *[f"- {item}" for item in response.follow_up_actions],
-        "",
-        "### Risks",
-        *[f"- {item}" for item in response.risks],
-    ]
-    if response.draft_work_order:
-        lines.extend(["", "### Draft Work Order", f"- {response.draft_work_order.title}"])
-    if reason:
-        lines.append(f"- LLM fallback reason: {reason}")
-    return "\n".join(lines)
+    return _llm_unavailable_apology()
+
+
+def _llm_unavailable_apology() -> str:
+    return "Sorry, Neo could not get a live LLM response right now. Please retry after confirming the LLM service is responding."
+
+
+def _technician_llm_unavailable_response(work_order, evidence, provider: str) -> TechnicianAssistantResponse:
+    apology = _llm_unavailable_apology()
+    return TechnicianAssistantResponse(
+        work_order_id=work_order["id"],
+        next_prompt=apology,
+        live_directions=[],
+        recommendations=[],
+        safety_reminders=[],
+        suggested_problem_code=work_order["problem_code"],
+        suggested_failure_class=work_order["failure_class"],
+        completion_summary=apology,
+        evidence=evidence,
+        used_live_provider=False,
+        provider=provider,
+    )
+
+
+def _supervisor_llm_unavailable_response(work_orders, selected, provider: str) -> SupervisorAssistantResponse:
+    return SupervisorAssistantResponse(
+        summary=_llm_unavailable_apology(),
+        follow_up_actions=[],
+        risks=[],
+        draft_work_order=None,
+        referenced_work_orders=[item["id"] for item in work_orders[:6]],
+        used_live_provider=False,
+        provider=provider,
+    )
 
 
 def _technician_output_from_response(response: TechnicianAssistantResponse) -> TechnicianAssistantLLMOutput:
@@ -626,9 +638,12 @@ def _technician_fallback(request, work_order, summary, evidence) -> TechnicianAs
     )
 
 
-def _supervisor_fallback(request, work_orders, selected) -> SupervisorAssistantResponse:
-    target = selected or (work_orders[0] if work_orders else None)
+def _supervisor_fallback(request, work_orders, selected, queue_focus: Optional[str] = None) -> SupervisorAssistantResponse:
+    focused_ids = {item["id"] for item in work_orders}
+    target = selected if selected and selected["id"] in focused_ids else (work_orders[0] if work_orders else None)
+    queue_focus = queue_focus or _supervisor_queue_focus(request)
     follow_ups = [item for item in work_orders if item.get("follow_up_required")]
+    approvals = [item for item in work_orders if item["status"] == "WAPPR"]
     overdue_or_urgent = [item for item in work_orders if item["priority"] == 1 and item["status"] not in {"COMP", "CLOSE"}]
     material_blockers = [
         item
@@ -662,18 +677,68 @@ def _supervisor_fallback(request, work_orders, selected) -> SupervisorAssistantR
             follow_up_required=False,
             ai_summary=f"Drafted from supervisor review of {target['id']}.",
         )
-    return SupervisorAssistantResponse(
-        summary=f"{len(work_orders)} work order(s) reviewed; {len(follow_ups)} require follow-up action.",
-        follow_up_actions=[
+    if queue_focus == "waiting_approval":
+        summary = _approval_summary(approvals)
+        follow_up_actions = [
+            f"Approve or reject {item['id']} for {item['equipment_id']}: {item['title']}."
+            for item in approvals[:6]
+        ] or ["No work orders are currently waiting for supervisor approval."]
+    elif queue_focus == "material_blockers":
+        summary = f"{len(material_blockers)} material-blocked open work order(s) need supervisor coordination."
+        follow_up_actions = [
+            f"Coordinate material recovery for {item['id']}: {item.get('material_blocker_note') or item.get('material_blocker_status')}."
+            for item in material_blockers[:6]
+        ] or ["No open work orders are currently blocked by material availability."]
+    else:
+        summary = f"{len(work_orders)} work order(s) reviewed; {len(follow_ups)} require follow-up action."
+        follow_up_actions = [
             f"Review {item['id']} with {item['assigned_to']}: {item['recommended_action']}"
             for item in follow_ups[:4]
-        ] or ["No follow-up work orders are currently flagged."],
+        ] or ["No follow-up work orders are currently flagged."]
+    return SupervisorAssistantResponse(
+        summary=summary,
+        follow_up_actions=follow_up_actions,
         risks=material_risks + priority_risks or ["No open priority-1 work orders found in the current queue."],
         draft_work_order=draft,
         referenced_work_orders=[item["id"] for item in work_orders[:6]],
         used_live_provider=False,
         provider="mock",
     )
+
+
+def _supervisor_queue_focus(request: SupervisorAssistantRequest) -> str:
+    text = f"{request.queue_name or ''} {request.question or ''}".lower()
+    if any(term in text for term in APPROVAL_QUEUE_TERMS):
+        return "waiting_approval"
+    if any(term in text for term in MATERIAL_QUEUE_TERMS):
+        return "material_blockers"
+    if "follow_up" in text or "follow-up" in text or "follow up" in text or "followup" in text:
+        return "follow_up"
+    return "all_work"
+
+
+def _supervisor_work_orders_for_focus(queue_focus: str) -> list[dict]:
+    work_orders = repository.list_work_orders(follow_up_only=queue_focus == "follow_up")
+    if queue_focus == "waiting_approval":
+        return [item for item in work_orders if item["status"] == "WAPPR"]
+    if queue_focus == "material_blockers":
+        return [
+            item
+            for item in work_orders
+            if item.get("material_blocker_status") in {"blocked", "waiting_procurement", "reorder_requested"}
+            and item["status"] not in {"COMP", "CLOSE"}
+        ]
+    return work_orders
+
+
+def _approval_summary(approvals: list[dict]) -> str:
+    if not approvals:
+        return "No work orders are currently waiting for supervisor approval."
+    items = [
+        f"{item['id']} ({item['equipment_id']}) is waiting for approval: {item['title']}."
+        for item in approvals[:6]
+    ]
+    return "Waiting for approval: " + " ".join(items)
 
 
 def _work_order_line(work_order) -> str:

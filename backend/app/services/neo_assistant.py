@@ -31,6 +31,66 @@ ENGINEERING_ATTENTION_ROLES = {"maintenance_engineer", "reliability_engineer", "
 
 
 def neo_welcome(current_user: UserPublic) -> NeoChatResponse:
+    grounded_response = _grounded_welcome_response(current_user)
+    prompt = _neo_welcome_prompt(current_user, grounded_response)
+    response = _neo_llm_client().complete_text(
+        prompt,
+        _neo_system_prompt(),
+        lambda provider, reason: _llm_apology(provider, reason),
+        max_tokens=NEO_GENERAL_MAX_TOKENS,
+    )
+    return NeoChatResponse(
+        answer=response.content,
+        table=grounded_response.table,
+        action=grounded_response.action,
+        used_live_provider=response.used_live_provider,
+        provider=response.provider,
+    )
+
+
+def stream_neo_welcome(current_user: UserPublic) -> Iterator[dict[str, object]]:
+    grounded_response = _grounded_welcome_response(current_user)
+    prompt = _neo_welcome_prompt(current_user, grounded_response)
+    content_parts: list[str] = []
+    provider = "mock"
+    used_live_provider = False
+    sent_meta = False
+    for chunk in _neo_llm_client().stream_text(
+        prompt,
+        _neo_system_prompt(),
+        lambda fallback_provider, reason: _llm_apology(fallback_provider, reason),
+        max_tokens=NEO_GENERAL_MAX_TOKENS,
+        timeout_seconds=get_settings().llm_timeout_seconds,
+    ):
+        provider = chunk.provider
+        used_live_provider = chunk.used_live_provider
+        if not sent_meta:
+            sent_meta = True
+            yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+        if chunk.content:
+            content_parts.append(chunk.content)
+            yield {"type": "token", "content": chunk.content}
+
+    answer = "".join(content_parts)
+    if not answer:
+        answer = _llm_apology(provider, "stream returned no content").content
+        provider = "mock"
+        used_live_provider = False
+        if not sent_meta:
+            yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+        yield {"type": "token", "content": answer}
+    response = NeoChatResponse(
+        answer=answer,
+        table=grounded_response.table,
+        action=grounded_response.action,
+        used_live_provider=used_live_provider,
+        provider=provider,
+    )
+    _record_neo_interaction(prompt, response, current_user, "role_aware_welcome_stream", None)
+    yield {"type": "done", "response": response.model_dump(mode="json")}
+
+
+def _grounded_welcome_response(current_user: UserPublic) -> NeoChatResponse:
     if current_user.role == "maintenance_technician":
         return _technician_welcome(current_user)
     if current_user.role in SUPERVISOR_ATTENTION_ROLES:
@@ -40,21 +100,16 @@ def neo_welcome(current_user: UserPublic) -> NeoChatResponse:
     if current_user.role == "operator":
         return _operator_welcome(current_user)
     return NeoChatResponse(
-        answer=(
-            f"I’m Neo. I’m ready for {current_user.display_name}. "
-            "I do not see immediate role-specific attention items for your account right now. "
-            "Ask me for assets, work orders, documents, or user data that your role can access."
-        ),
-        table=None,
-        action=NeoAction(
-            type="neo_welcome",
-            label="Loaded role-aware welcome",
-            status="completed",
-            detail=f"No immediate task queue was found for role {current_user.role}.",
-        ),
-        used_live_provider=False,
-        provider="deterministic",
-    )
+            answer=f"No immediate task queue was found for role {current_user.role}.",
+            action=NeoAction(
+                type="neo_welcome",
+                label="Loaded role-aware welcome",
+                status="completed",
+                detail=f"No immediate task queue was found for role {current_user.role}.",
+            ),
+            used_live_provider=False,
+            provider="deterministic",
+        )
 
 
 def neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> NeoChatResponse:
@@ -64,17 +119,7 @@ def neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> NeoChat
     response = _neo_llm_client().complete_text(
         prompt,
         _neo_system_prompt(),
-        lambda provider, reason: LLMTextResponse(
-            content=_fallback_answer(
-                request.message,
-                grounded_response,
-                current_user,
-                evidence=evidence,
-                live_failure_reason=reason,
-            ),
-            used_live_provider=False,
-            provider=provider,
-        ),
+        lambda provider, reason: _llm_apology(provider, reason),
         max_tokens=NEO_GENERAL_MAX_TOKENS,
     )
     neo_response = NeoChatResponse(
@@ -99,17 +144,7 @@ def stream_neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> 
     for chunk in _neo_llm_client().stream_text(
         prompt,
         _neo_system_prompt(),
-        lambda fallback_provider, reason: LLMTextResponse(
-            content=_fallback_answer(
-                request.message,
-                grounded_response,
-                current_user,
-                evidence=evidence,
-                live_failure_reason=reason,
-            ),
-            used_live_provider=False,
-            provider=fallback_provider,
-        ),
+        lambda fallback_provider, reason: _llm_apology(fallback_provider, reason),
         max_tokens=NEO_GENERAL_MAX_TOKENS,
         timeout_seconds=get_settings().llm_timeout_seconds,
     ):
@@ -128,13 +163,7 @@ def stream_neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> 
 
     answer = "".join(content_parts)
     if not answer:
-        fallback = _fallback_answer(
-            request.message,
-            grounded_response,
-            current_user,
-            evidence=evidence,
-            live_failure_reason="stream returned no content",
-        )
+        fallback = _llm_apology(provider, "stream returned no content").content
         answer = fallback
         provider = "mock"
         used_live_provider = False
@@ -403,21 +432,36 @@ def _neo_prompt(
     )
 
 
-def _fallback_answer(
-    message: str,
-    grounded_response: Optional[NeoChatResponse],
-    current_user: UserPublic,
-    evidence: Optional[list[Evidence]] = None,
-    live_failure_reason: Optional[str] = None,
-) -> str:
-    if grounded_response:
-        lead = "I could not get a timely live LLM response, so I used the configured LLM fallback over the grounded app context. "
-        return f"{lead}{grounded_response.answer}"
-    if evidence:
-        return _evidence_based_answer(message, evidence, live_failure_reason)
-    return (
-        "I could not get a timely live LLM response. Ask me a maintenance question with an asset name or ID, "
-        "or ask me to show assets, work orders, or users."
+def _neo_welcome_prompt(current_user: UserPublic, grounded_response: NeoChatResponse) -> str:
+    lines = [
+        f"User: {current_user.display_name} ({current_user.role})",
+        "Task: Write the initial Neo welcome for this user from the app-owned context below.",
+        "Do not invent data. Do not mention table names, column names, row counts, or hidden app metadata.",
+        "Keep it concise and role-specific.",
+        "App-owned context:",
+        grounded_response.answer,
+    ]
+    if grounded_response.table:
+        lines.extend(
+            [
+                "Visible result context:",
+                f"- Title: {grounded_response.table.title}",
+                *[
+                    "- " + ", ".join(f"{key}: {value}" for key, value in row.items())
+                    for row in grounded_response.table.rows[:5]
+                ],
+            ]
+        )
+    if grounded_response.action:
+        lines.append(f"Action context: {grounded_response.action.label}; {grounded_response.action.detail or ''}")
+    return "\n".join(lines)
+
+
+def _llm_apology(provider: str, reason: str) -> LLMTextResponse:
+    return LLMTextResponse(
+        content="Sorry, Neo could not get a live LLM response right now. Please retry after confirming the LLM service is responding.",
+        used_live_provider=False,
+        provider=provider,
     )
 
 
