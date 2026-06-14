@@ -1173,21 +1173,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  technicianAssist: (workOrderId: string, observation?: string) =>
+  technicianAssist: (workOrderId: string, observation?: string, requestedStep?: string) =>
     request<TechnicianAssistantResponse>('/api/work-orders/technician-assist', {
       method: 'POST',
-      body: JSON.stringify({ work_order_id: workOrderId, observation }),
+      body: JSON.stringify({ work_order_id: workOrderId, observation, requested_step: requestedStep }),
     }),
   technicianAssistStream: (
     workOrderId: string,
     observation: string | undefined,
+    requestedStep: string | undefined,
     onEvent: (event: AssistantStreamEvent<TechnicianAssistantResponse>) => void,
   ) =>
     streamRequest<AssistantStreamEvent<TechnicianAssistantResponse>>(
       '/api/work-orders/technician-assist/stream',
       {
         method: 'POST',
-        body: JSON.stringify({ work_order_id: workOrderId, observation }),
+        body: JSON.stringify({ work_order_id: workOrderId, observation, requested_step: requestedStep }),
       },
       onEvent,
     ),

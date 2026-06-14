@@ -356,6 +356,8 @@ def _technician_system_prompt() -> str:
         "material plan, and approved learning context. If the technician asks about blocked "
         "spares, material availability, procurement, lead time, reorder, or substitutes, answer "
         "that material question directly in next_prompt before any execution guidance. Do not "
+        "tell a technician to start field execution when requested_step is initial_context and "
+        "the supplied material plan shows a blocker. "
         "override deterministic inventory or work-order facts with learned context."
     )
 
@@ -372,7 +374,9 @@ def _technician_text_system_prompt() -> str:
         "steps. For execution questions, include live directions, safety reminders, recommended "
         "actions, a suggested problem code, and a completion summary. Ground every suggestion in the "
         "supplied work order, asset state, alerts, evidence, material plan, and approved learning "
-        "context. Do not override deterministic inventory or work-order facts with learned context. "
+        "context. When Requested step is initial_context, summarize the selected work order's current "
+        "state. If the material plan has a blocker, explain the blocker and next permissible action; "
+        "do not give start-work steps. Do not override deterministic inventory or work-order facts with learned context. "
         "Do not include table names, column names, row counts, or table-update metadata."
     )
 
@@ -396,7 +400,26 @@ def _supervisor_text_system_prompt() -> str:
 
 
 def _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes) -> str:
-    material_inquiry = _is_material_inquiry(request.observation or "")
+    initial_context = request.requested_step == "initial_context"
+    has_material_blocker = bool(_material_blocker_sentence(work_order))
+    material_inquiry = _is_material_inquiry(request.observation or "") or (initial_context and has_material_blocker)
+    if initial_context and has_material_blocker:
+        response_objective = (
+            "Response objective: explain the selected work order's material blocker, expected availability "
+            "or substitute limits when supplied, and what the technician can do next without starting field execution."
+        )
+    elif initial_context:
+        response_objective = (
+            "Response objective: summarize the selected work order's current technician context and ask for "
+            "the next field observation only if execution is allowed."
+        )
+    elif material_inquiry:
+        response_objective = (
+            "Response objective: answer the blocked spare or material availability question directly "
+            "before any execution checklist."
+        )
+    else:
+        response_objective = "Response objective: guide safe technician execution."
     return "\n".join(
         [
             f"Work order: {work_order['id']} {work_order['title']}",
@@ -404,14 +427,10 @@ def _technician_text_prompt(request, work_order, equipment, summary, evidence, f
             f"Status: {work_order['status']} Priority: {work_order['priority']}",
             f"Description: {work_order['description']}",
             f"Recommended action: {work_order['recommended_action']}",
+            f"Requested step: {request.requested_step or 'technician_chat'}",
             f"Technician observation: {request.observation or 'No observation yet'}",
-            f"Technician intent: {'material availability question' if material_inquiry else 'execution guidance'}",
-            (
-                "Response objective: answer the blocked spare or material availability question directly "
-                "before any execution checklist."
-                if material_inquiry
-                else "Response objective: guide safe technician execution."
-            ),
+            f"Technician intent: {'initial blocked context' if initial_context and has_material_blocker else 'initial context' if initial_context else 'material availability question' if material_inquiry else 'execution guidance'}",
+            response_objective,
             f"Current risk: {summary.risk_level}, health score: {summary.health_score}",
             f"Suggested problem code from app rules: {fallback.suggested_problem_code}",
             f"Suggested failure class from app rules: {fallback.suggested_failure_class}",
