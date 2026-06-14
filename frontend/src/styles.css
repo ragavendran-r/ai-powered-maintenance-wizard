@@ -2598,10 +2598,19 @@ h3 {
   min-width: 0;
 }
 
-.plannerCardGrid {
+.plannerWorkOrderPicker {
+  color: var(--color-text-muted);
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  font-size: 0.72rem;
+  font-weight: 900;
+  gap: 6px;
+  max-width: 520px;
+}
+
+.plannerWorkOrderPicker select {
+  font-size: 0.76rem;
+  min-height: 36px;
+  width: 100%;
 }
 
 .plannerCard {
@@ -2627,12 +2636,19 @@ h3 {
   display: grid;
   gap: 8px;
   grid-template-columns: auto minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.plannerCardHeader > div {
+  min-width: 0;
 }
 
 .plannerCardHeader strong,
 .technicianScheduleItem strong {
   color: var(--color-text-strong);
+  display: block;
   line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .plannerCardHeader small,
@@ -2671,8 +2687,8 @@ h3 {
 
 .plannerFieldGrid {
   display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .plannerFieldGrid label,
@@ -2688,9 +2704,47 @@ h3 {
 .plannerFieldGrid select,
 .plannerWideField input,
 .plannerWideField textarea {
+  box-sizing: border-box;
   font-size: 0.72rem;
   min-height: 32px;
+  min-width: 0;
   padding: 6px 8px;
+  width: 100%;
+}
+
+.plannerDateControl {
+  display: block;
+  min-width: 0;
+  position: relative;
+}
+
+.plannerDateInput {
+  padding-right: 34px;
+}
+
+.plannerDateInput.empty:not(:focus) {
+  color: transparent;
+}
+
+.plannerDateInput.empty:not(:focus)::-webkit-datetime-edit {
+  color: transparent;
+}
+
+.plannerDatePlaceholder {
+  color: var(--color-text-subtle);
+  font-weight: 800;
+  inset: 50% 34px auto 8px;
+  line-height: 1;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  text-overflow: ellipsis;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+.plannerDateInput:focus + .plannerDatePlaceholder {
+  display: none;
 }
 
 .plannerWideField textarea {
@@ -2785,8 +2839,8 @@ h3 {
 .statusTimeline {
   background: var(--color-surface-subtle);
   display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   margin-bottom: 16px;
   padding: 16px;
 }
@@ -2795,14 +2849,20 @@ h3 {
   color: var(--color-text-muted);
   display: grid;
   gap: 6px;
-  justify-items: start;
+  justify-items: center;
   min-width: 0;
+  position: relative;
+  text-align: center;
 }
 
 .statusTimeline strong {
   color: var(--color-text-heading);
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   line-height: 1.15;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .statusTimeline small {
@@ -2820,6 +2880,33 @@ h3 {
 .statusTimeline span.active i {
   background: var(--state-info-fill);
   border-color: var(--state-info-fill);
+}
+
+.statusTimeline span:hover strong,
+.statusTimeline span:focus-within strong {
+  overflow: visible;
+  white-space: normal;
+}
+
+.workOrderBadges {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.workOrderBadges .statusPill,
+.workOrderBadges .workOrderStatusBadge {
+  box-sizing: border-box;
+  height: 40px;
+  justify-content: center;
+  min-width: 156px;
+  width: 156px;
+}
+
+.workOrderBadges .statusPill {
+  font-weight: 900;
 }
 
 .statusDescription {

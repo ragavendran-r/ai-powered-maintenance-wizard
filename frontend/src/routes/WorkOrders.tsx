@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Bot, Briefcase, CalendarClock, FileText, Send, Truck } from 'lucide-react'
 import type {
   AuthUser,
@@ -91,6 +91,7 @@ export function WorkOrdersRoute({
             onDispatch={dispatchWorkOrder}
             onOpen={setSelectedWorkOrderId}
             onPlan={planWorkOrder}
+            selectedWorkOrderId={selectedWorkOrder?.id}
             technicians={technicians}
             workOrders={workOrders}
           />
@@ -237,8 +238,10 @@ export function WorkOrdersRoute({
               </div>
               <StatusTimeline status={selectedWorkOrder.status} />
               <div className="workOrderSummary">
-                <span className="statusPill connected">Priority {selectedWorkOrder.priority}</span>
-                <StatusBadge status={selectedWorkOrder.status} />
+                <div className="workOrderBadges">
+                  <span className="statusPill connected priorityPill">Priority {selectedWorkOrder.priority}</span>
+                  <StatusBadge status={selectedWorkOrder.status} />
+                </div>
                 <p className="statusDescription">{workOrderStatusDetail(selectedWorkOrder.status).description}</p>
                 <p>{selectedWorkOrder.description}</p>
                 <dl>
@@ -304,16 +307,39 @@ function PlannerDispatchBoard({
   onDispatch,
   onOpen,
   onPlan,
+  selectedWorkOrderId,
   technicians,
   workOrders,
 }: {
   onDispatch: (workOrderId: string) => void
   onOpen: (workOrderId: string) => void
   onPlan: (workOrderId: string, payload: WorkOrderPlanningUpdate) => void
+  selectedWorkOrderId?: string
   technicians: AuthUser[]
   workOrders: WorkOrder[]
 }) {
-  const openWorkOrders = workOrders.filter((order) => !['COMP', 'CLOSE'].includes(order.status))
+  const openWorkOrders = useMemo(
+    () => workOrders.filter((order) => !['COMP', 'CLOSE'].includes(order.status)),
+    [workOrders],
+  )
+  const openWorkOrderIds = openWorkOrders.map((order) => order.id).join('|')
+  const [selectedPlannerOrderId, setSelectedPlannerOrderId] = useState(selectedWorkOrderId ?? openWorkOrders[0]?.id ?? '')
+  const selectedPlannerOrder = openWorkOrders.find((order) => order.id === selectedPlannerOrderId) ?? openWorkOrders[0]
+
+  useEffect(() => {
+    if (selectedWorkOrderId && openWorkOrders.some((order) => order.id === selectedWorkOrderId)) {
+      setSelectedPlannerOrderId(selectedWorkOrderId)
+      return
+    }
+    if (!openWorkOrders.some((order) => order.id === selectedPlannerOrderId)) {
+      setSelectedPlannerOrderId(openWorkOrders[0]?.id ?? '')
+    }
+  }, [openWorkOrderIds, openWorkOrders, selectedPlannerOrderId, selectedWorkOrderId])
+
+  function selectPlannerOrder(workOrderId: string) {
+    setSelectedPlannerOrderId(workOrderId)
+    onOpen(workOrderId)
+  }
 
   return (
     <section className="detailPanel plannerDispatchBoard" aria-label="Maintenance planning and dispatch board">
@@ -324,18 +350,34 @@ function PlannerDispatchBoard({
           <small>{openWorkOrders.length} open work order{openWorkOrders.length === 1 ? '' : 's'} ready for planner review</small>
         </div>
       </div>
-      <div className="plannerCardGrid">
-        {openWorkOrders.map((order) => (
+      {openWorkOrders.length > 0 ? (
+        <>
+          <label className="plannerWorkOrderPicker">
+            Work order
+            <select
+              aria-label="Select work order for planning"
+              value={selectedPlannerOrder?.id ?? ''}
+              onChange={(event) => selectPlannerOrder(event.target.value)}
+            >
+              {openWorkOrders.map((order) => (
+                <option value={order.id} key={order.id}>
+                  {order.id} - {order.title}
+                </option>
+              ))}
+            </select>
+          </label>
           <PlannerDispatchCard
-            key={order.id}
+            key={selectedPlannerOrder.id}
             onDispatch={onDispatch}
             onOpen={onOpen}
             onPlan={onPlan}
-            order={order}
+            order={selectedPlannerOrder}
             technicians={technicians}
           />
-        ))}
-      </div>
+        </>
+      ) : (
+        <p className="plannerHint">No open work orders are ready for planner review.</p>
+      )}
     </section>
   )
 }
@@ -428,21 +470,31 @@ function PlannerDispatchCard({
         </label>
         <label>
           Start
-          <input
-            aria-label={`Planned start ${order.id}`}
-            type="datetime-local"
-            value={plannedStart}
-            onChange={(event) => setPlannedStart(event.target.value)}
-          />
+          <span className="plannerDateControl">
+            <input
+              aria-label={`Planned start ${order.id}`}
+              className={`plannerDateInput ${plannedStart ? 'hasValue' : 'empty'}`}
+              type="datetime-local"
+              value={plannedStart}
+              onClick={(event) => (event.currentTarget as HTMLInputElement & { showPicker?: () => void }).showPicker?.()}
+              onChange={(event) => setPlannedStart(event.target.value)}
+            />
+            {!plannedStart && <span className="plannerDatePlaceholder" aria-hidden="true">Pick start</span>}
+          </span>
         </label>
         <label>
           End
-          <input
-            aria-label={`Planned end ${order.id}`}
-            type="datetime-local"
-            value={plannedEnd}
-            onChange={(event) => setPlannedEnd(event.target.value)}
-          />
+          <span className="plannerDateControl">
+            <input
+              aria-label={`Planned end ${order.id}`}
+              className={`plannerDateInput ${plannedEnd ? 'hasValue' : 'empty'}`}
+              type="datetime-local"
+              value={plannedEnd}
+              onClick={(event) => (event.currentTarget as HTMLInputElement & { showPicker?: () => void }).showPicker?.()}
+              onChange={(event) => setPlannedEnd(event.target.value)}
+            />
+            {!plannedEnd && <span className="plannerDatePlaceholder" aria-hidden="true">Pick end</span>}
+          </span>
         </label>
         <label>
           Materials
