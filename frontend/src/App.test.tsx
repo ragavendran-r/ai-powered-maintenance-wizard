@@ -1731,9 +1731,16 @@ describe('Maintenance Wizard dashboard', () => {
     expect(within(dispatchBoard).getByRole('heading', { name: 'Planning, Scheduling & Dispatch' })).toBeInTheDocument()
     expect(within(centerPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
 
+    const workOrderPicker = within(dispatchBoard).getByLabelText('Select work order for planning')
+    expect(workOrderPicker).toBeInTheDocument()
+    fireEvent.change(workOrderPicker, { target: { value: 'WO-8304' } })
+
     const plannerCard = within(dispatchBoard).getByLabelText('WO-8304 planner card')
+    expect(within(dispatchBoard).queryByLabelText('WO-8311 planner card')).not.toBeInTheDocument()
     expect(within(plannerCard).getByText('Planned')).toBeInTheDocument()
     expect(within(plannerCard).getByDisplayValue('Maintenance Technician')).toBeInTheDocument()
+    expect(within(plannerCard).getByLabelText('Planned start WO-8304')).toHaveAttribute('type', 'datetime-local')
+    expect(within(plannerCard).getByLabelText('Planned start WO-8304')).not.toHaveAttribute('placeholder')
 
     fireEvent.change(within(plannerCard).getByLabelText('Planned start WO-8304'), {
       target: { value: '2026-06-12T15:00' },

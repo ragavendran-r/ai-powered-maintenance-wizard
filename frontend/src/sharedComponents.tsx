@@ -564,12 +564,29 @@ export function StatusTimeline({ status }: { status: WorkOrderStatus }) {
   const activeIndex = Math.max(0, workOrderStatusFlow.indexOf(status))
   return (
     <div className="statusTimeline" aria-label="Work order status">
-      {workOrderStatusFlow.map((item, index) => (
-        <span className={index <= activeIndex ? 'active' : ''} key={item}>
-          <i />
-          <strong>{workOrderStatusDetail(item).label}</strong>
-        </span>
-      ))}
+      {workOrderStatusFlow.map((item, index) => {
+        const detail = workOrderStatusDetail(item)
+        return (
+          <span
+            aria-label={detail.label}
+            className={index <= activeIndex ? 'active' : ''}
+            key={item}
+            title={`${detail.label}: ${detail.description}`}
+          >
+            <i />
+            <strong>{compactWorkOrderStatusLabels[item]}</strong>
+          </span>
+        )
+      })}
     </div>
   )
+}
+
+const compactWorkOrderStatusLabels: Record<WorkOrderStatus, string> = {
+  WAPPR: 'Approval',
+  APPR: 'Approved',
+  INPRG: 'Progress',
+  WMATL: 'Material',
+  COMP: 'Complete',
+  CLOSE: 'Closed',
 }
