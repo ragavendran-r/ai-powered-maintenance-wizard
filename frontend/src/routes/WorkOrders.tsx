@@ -94,6 +94,7 @@ export function WorkOrdersRoute({
   const selectedEffectiveStatusDetail = selectedEffectiveStatus ? workOrderStatusDetail(selectedEffectiveStatus) : undefined
   const [technicianWaitingLong, setTechnicianWaitingLong] = useState(false)
   const isPlanningMode = mode === 'planning'
+  const canUseAssistant = canTechnicianAssistant || canSupervisorAssistant
 
   useEffect(() => {
     if (!technicianLoading || technicianStreaming) {
@@ -117,125 +118,120 @@ export function WorkOrdersRoute({
             workOrders={workOrders}
           />
         )}
-        {!isPlanningMode && (
-        <section className="detailPanel workOrderAssistantPanel">
-          {selectedWorkOrder ? (
-            <>
-              {canTechnicianAssistant && (
-                <>
-                  <TechnicianScheduleQueue
-                    onOpen={setSelectedWorkOrderId}
-                    selectedWorkOrderId={selectedWorkOrder.id}
-                    workOrders={workOrders}
-                  />
-                  <TechnicianExecutionCard
-                    assistant={technicianAssistant}
-                    isLoading={technicianLoading}
-                    onComplete={completeSelectedWorkOrder}
-                    onStart={startWorkOrder}
-                    workOrder={selectedWorkOrder}
-                  />
-                </>
-              )}
-              <div className={canTechnicianAssistant && canSupervisorAssistant ? 'assistantSplit' : 'assistantSplit singleAssistant'}>
+        {!isPlanningMode && canUseAssistant && (
+          <section className="detailPanel workOrderAssistantPanel">
+            {selectedWorkOrder ? (
+              <>
                 {canTechnicianAssistant && (
-                  <section className="assistantBox technician" aria-busy={technicianLoading}>
-                    <div className="sectionHeader">
-                      <Bot size={18} />
-                      <div>
-                        <h2>{technicianAssistantName}</h2>
-                        <small>Technician AI assistant with shared LLM configuration</small>
+                  <>
+                    <TechnicianScheduleQueue
+                      onOpen={setSelectedWorkOrderId}
+                      selectedWorkOrderId={selectedWorkOrder.id}
+                      workOrders={workOrders}
+                    />
+                    <TechnicianExecutionCard
+                      assistant={technicianAssistant}
+                      isLoading={technicianLoading}
+                      onComplete={completeSelectedWorkOrder}
+                      onStart={startWorkOrder}
+                      workOrder={selectedWorkOrder}
+                    />
+                  </>
+                )}
+                <div className={canTechnicianAssistant && canSupervisorAssistant ? 'assistantSplit' : 'assistantSplit singleAssistant'}>
+                  {canTechnicianAssistant && (
+                    <section className="assistantBox technician" aria-busy={technicianLoading}>
+                      <div className="sectionHeader">
+                        <Bot size={18} />
+                        <div>
+                          <h2>{technicianAssistantName}</h2>
+                          <small>Technician AI assistant with shared LLM configuration</small>
+                        </div>
                       </div>
-                    </div>
-                    <div className="assistantTranscript" aria-label={`${technicianAssistantName} technician chat`}>
-                      {technicianChat.map((turn) => (
-                        <div className={`chatBubble ${turn.role}`} key={turn.id}>
-                          <span>{turn.role === 'assistant' ? technicianAssistantName : 'You'}</span>
-                          {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
-                          <AssistantMessageContent turn={turn} />
-                        </div>
-                      ))}
-                      {technicianLoading && !technicianStreaming && (
-                        <div className="chatBubble assistant" aria-live="polite">
-                          <span>{technicianAssistantName}</span>
-                          <p>
-                            <span className="loadingSpinner" aria-hidden="true" />
-                            {technicianWaitingLong
-                              ? ' Waiting for the LLM response. Local models can take longer on first token.'
-                              : ' Thinking...'}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                    <form className="assistantComposer" onSubmit={(event) => {
-                      event.preventDefault()
-                      runTechnicianAssistant()
-                    }}>
-                      <textarea
-                        aria-label="Technician observation"
-                        value={technicianObservation}
-                        disabled={technicianLoading}
-                        onChange={(event) => setTechnicianObservation(event.target.value)}
-                      />
-                      <button className="textButton" type="submit" disabled={technicianLoading}>
-                        {technicianLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
-                        Send
-                      </button>
-                    </form>
-                  </section>
-                )}
-                {canSupervisorAssistant && (
-                  <section className="assistantBox supervisor" aria-busy={supervisorLoading}>
-                    <div className="sectionHeader">
-                      <Bot size={18} />
-                      <div>
-                        <h2>{supervisorAssistantName}</h2>
-                        <small>Supervisor AI assistant with shared LLM configuration</small>
+                      <div className="assistantTranscript" aria-label={`${technicianAssistantName} technician chat`}>
+                        {technicianChat.map((turn) => (
+                          <div className={`chatBubble ${turn.role}`} key={turn.id}>
+                            <span>{turn.role === 'assistant' ? technicianAssistantName : 'You'}</span>
+                            {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
+                            <AssistantMessageContent turn={turn} />
+                          </div>
+                        ))}
+                        {technicianLoading && !technicianStreaming && (
+                          <div className="chatBubble assistant" aria-live="polite">
+                            <span>{technicianAssistantName}</span>
+                            <p>
+                              <span className="loadingSpinner" aria-hidden="true" />
+                              {technicianWaitingLong
+                                ? ' Waiting for the LLM response. Local models can take longer on first token.'
+                                : ' Thinking...'}
+                            </p>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                    <div className="assistantTranscript" aria-label={`${supervisorAssistantName} supervisor chat`}>
-                      {supervisorChat.map((turn) => (
-                        <div className={`chatBubble ${turn.role}`} key={turn.id}>
-                          <span>{turn.role === 'assistant' ? supervisorAssistantName : 'You'}</span>
-                          {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
-                          <AssistantMessageContent turn={turn} />
+                      <form className="assistantComposer" onSubmit={(event) => {
+                        event.preventDefault()
+                        runTechnicianAssistant()
+                      }}>
+                        <textarea
+                          aria-label="Technician observation"
+                          value={technicianObservation}
+                          disabled={technicianLoading}
+                          onChange={(event) => setTechnicianObservation(event.target.value)}
+                        />
+                        <button className="textButton" type="submit" disabled={technicianLoading}>
+                          {technicianLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
+                          Send
+                        </button>
+                      </form>
+                    </section>
+                  )}
+                  {canSupervisorAssistant && (
+                    <section className="assistantBox supervisor" aria-busy={supervisorLoading}>
+                      <div className="sectionHeader">
+                        <Bot size={18} />
+                        <div>
+                          <h2>{supervisorAssistantName}</h2>
+                          <small>Supervisor AI assistant with shared LLM configuration</small>
                         </div>
-                      ))}
-                      {supervisorLoading && !supervisorStreaming && (
-                        <div className="chatBubble assistant" aria-live="polite">
-                          <span>{supervisorAssistantName}</span>
-                          <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
-                        </div>
-                      )}
-                    </div>
-                    <form className="assistantComposer" onSubmit={(event) => {
-                      event.preventDefault()
-                      runSupervisorAssistant(selectedWorkOrder.id)
-                    }}>
-                      <textarea
-                        aria-label="Supervisor question"
-                        value={supervisorQuestion}
-                        disabled={supervisorLoading}
-                        onChange={(event) => setSupervisorQuestion(event.target.value)}
-                      />
-                      <button className="textButton" type="submit" disabled={supervisorLoading}>
-                        {supervisorLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
-                        Send
-                      </button>
-                    </form>
-                  </section>
-                )}
-                {!canTechnicianAssistant && !canSupervisorAssistant && (
-                  <section className="assistantBox">
-                    <p className="emptyState">Neo is available to technician and supervisor accounts.</p>
-                  </section>
-                )}
-              </div>
-            </>
-          ) : (
-            <p className="emptyState">Select a work order to use the assistant.</p>
-          )}
-        </section>
+                      </div>
+                      <div className="assistantTranscript" aria-label={`${supervisorAssistantName} supervisor chat`}>
+                        {supervisorChat.map((turn) => (
+                          <div className={`chatBubble ${turn.role}`} key={turn.id}>
+                            <span>{turn.role === 'assistant' ? supervisorAssistantName : 'You'}</span>
+                            {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
+                            <AssistantMessageContent turn={turn} />
+                          </div>
+                        ))}
+                        {supervisorLoading && !supervisorStreaming && (
+                          <div className="chatBubble assistant" aria-live="polite">
+                            <span>{supervisorAssistantName}</span>
+                            <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
+                          </div>
+                        )}
+                      </div>
+                      <form className="assistantComposer" onSubmit={(event) => {
+                        event.preventDefault()
+                        runSupervisorAssistant(selectedWorkOrder.id)
+                      }}>
+                        <textarea
+                          aria-label="Supervisor question"
+                          value={supervisorQuestion}
+                          disabled={supervisorLoading}
+                          onChange={(event) => setSupervisorQuestion(event.target.value)}
+                        />
+                        <button className="textButton" type="submit" disabled={supervisorLoading}>
+                          {supervisorLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
+                          Send
+                        </button>
+                      </form>
+                    </section>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="emptyState">Select a work order to use the assistant.</p>
+            )}
+          </section>
         )}
         <section className="detailPanel workOrderQueuePanel">
           <div className="sectionHeader">
