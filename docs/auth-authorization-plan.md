@@ -72,14 +72,16 @@ Unauthorized requests must return `401`. Authenticated users without the require
 
 Seed demo users from `assets/sample_data/users_seed.sql` only when `AUTH_SEED_DEMO_USERS=true`. Demo credentials are for local evaluation only and must not be used in production.
 
-| User | Role |
-| --- | --- |
-| `admin@plant.local` | `admin` |
-| `maintenance@plant.local` | `maintenance_engineer` |
-| `reliability@plant.local` | `reliability_engineer` |
-| `planner@plant.local` | `planner` |
-| `operator@plant.local` | `operator` |
-| `iot-service@plant.local` | `iot_service` |
+| Name | User | Role |
+| --- | --- | --- |
+| Ragav | `admin@plant.local` | `admin` |
+| Lokesh | `maintenance@plant.local` | `maintenance_engineer` |
+| Vinoth | `technician@plant.local` | `maintenance_technician` |
+| Dhruv | `supervisor@plant.local` | `maintenance_supervisor` |
+| Guna | `reliability@plant.local` | `reliability_engineer` |
+| Priya | `planner@plant.local` | `planner` |
+| Jan | `operator@plant.local` | `operator` |
+| Vijay | `iot-service@plant.local` | `iot_service` |
 
 ## Test Plan
 

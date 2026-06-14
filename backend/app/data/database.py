@@ -729,8 +729,8 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "failure_class": "MECH",
             "problem_code": "BRGVIB",
             "classification": "Bearing vibration",
-            "assigned_to": "Maintenance Technician",
-            "supervisor": "Maintenance Supervisor",
+            "assigned_to": "Vinoth",
+            "supervisor": "Dhruv",
             "due_date": "2026-06-12T18:00:00+05:30",
             "planning_status": "planned",
             "planned_start": "2026-06-12T14:00:00+05:30",
@@ -758,7 +758,7 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "failure_class": "CTRL",
             "problem_code": "IGVACT",
             "classification": "Control actuator",
-            "assigned_to": "Reliability Engineer",
+            "assigned_to": "Guna",
             "supervisor": "Blast Furnace Supervisor",
             "due_date": "2026-06-13T12:00:00+05:30",
             "planning_status": "unscheduled",
@@ -963,7 +963,7 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
         """,
         [
             ("WO-8304", "Maintenance Wizard", "assistant", "Start with lockout, bearing temperature, coupling alignment, and foundation bolt checks."),
-            ("WO-8304", "Maintenance Engineer", "observation", "Drive-end vibration confirmed at reduced finishing stand load."),
+            ("WO-8304", "Lokesh", "observation", "Drive-end vibration confirmed at reduced finishing stand load."),
             ("WO-8297", "Crane Technician", "completion", "Brake temperature normalized after restriction; shoe set needs follow-up replacement planning."),
         ],
     )
@@ -1041,7 +1041,7 @@ def seed_demo_rca_cases(connection: sqlite3.Connection) -> None:
                 {
                     "id": "CA-1",
                     "action": "Procure drive-end bearing and reserve installation window.",
-                    "owner": "Planner",
+                    "owner": "Priya",
                     "due_date": "2026-07-03",
                     "status": "approved",
                     "verification": "Bearing received and reserved against WO-8304.",
@@ -1049,7 +1049,7 @@ def seed_demo_rca_cases(connection: sqlite3.Connection) -> None:
                 {
                     "id": "CA-2",
                     "action": "Complete non-intrusive temperature, alignment, and bolt torque checks.",
-                    "owner": "Maintenance Engineer",
+                    "owner": "Lokesh",
                     "due_date": "2026-06-14",
                     "status": "in_progress",
                     "verification": "Attach readings and photos to the RCA evidence timeline.",

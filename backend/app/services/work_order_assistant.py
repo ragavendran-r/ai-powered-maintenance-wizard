@@ -105,6 +105,8 @@ def technician_assistance(
     fallback = _technician_fallback(request, work_order, summary, evidence)
     prompt = "\n".join(
         [
+            f"Technician name: {current_user.display_name if current_user else work_order['assigned_to']}",
+            "Address the technician by this name; do not address them by role.",
             f"Work order: {work_order['id']} {work_order['title']}",
             f"Asset: {equipment['id']} {equipment['name']} in {equipment['area']}",
             f"Status: {work_order['status']} Priority: {work_order['priority']}",
@@ -188,7 +190,7 @@ def stream_technician_assistance(
         use_reranker=False,
     )
     fallback = _technician_fallback(request, work_order, summary, evidence)
-    prompt = _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes)
+    prompt = _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes, current_user)
     content_parts: list[str] = []
     last_meta = (provider, used_live_provider)
     for chunk in llm_client.stream_text(
@@ -252,6 +254,8 @@ def supervisor_assistance(
     fallback = _supervisor_fallback(request, work_orders, selected)
     prompt = "\n".join(
         [
+            f"Supervisor name: {current_user.display_name if current_user else 'Supervisor'}",
+            "Address the supervisor by this name; do not address them by role.",
             f"Supervisor question: {request.question or 'Review work order status and follow-ups.'}",
             f"Queue focus: {queue_focus}",
             "Selected work order:",
@@ -310,7 +314,7 @@ def stream_supervisor_assistance(
     if request.work_order_id and not selected:
         raise HTTPException(status_code=404, detail="Work order not found")
     fallback = _supervisor_fallback(request, work_orders, selected, queue_focus)
-    prompt = _supervisor_text_prompt(request, work_orders, selected, fallback, queue_focus)
+    prompt = _supervisor_text_prompt(request, work_orders, selected, fallback, queue_focus, current_user)
     content_parts: list[str] = []
     provider = "mock"
     used_live_provider = False
@@ -374,6 +378,7 @@ def _technician_system_prompt() -> str:
         f"You are {TECHNICIAN_ASSISTANT_NAME}, a steel-plant maintenance technician assistant. Return only valid JSON "
         "matching TechnicianAssistantLLMOutput. Give safe live directions, practical "
         "recommendations, problem code, failure class, and a concise completion summary. "
+        "When a technician name is supplied in the prompt, address them by name and not by role. "
         "Ground every suggestion in the supplied work order, asset state, alerts, evidence, "
         "material plan, and approved learning context. If the technician asks about blocked "
         "spares, material availability, procurement, lead time, reorder, or substitutes, answer "
@@ -388,6 +393,7 @@ def _technician_text_system_prompt() -> str:
     return (
         f"You are {TECHNICIAN_ASSISTANT_NAME}, a steel-plant maintenance technician assistant. "
         "Stream a concise Markdown chat response for the assigned technician. Do not return JSON. "
+        "When a technician name is supplied in the prompt, address them by name and not by role. "
         "Use short headings and bullets. When the technician asks about blocked spares, material "
         "readiness, availability, expected date, procurement, reorder, lead time, or substitutes, "
         "answer that question directly first from the Material plan. Include expected date or say "
@@ -413,7 +419,8 @@ def _supervisor_system_prompt() -> str:
     return (
         f"You are {SUPERVISOR_ASSISTANT_NAME}, a maintenance supervisor assistant. Return only valid JSON matching "
         "SupervisorAssistantLLMOutput. Summarize queue state, identify follow-ups, list risks, "
-        "and set draft fields only when the supplied work order needs one."
+        "and set draft fields only when the supplied work order needs one. "
+        "When a supervisor name is supplied in the prompt, address them by name and not by role."
     )
 
 
@@ -421,6 +428,7 @@ def _supervisor_text_system_prompt() -> str:
     return (
         f"You are {SUPERVISOR_ASSISTANT_NAME}, a maintenance supervisor assistant. "
         "Stream a concise Markdown chat response for supervisor review. Do not return JSON. "
+        "When a supervisor name is supplied in the prompt, address them by name and not by role. "
         "Answer the supervisor's exact question first. If the question asks for waiting approval or pending "
         "approval, list only WAPPR work orders and the required approval decision. If it asks for follow-ups, "
         "list follow-up work. If it asks for material blockers, list material-blocked work. Then list risks "
@@ -430,7 +438,7 @@ def _supervisor_text_system_prompt() -> str:
     )
 
 
-def _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes) -> str:
+def _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes, current_user: Optional[UserPublic] = None) -> str:
     initial_context = request.requested_step == "initial_context"
     has_material_blocker = bool(_material_blocker_sentence(work_order))
     material_inquiry = _is_material_inquiry(request.observation or "") or (initial_context and has_material_blocker)
@@ -458,6 +466,8 @@ def _technician_text_prompt(request, work_order, equipment, summary, evidence, f
     learning_note_limit = 2 if initial_context else 3
     return "\n".join(
         [
+            f"Technician name: {current_user.display_name if current_user else work_order['assigned_to']}",
+            "Address the technician by this name; do not address them by role.",
             f"Work order: {work_order['id']} {work_order['title']}",
             f"Asset: {equipment['id']} {equipment['name']} in {equipment['area']}",
             f"Status: {work_order['status']} Priority: {work_order['priority']}",
@@ -484,9 +494,18 @@ def _technician_text_prompt(request, work_order, equipment, summary, evidence, f
     )
 
 
-def _supervisor_text_prompt(request, work_orders, selected, fallback, queue_focus: str) -> str:
+def _supervisor_text_prompt(
+    request,
+    work_orders,
+    selected,
+    fallback,
+    queue_focus: str,
+    current_user: Optional[UserPublic] = None,
+) -> str:
     return "\n".join(
         [
+            f"Supervisor name: {current_user.display_name if current_user else 'Supervisor'}",
+            "Address the supervisor by this name; do not address them by role.",
             f"Supervisor question: {request.question or 'Review work order status and follow-ups.'}",
             f"Queue focus: {queue_focus}",
             "Response objective: answer the supervisor question using only the focused queue below before adding risks.",

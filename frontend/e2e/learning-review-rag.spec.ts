@@ -3,7 +3,7 @@ import { expect, test, type Page, type Route } from '@playwright/test'
 const adminUser = {
   id: 'USER-ADMIN',
   email: 'admin@plant.local',
-  display_name: 'Plant Admin',
+  display_name: 'Ragav',
   role: 'admin',
   is_active: true,
 }
@@ -205,7 +205,7 @@ test('shows approved learning-example Qdrant sync after Learning Review reindex'
   await page.goto('/')
 
   await page.getByRole('button', { name: 'Sign In' }).click()
-  await expect(page.getByText('Plant Admin')).toBeVisible()
+  await expect(page.getByText('Ragav')).toBeVisible()
 
   await page.getByRole('button', { name: 'Learning and Tuning' }).click()
   await expect(page.getByRole('heading', { name: 'Learning and Tuning' })).toBeVisible()

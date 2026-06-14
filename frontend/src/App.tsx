@@ -114,11 +114,13 @@ function navigationIcon(icon: NavigationIcon) {
   }
 }
 
-function technicianInitialContextPrompt(workOrder: WorkOrder) {
+function technicianInitialContextPrompt(workOrder: WorkOrder, userName?: string) {
   const statusLabel = workOrderStatusLabel(workOrder.status)
   const materialBlockReason = workOrderStartBlockReason(workOrder)
+  const nameInstruction = userName ? `Address ${userName} by name, not by role.` : 'Address the signed-in technician by name, not by role.'
   if (materialBlockReason) {
     return [
+      nameInstruction,
       `Open selected work order ${workOrder.id} for technician context.`,
       `Current status is ${statusLabel}, and field execution is blocked by material availability.`,
       `Material blocker: ${materialBlockReason}.`,
@@ -126,6 +128,7 @@ function technicianInitialContextPrompt(workOrder: WorkOrder) {
     ].join(' ')
   }
   return [
+    nameInstruction,
     `Open selected work order ${workOrder.id} for technician context.`,
     `Current status is ${statusLabel}.`,
     'Summarize the immediate technician context from the work order, material plan, asset evidence, and approved learning notes.',
@@ -147,7 +150,7 @@ function supervisorQueueNameForPrompt(prompt: string) {
   return 'all_work'
 }
 
-function supervisorInitialContextPrompt(workOrder: WorkOrder | undefined, workOrders: WorkOrder[]) {
+function supervisorInitialContextPrompt(workOrder: WorkOrder | undefined, workOrders: WorkOrder[], userName?: string) {
   const approvals = workOrders.filter((item) => item.status === 'WAPPR')
   const followUps = workOrders.filter((item) => item.follow_up_required)
   const materialBlocked = workOrders.filter((item) => (
@@ -158,6 +161,7 @@ function supervisorInitialContextPrompt(workOrder: WorkOrder | undefined, workOr
     ? `Selected work order: ${workOrder.id} ${workOrder.title}, status ${workOrderStatusLabel(workOrder.status)}.`
     : 'No selected work order.'
   return [
+    userName ? `Address ${userName} by name, not by role.` : 'Address the signed-in supervisor by name, not by role.',
     'Open supervisor Work Execution initial context.',
     selected,
     `Queue context: ${approvals.length} waiting approval, ${followUps.length} follow-up, ${materialBlocked.length} material-blocked.`,
@@ -1817,7 +1821,7 @@ export function App() {
   async function loadTechnicianInitialContext(workOrder: WorkOrder, contextKey: string) {
     await streamTechnicianAssistantTurn({
       workOrder,
-      prompt: technicianInitialContextPrompt(workOrder),
+      prompt: technicianInitialContextPrompt(workOrder, currentUser?.display_name),
       requestedStep: 'initial_context',
       replaceTranscript: true,
       contextKey,
@@ -1966,7 +1970,7 @@ export function App() {
       await api.supervisorAssistStream({
         work_order_id: workOrder?.id,
         queue_name: 'all_work',
-        question: supervisorInitialContextPrompt(workOrder, workOrders),
+        question: supervisorInitialContextPrompt(workOrder, workOrders, currentUser?.display_name),
       }, (event) => {
         if (!isCurrentContext()) return
         if (event.type === 'meta') {
