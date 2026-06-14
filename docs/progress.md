@@ -24,6 +24,9 @@ Implement a working AI-powered Maintenance Wizard prototype in `/Users/ragaven/w
 
 ## Latest Session Update
 
+- Reviewed the Markdown/documentation set and refreshed stale documentation on `codex/fix-reports-export-latency`: README now includes a full tech stack table covering backend, frontend, auth, AI providers, local LLM runtime, assistants, Qdrant RAG, NATS, learning/PEFT, document parsing, reports, tests, and local orchestration. Updated the implementation plan, completion audit, production hardening notes, demo script, submission guide, and ingestion-sample README so they match the current RBAC, Qdrant, NATS, Reports, PM/RCA, Learning Review, PEFT, artifact, and model-promotion behavior instead of the initial prototype snapshot.
+- Documentation checks run in this pass: Markdown inventory with `rg --files -g '*.md'`, stale-term scan across README/docs/sample docs, targeted re-reads of touched docs, and `git diff --check`. No backend/frontend source files were intentionally changed in this documentation pass; existing dirty source/test changes from `codex/fix-reports-export-latency` remain outside this edit scope.
+
 - Fixed Neo stream latency regression on `codex/fix-neo-stream-timeout`: the shared LLM client now supports per-call stream timeout overrides, and Neo dashboard, technician, and supervisor streams explicitly use the 15 second `LLM_TIMEOUT_SECONDS` interactive timeout instead of the longer shared stream timeout. Morpheus RCA/PM and other long-form live narratives keep their scoped draft/stream settings. Updated LM Studio docs and added backend regression coverage for the OpenAI-compatible timeout override and all Neo stream endpoints.
 - Verification passed with backend compile, focused LLM stream tests (`3 passed`), focused Neo/work-order stream API tests (`7 passed`), full backend tests (`118 passed`), focused Neo frontend tests (`4 passed`), full frontend tests (`22 passed`), frontend build, `git diff --check`, and focused Playwright streaming coverage outside the sandbox (`1 passed`). The Playwright spec was also updated to use the current Command Center and asset Reliability tab navigation.
 
@@ -117,7 +120,7 @@ Next G-016 implementation items:
 
 ## Current Status
 
-An initial end-to-end prototype is implemented and verified, and current work is moving it toward production-ready architecture. It includes a FastAPI backend, React/Vite frontend, bundled sample data, SQLite persistence seeded from sample data, Qdrant-backed production RAG with SQLite/local-vector fallback, deterministic recommendation safeguards, rolling-baseline anomaly detection, risk/RUL heuristics, feedback persistence, async learning job records, Markdown report export, setup documentation, and local stack scripts.
+An end-to-end prototype is implemented and verified across several iterations, and current work keeps the documentation aligned with the production-targeted local architecture. It includes a FastAPI backend, React/Vite frontend, bundled sample data, local RBAC, SQLite persistence seeded from sample data, Qdrant-backed production-like RAG with SQLite/local-vector fallback, NATS JetStream IoT ingestion and learning jobs, deterministic recommendation safeguards, rolling-baseline anomaly detection, risk/RUL heuristics, PM/RCA/work-order workflows, structured reports, feedback persistence, Learning Review, PEFT handoff, Markdown export, setup documentation, and local stack scripts.
 
 The active goal is complete for a working hackathon prototype. Remaining items are production extensions, not blockers for the requested prototype.
 
@@ -162,15 +165,16 @@ The active goal is complete for a working hackathon prototype. Remaining items a
 
 ## Next Steps
 
-1. Production extension: add stronger embedding model selection/versioning and Qdrant collection migration controls.
-2. Optional production extension: add OCR for scanned PDFs.
-3. Optional production extension: add authentication and role-based access control.
+1. Production extension: replace deterministic hash embeddings with a governed production embedding model.
+2. Production extension: migrate operational, audit, and learning state from SQLite to Postgres or another managed database.
+3. Production extension: add OCR for scanned PDFs.
+4. Hardening follow-up: add document upload size/page limits, stricter ingestion request schemas, SQLite foreign-key enforcement, and local SQLite concurrency settings until the database migration is complete.
 
 ## Decisions
 
 - Stack: FastAPI backend with React and TypeScript frontend.
 - LLM integration: provider-agnostic adapter.
-- Storage: SQLite plus local vector store.
+- Storage: SQLite for local/demo operational state plus Qdrant for production-like RAG.
 - Scope: end-to-end hackathon prototype.
 - Progress tracking: update this file at the end of each implementation session.
 - Live LLM calls remain deferred in this slice; deterministic fallback reasoning is used so the app runs without secrets.
