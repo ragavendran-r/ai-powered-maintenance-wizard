@@ -1183,12 +1183,14 @@ export const api = {
     observation: string | undefined,
     requestedStep: string | undefined,
     onEvent: (event: AssistantStreamEvent<TechnicianAssistantResponse>) => void,
+    signal?: AbortSignal,
   ) =>
     streamRequest<AssistantStreamEvent<TechnicianAssistantResponse>>(
       '/api/work-orders/technician-assist/stream',
       {
         method: 'POST',
         body: JSON.stringify({ work_order_id: workOrderId, observation, requested_step: requestedStep }),
+        signal,
       },
       onEvent,
     ),

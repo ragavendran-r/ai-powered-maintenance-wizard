@@ -75,6 +75,13 @@ import { IngestionRoute } from './routes/Ingestion'
 import { LearningReviewRoute } from './routes/LearningReview'
 import { UsersRoute } from './routes/Users'
 
+const TECHNICIAN_INITIAL_CONTEXT_TIMEOUT_MS = 90_000
+const TECHNICIAN_ASSISTANT_TIMEOUT_MS = 120_000
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 function technicianInitialContextPrompt(workOrder: WorkOrder) {
   const statusLabel = workOrderStatusLabel(workOrder.status)
   const materialBlockReason = workOrderStartBlockReason(workOrder)
@@ -108,8 +115,6 @@ function technicianContextKey(workOrder: WorkOrder, userId?: string) {
   return [
     userId ?? 'anonymous',
     workOrder.id,
-    workOrder.status,
-    workOrder.updated_at,
     workOrder.material_readiness,
     workOrder.material_blocker_status,
     workOrder.material_blocker_note,
@@ -1238,6 +1243,13 @@ export function App() {
     }
     setTechnicianLoading(true)
     setTechnicianStreaming(false)
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+    const timeoutMs = requestedStep === 'initial_context'
+      ? TECHNICIAN_INITIAL_CONTEXT_TIMEOUT_MS
+      : TECHNICIAN_ASSISTANT_TIMEOUT_MS
+    const timeoutId = controller
+      ? window.setTimeout(() => controller.abort(), timeoutMs)
+      : undefined
     try {
       let assistantMessageId: string | null = null
       let streamedContent = ''
@@ -1306,14 +1318,18 @@ export function App() {
             ])
           }
         }
-      })
+      }, controller?.signal)
       return true
-    } catch {
+    } catch (error) {
       if (isCurrentContext()) {
-        setWorkOrderMessage(`${technicianAssistantName} could not reach the LLM service for ${workOrder.id}`)
+        const message = isAbortError(error)
+          ? `${technicianAssistantName} did not receive a complete LLM response for ${workOrder.id} within ${Math.round(timeoutMs / 1000)} seconds`
+          : `${technicianAssistantName} could not reach the LLM service for ${workOrder.id}`
+        setWorkOrderMessage(message)
       }
       return false
     } finally {
+      if (timeoutId) window.clearTimeout(timeoutId)
       if (isCurrentContext()) {
         setTechnicianLoading(false)
         setTechnicianStreaming(false)

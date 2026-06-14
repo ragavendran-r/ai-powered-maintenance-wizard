@@ -23,6 +23,7 @@ from app.services.risk import health_summary
 TECHNICIAN_ASSISTANT_NAME = "Neo"
 SUPERVISOR_ASSISTANT_NAME = "Neo"
 WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS = 600
+WORK_ORDER_ASSISTANT_INITIAL_CONTEXT_MAX_TOKENS = 220
 MATERIAL_INQUIRY_TERMS = (
     "available",
     "availability",
@@ -170,10 +171,12 @@ def stream_technician_assistance(
     fallback = _technician_fallback(request, work_order, summary, evidence)
     prompt = _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes)
     content_parts: list[str] = []
-    provider = "mock"
-    used_live_provider = False
-    sent_meta = False
-    for chunk in configured_llm_client().stream_text(
+    llm_client = configured_llm_client()
+    provider = llm_client.provider_name
+    used_live_provider = provider != "mock"
+    yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+    last_meta = (provider, used_live_provider)
+    for chunk in llm_client.stream_text(
         prompt,
         _technician_text_system_prompt(),
         lambda fallback_provider, reason: LLMTextResponse(
@@ -181,13 +184,13 @@ def stream_technician_assistance(
             used_live_provider=False,
             provider=fallback_provider,
         ),
-        max_tokens=WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS,
+        max_tokens=_technician_stream_max_tokens(request),
     ):
         provider = chunk.provider
         used_live_provider = chunk.used_live_provider
-        if not sent_meta:
-            sent_meta = True
+        if (provider, used_live_provider) != last_meta:
             yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+            last_meta = (provider, used_live_provider)
         if chunk.content:
             content_parts.append(chunk.content)
             yield {"type": "token", "content": chunk.content}
@@ -197,8 +200,6 @@ def stream_technician_assistance(
         answer = _technician_stream_fallback_text(fallback, "stream returned no content")
         provider = "mock"
         used_live_provider = False
-        if not sent_meta:
-            yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
         yield {"type": "token", "content": answer}
     response = fallback.model_copy(
         update={
@@ -381,6 +382,12 @@ def _technician_text_system_prompt() -> str:
     )
 
 
+def _technician_stream_max_tokens(request: TechnicianAssistantRequest) -> int:
+    if request.requested_step == "initial_context":
+        return WORK_ORDER_ASSISTANT_INITIAL_CONTEXT_MAX_TOKENS
+    return WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS
+
+
 def _supervisor_system_prompt() -> str:
     return (
         f"You are {SUPERVISOR_ASSISTANT_NAME}, a maintenance supervisor assistant. Return only valid JSON matching "
@@ -406,12 +413,14 @@ def _technician_text_prompt(request, work_order, equipment, summary, evidence, f
     if initial_context and has_material_blocker:
         response_objective = (
             "Response objective: explain the selected work order's material blocker, expected availability "
-            "or substitute limits when supplied, and what the technician can do next without starting field execution."
+            "or substitute limits when supplied, and what the technician can do next without starting field execution. "
+            "Limit the response to 3 short bullets and no more than 90 words."
         )
     elif initial_context:
         response_objective = (
             "Response objective: summarize the selected work order's current technician context and ask for "
-            "the next field observation only if execution is allowed."
+            "the next field observation only if execution is allowed. Limit the response to 3 short bullets and "
+            "no more than 90 words."
         )
     elif material_inquiry:
         response_objective = (
@@ -420,6 +429,9 @@ def _technician_text_prompt(request, work_order, equipment, summary, evidence, f
         )
     else:
         response_objective = "Response objective: guide safe technician execution."
+    alert_limit = 2 if initial_context else 4
+    evidence_limit = 2 if initial_context else 4
+    learning_note_limit = 2 if initial_context else 3
     return "\n".join(
         [
             f"Work order: {work_order['id']} {work_order['title']}",
@@ -437,11 +449,13 @@ def _technician_text_prompt(request, work_order, equipment, summary, evidence, f
             "Material plan:",
             *_material_context_lines(work_order),
             "Approved learning context:",
-            *(learning_notes or ["- No approved learning notes available for this asset."]),
+            *((learning_notes[:learning_note_limit] if learning_notes else []) or [
+                "- No approved learning notes available for this asset."
+            ]),
             "Active alerts:",
-            *[f"- {alert.message}" for alert in summary.active_alerts[:4]],
+            *[f"- {alert.message}" for alert in summary.active_alerts[:alert_limit]],
             "Evidence:",
-            *[f"- {item.title}: {item.excerpt}" for item in evidence[:4]],
+            *[f"- {item.title}: {item.excerpt}" for item in evidence[:evidence_limit]],
         ]
     )
 
