@@ -12,7 +12,7 @@ import type {
   WorkOrder,
 } from '../src/services/api'
 
-export type RoleKey = 'operator' | 'technician' | 'supervisor' | 'engineer' | 'reliability' | 'admin'
+export type RoleKey = 'operator' | 'technician' | 'supervisor' | 'engineer' | 'reliability' | 'planner' | 'admin'
 
 export const demoPassword = 'DemoPass123!'
 
@@ -50,6 +50,13 @@ export const roleUsers: Record<RoleKey, AuthUser> = {
     email: 'reliability@plant.local',
     display_name: 'Reliability Engineer',
     role: 'reliability_engineer',
+    is_active: true,
+  },
+  planner: {
+    id: 'USER-PLANNER',
+    email: 'planner@plant.local',
+    display_name: 'Maintenance Planner',
+    role: 'planner',
     is_active: true,
   },
   admin: {
@@ -161,6 +168,13 @@ export const workOrders: WorkOrder[] = [
     assigned_to: 'Maintenance Technician',
     supervisor: 'Maintenance Supervisor',
     due_date: '2026-06-14T18:00:00+05:30',
+    planning_status: 'planned',
+    planned_start: '2026-06-14T14:00:00+05:30',
+    planned_end: '2026-06-14T18:00:00+05:30',
+    outage_window: 'Finishing stand load-reduction window',
+    material_readiness: 'ready',
+    dispatch_notes: 'Stage vibration tools and bearing inspection kit.',
+    dispatched_at: null,
     recommended_action: 'Reduce load if vibration persists and verify coupling alignment.',
     follow_up_required: true,
     ai_summary: 'High-risk drive vibration needs mechanical inspection before restart.',
@@ -184,6 +198,13 @@ export const workOrders: WorkOrder[] = [
     assigned_to: 'Reliability Engineer',
     supervisor: 'Maintenance Supervisor',
     due_date: '2026-06-15T12:00:00+05:30',
+    planning_status: 'unscheduled',
+    planned_start: null,
+    planned_end: null,
+    outage_window: null,
+    material_readiness: 'unknown',
+    dispatch_notes: null,
+    dispatched_at: null,
     recommended_action: 'Stroke-test the guide vane actuator and compare response to pressure variance.',
     follow_up_required: false,
     ai_summary: 'Pressure variance points to actuator or linkage response drift.',
@@ -522,8 +543,15 @@ export async function installMaintenanceApi(page: Page, initialUser: AuthUser = 
     }
     if (path.startsWith('/api/work-orders/') && request.method() === 'PATCH') {
       const workOrderId = path.split('/').at(-1)
+      const body = JSON.parse(request.postData() || '{}')
       const updated = workOrders.find((order) => order.id === workOrderId) ?? workOrders[0]
-      await route.fulfill(json(updated))
+      await route.fulfill(
+        json({
+          ...updated,
+          ...body,
+          dispatched_at: body.planning_status === 'dispatched' ? '2026-06-14T13:50:00+05:30' : updated.dispatched_at,
+        }),
+      )
       return
     }
     if (path === '/api/work-orders/technician-assist/stream') {

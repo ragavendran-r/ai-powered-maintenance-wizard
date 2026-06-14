@@ -165,6 +165,13 @@ SCHEMA_STATEMENTS = [
         assigned_to TEXT NOT NULL,
         supervisor TEXT NOT NULL,
         due_date TEXT NOT NULL,
+        planning_status TEXT NOT NULL DEFAULT 'unscheduled',
+        planned_start TEXT,
+        planned_end TEXT,
+        outage_window TEXT,
+        material_readiness TEXT NOT NULL DEFAULT 'unknown',
+        dispatch_notes TEXT,
+        dispatched_at TEXT,
         recommended_action TEXT NOT NULL,
         follow_up_required INTEGER NOT NULL DEFAULT 0,
         ai_summary TEXT,
@@ -477,7 +484,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "14"
+SCHEMA_VERSION = "15"
 _INITIALIZING = False
 
 
@@ -527,6 +534,13 @@ def initialize_database(seed: bool = True) -> None:
             _ensure_column(connection, "document_chunks", "embedding_dimensions", "INTEGER NOT NULL DEFAULT 64")
             _ensure_column(connection, "document_chunks", "embedding_distance", "TEXT NOT NULL DEFAULT 'Cosine'")
             _ensure_column(connection, "document_chunks", "embedded_at", "TEXT")
+            _ensure_column(connection, "work_orders", "planning_status", "TEXT NOT NULL DEFAULT 'unscheduled'")
+            _ensure_column(connection, "work_orders", "planned_start", "TEXT")
+            _ensure_column(connection, "work_orders", "planned_end", "TEXT")
+            _ensure_column(connection, "work_orders", "outage_window", "TEXT")
+            _ensure_column(connection, "work_orders", "material_readiness", "TEXT NOT NULL DEFAULT 'unknown'")
+            _ensure_column(connection, "work_orders", "dispatch_notes", "TEXT")
+            _ensure_column(connection, "work_orders", "dispatched_at", "TEXT")
             connection.execute(
                 """
                 UPDATE document_chunks
@@ -613,6 +627,13 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "assigned_to": "Maintenance Technician",
             "supervisor": "Maintenance Supervisor",
             "due_date": "2026-06-12T18:00:00+05:30",
+            "planning_status": "planned",
+            "planned_start": "2026-06-12T14:00:00+05:30",
+            "planned_end": "2026-06-12T18:00:00+05:30",
+            "outage_window": "Finishing stand load-reduction window",
+            "material_readiness": "blocked",
+            "dispatch_notes": "Bearing spare availability must be confirmed before intrusive work.",
+            "dispatched_at": None,
             "recommended_action": "Reduce load if vibration persists, inspect bearing housing temperature, verify coupling alignment, and document final root cause.",
             "follow_up_required": True,
             "ai_summary": "High-risk drive vibration with unavailable bearing spare; technician should verify mechanical looseness and bearing condition before restart.",
@@ -633,6 +654,13 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "assigned_to": "Reliability Engineer",
             "supervisor": "Blast Furnace Supervisor",
             "due_date": "2026-06-13T12:00:00+05:30",
+            "planning_status": "unscheduled",
+            "planned_start": None,
+            "planned_end": None,
+            "outage_window": None,
+            "material_readiness": "unknown",
+            "dispatch_notes": None,
+            "dispatched_at": None,
             "recommended_action": "Stroke-test the guide vane actuator and compare position feedback with outlet pressure variance trend.",
             "follow_up_required": False,
             "ai_summary": "Pressure variance suggests guide vane actuator or linkage response drift.",
@@ -653,6 +681,13 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "assigned_to": "Crane Technician",
             "supervisor": "Melt Shop Supervisor",
             "due_date": "2026-06-11T17:00:00+05:30",
+            "planning_status": "dispatched",
+            "planned_start": "2026-06-11T13:30:00+05:30",
+            "planned_end": "2026-06-11T16:30:00+05:30",
+            "outage_window": "Crane heavy-lift restriction window",
+            "material_readiness": "blocked",
+            "dispatch_notes": "Replacement brake shoes require follow-up procurement.",
+            "dispatched_at": "2026-06-11T12:45:00+05:30",
             "recommended_action": "Confirm brake shoe wear and motor current after lift restriction.",
             "follow_up_required": True,
             "ai_summary": "Completed crane inspection still requires supervisor follow-up because brake spares are unavailable.",
@@ -673,6 +708,13 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "assigned_to": "Hydraulic Technician",
             "supervisor": "Rolling Mill Supervisor",
             "due_date": "2026-06-14T10:00:00+05:30",
+            "planning_status": "planned",
+            "planned_start": "2026-06-14T08:00:00+05:30",
+            "planned_end": "2026-06-14T10:00:00+05:30",
+            "outage_window": "Morning roll-gap correction maintenance window",
+            "material_readiness": "pending",
+            "dispatch_notes": "Pump cartridge assembly reservation is pending.",
+            "dispatched_at": None,
             "recommended_action": "Reserve pump cartridge assembly, inspect cooler differential temperature, and trend pressure pulsation.",
             "follow_up_required": False,
             "ai_summary": "Hydraulic oil temperature and pressure pulsation require material coordination before intrusive work.",
@@ -694,6 +736,13 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
         "assigned_to",
         "supervisor",
         "due_date",
+        "planning_status",
+        "planned_start",
+        "planned_end",
+        "outage_window",
+        "material_readiness",
+        "dispatch_notes",
+        "dispatched_at",
         "recommended_action",
         "follow_up_required",
         "ai_summary",

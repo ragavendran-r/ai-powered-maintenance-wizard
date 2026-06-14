@@ -83,7 +83,7 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "14"
+    assert status["schema_version"] == "15"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["asset_profiles"] == 5
     assert status["counts"]["asset_metric_snapshots"] == 15
@@ -383,13 +383,95 @@ def test_technician_sees_only_assigned_work_orders():
 def test_admin_and_supervisor_can_list_assignment_technicians():
     admin_response = client.get("/api/users/technicians", headers=auth_headers())
     supervisor_response = client.get("/api/users/technicians", headers=auth_headers("supervisor@plant.local"))
+    planner_response = client.get("/api/users/technicians", headers=auth_headers("planner@plant.local"))
     technician_response = client.get("/api/users/technicians", headers=auth_headers("technician@plant.local"))
 
     assert admin_response.status_code == 200
     assert supervisor_response.status_code == 200
+    assert planner_response.status_code == 200
     assert technician_response.status_code == 403
     assert [user["role"] for user in admin_response.json()] == ["maintenance_technician"]
     assert [user["display_name"] for user in supervisor_response.json()] == ["Maintenance Technician"]
+    assert [user["display_name"] for user in planner_response.json()] == ["Maintenance Technician"]
+
+
+def test_planner_board_filters_open_scheduled_work_orders():
+    headers = auth_headers("planner@plant.local")
+
+    response = client.get("/api/work-orders/planning/board?planning_status=planned", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {item["id"] for item in payload} == {"WO-8304", "WO-8275"}
+    assert all(item["status"] not in {"COMP", "CLOSE"} for item in payload)
+    assert all(item["planning_status"] == "planned" for item in payload)
+
+
+def test_planner_can_schedule_and_dispatch_approved_work_order():
+    headers = auth_headers("planner@plant.local")
+
+    plan_response = client.patch(
+        "/api/work-orders/WO-8311",
+        json={
+            "status": "APPR",
+            "assigned_to": "Maintenance Technician",
+            "planning_status": "planned",
+            "planned_start": "2026-06-13T08:00:00+05:30",
+            "planned_end": "2026-06-13T10:00:00+05:30",
+            "outage_window": "Blast furnace blower reduced-load window",
+            "material_readiness": "ready",
+            "dispatch_notes": "Carry actuator calibration kit and compare feedback trend.",
+        },
+        headers=headers,
+    )
+    assert plan_response.status_code == 200
+    planned = plan_response.json()
+    assert planned["status"] == "APPR"
+    assert planned["planning_status"] == "planned"
+    assert planned["assigned_to"] == "Maintenance Technician"
+    assert planned["planned_start"] == "2026-06-13T08:00:00+05:30"
+    assert planned["material_readiness"] == "ready"
+
+    dispatch_response = client.patch(
+        "/api/work-orders/WO-8311",
+        json={"planning_status": "dispatched"},
+        headers=headers,
+    )
+    assert dispatch_response.status_code == 200
+    dispatched = dispatch_response.json()
+    assert dispatched["planning_status"] == "dispatched"
+    assert dispatched["dispatched_at"]
+
+
+def test_dispatch_requires_approval_schedule_and_unblocked_materials():
+    headers = auth_headers("planner@plant.local")
+
+    waiting_response = client.patch(
+        "/api/work-orders/WO-8311",
+        json={"planning_status": "dispatched"},
+        headers=headers,
+    )
+    blocked_response = client.patch(
+        "/api/work-orders/WO-8304",
+        json={"planning_status": "dispatched"},
+        headers=headers,
+    )
+
+    assert waiting_response.status_code == 400
+    assert waiting_response.json()["detail"] == "Approve work order before dispatch"
+    assert blocked_response.status_code == 400
+    assert blocked_response.json()["detail"] == "Resolve blocked materials before dispatch"
+
+
+def test_technician_cannot_modify_planning_fields():
+    response = client.patch(
+        "/api/work-orders/WO-8304",
+        json={"planned_start": "2026-06-12T15:00:00+05:30"},
+        headers=auth_headers("technician@plant.local"),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Technicians cannot plan or dispatch work orders"
 
 
 def test_assigned_technician_can_start_approved_or_material_waiting_work_order():
@@ -460,6 +542,12 @@ def test_create_update_and_log_work_order():
             "assigned_to": "Reliability Engineer",
             "supervisor": "Blast Furnace Supervisor",
             "due_date": "2026-06-14T09:00:00+05:30",
+            "planning_status": "planned",
+            "planned_start": "2026-06-14T07:00:00+05:30",
+            "planned_end": "2026-06-14T09:00:00+05:30",
+            "outage_window": "Blast furnace morning inspection window",
+            "material_readiness": "ready",
+            "dispatch_notes": "Coordinate with operations before actuator stroke test.",
             "recommended_action": "Stroke actuator and verify position feedback.",
         },
         headers=headers,
@@ -468,6 +556,9 @@ def test_create_update_and_log_work_order():
     work_order = create_response.json()
     assert work_order["id"].startswith("WO-")
     assert work_order["status"] == "WAPPR"
+    assert work_order["planning_status"] == "planned"
+    assert work_order["planned_start"] == "2026-06-14T07:00:00+05:30"
+    assert work_order["material_readiness"] == "ready"
 
     update_response = client.patch(
         f"/api/work-orders/{work_order['id']}",

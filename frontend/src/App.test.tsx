@@ -282,6 +282,13 @@ const workOrders = [
     assigned_to: 'Maintenance Technician',
     supervisor: 'Maintenance Supervisor',
     due_date: '2026-06-12T18:00:00+05:30',
+    planning_status: 'planned',
+    planned_start: '2026-06-12T14:00:00+05:30',
+    planned_end: '2026-06-12T18:00:00+05:30',
+    outage_window: 'Finishing stand load-reduction window',
+    material_readiness: 'ready',
+    dispatch_notes: 'Stage vibration tools and confirm bearing spare status.',
+    dispatched_at: null,
     recommended_action: 'Reduce load if vibration persists and verify coupling alignment.',
     follow_up_required: true,
     ai_summary: 'High-risk drive vibration needs mechanical inspection before restart.',
@@ -305,6 +312,13 @@ const workOrders = [
     assigned_to: 'Crane Technician',
     supervisor: 'Melt Shop Supervisor',
     due_date: '2026-06-11T17:00:00+05:30',
+    planning_status: 'unscheduled',
+    planned_start: null,
+    planned_end: null,
+    outage_window: null,
+    material_readiness: 'unknown',
+    dispatch_notes: null,
+    dispatched_at: null,
     recommended_action: 'Plan brake shoe replacement follow-up.',
     follow_up_required: true,
     ai_summary: 'Completed inspection still needs supervisor follow-up.',
@@ -328,6 +342,13 @@ const workOrders = [
     assigned_to: 'Hydraulic Technician',
     supervisor: 'Rolling Mill Supervisor',
     due_date: '2026-06-14T10:00:00+05:30',
+    planning_status: 'planned',
+    planned_start: '2026-06-14T08:00:00+05:30',
+    planned_end: '2026-06-14T10:00:00+05:30',
+    outage_window: 'Morning roll-gap correction maintenance window',
+    material_readiness: 'pending',
+    dispatch_notes: 'Pump cartridge assembly reservation is pending.',
+    dispatched_at: null,
     recommended_action: 'Reserve pump cartridge assembly and inspect cooler differential temperature.',
     follow_up_required: false,
     ai_summary: 'Hydraulic temperature work is waiting for material coordination.',
@@ -1363,14 +1384,38 @@ beforeEach(() => {
         if (init?.method === 'POST') {
           const body = JSON.parse((init.body as string) ?? '{}')
           return Promise.resolve(
-            new Response(JSON.stringify({ ...workOrders[0], ...body, id: 'WO-9001', status: 'WAPPR' }), { status: 201 }),
+            new Response(
+              JSON.stringify({
+                ...workOrders[0],
+                planning_status: 'unscheduled',
+                planned_start: null,
+                planned_end: null,
+                outage_window: null,
+                material_readiness: 'unknown',
+                dispatch_notes: null,
+                dispatched_at: null,
+                ...body,
+                id: 'WO-9001',
+                status: 'WAPPR',
+              }),
+              { status: 201 },
+            ),
           )
         }
         if (init?.method === 'PATCH') {
           const body = JSON.parse((init.body as string) ?? '{}')
           const workOrderId = url.match(/\/api\/work-orders\/([^/?]+)/)?.[1]
           const original = workOrders.find((item) => item.id === workOrderId) ?? workOrders[0]
-          return Promise.resolve(new Response(JSON.stringify({ ...original, ...body }), { status: 200 }))
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                ...original,
+                ...body,
+                dispatched_at: body.planning_status === 'dispatched' ? '2026-06-12T13:45:00+05:30' : original.dispatched_at,
+              }),
+              { status: 200 },
+            ),
+          )
         }
         const requestUser = userFromRequest(init)
         const rows = requestUser.role === 'maintenance_technician'
@@ -1676,6 +1721,54 @@ describe('Maintenance Wizard dashboard', () => {
     expect(JSON.parse((assignCall?.[1] as RequestInit).body as string)).toEqual({ assigned_to: 'Maintenance Technician' })
   })
 
+  it('lets planners schedule and dispatch approved work orders without assistant panels', async () => {
+    render(<App />)
+    await signIn('planner@plant.local')
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
+    const centerPane = screen.getByLabelText('Work order center pane')
+    const dispatchBoard = await within(centerPane).findByLabelText('Maintenance planning and dispatch board')
+    expect(within(dispatchBoard).getByRole('heading', { name: 'Planning, Scheduling & Dispatch' })).toBeInTheDocument()
+    expect(within(centerPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
+
+    const plannerCard = within(dispatchBoard).getByLabelText('WO-8304 planner card')
+    expect(within(plannerCard).getByText('Planned')).toBeInTheDocument()
+    expect(within(plannerCard).getByDisplayValue('Maintenance Technician')).toBeInTheDocument()
+
+    fireEvent.change(within(plannerCard).getByLabelText('Planned start WO-8304'), {
+      target: { value: '2026-06-12T15:00' },
+    })
+    fireEvent.change(within(plannerCard).getByLabelText('Material readiness WO-8304'), {
+      target: { value: 'ready' },
+    })
+    fireEvent.click(within(plannerCard).getByRole('button', { name: 'Save plan' }))
+    await screen.findByText('WO-8304 planning saved')
+
+    const planCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => {
+        if (!url.toString().includes('/api/work-orders/WO-8304') || init?.method !== 'PATCH') return false
+        const body = JSON.parse((init.body as string) ?? '{}')
+        return body.planned_start === '2026-06-12T15:00'
+      })
+    expect(JSON.parse((planCall?.[1] as RequestInit).body as string)).toMatchObject({
+      assigned_to: 'Maintenance Technician',
+      planning_status: 'planned',
+      planned_start: '2026-06-12T15:00',
+      material_readiness: 'ready',
+    })
+
+    fireEvent.click(within(plannerCard).getByRole('button', { name: /dispatch/i }))
+    await screen.findByText('WO-8304 dispatched')
+    const dispatchCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => {
+        if (!url.toString().includes('/api/work-orders/WO-8304') || init?.method !== 'PATCH') return false
+        return JSON.parse((init.body as string) ?? '{}').planning_status === 'dispatched'
+      })
+    expect(JSON.parse((dispatchCall?.[1] as RequestInit).body as string)).toEqual({ planning_status: 'dispatched' })
+  })
+
   it('shows only the technician LLM assistant to technician users', async () => {
     assistantResponseDelayMs = 300
     render(<App />)
@@ -1690,6 +1783,8 @@ describe('Maintenance Wizard dashboard', () => {
     expect(neoHeading).toBeInTheDocument()
     expect(Boolean(neoHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(within(centerPane).getByText('Technician AI assistant with shared LLM configuration')).toBeInTheDocument()
+    expect(within(centerPane).getByRole('heading', { name: 'Assigned Schedule' })).toBeInTheDocument()
+    expect(within(centerPane).queryByLabelText('Maintenance planning and dispatch board')).not.toBeInTheDocument()
     expect(within(rightPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
     const executionWorkflow = within(centerPane).getByLabelText('Technician execution workflow')
     expect(within(executionWorkflow).getByRole('heading', { name: 'Technician Execution' })).toBeInTheDocument()

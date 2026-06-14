@@ -50,6 +50,7 @@ export const permissionsByRole: Record<UserRole, readonly Permission[]> = {
     'streaming',
   ],
   planner: [
+    'assignWorkOrders',
     'createWorkOrders',
     'decisionSupport',
   ],

@@ -32,10 +32,10 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 
 ## Current Capabilities
 
-- FastAPI backend with health, dashboard, asset list/detail section loading, equipment health, alert, chat, diagnosis, prediction, work order, assistant, report, feedback, and learning-review endpoints.
+- FastAPI backend with health, dashboard, asset list/detail section loading, equipment health, alert, chat, diagnosis, prediction, work order, planning/scheduling/dispatch, assistant, report, feedback, and learning-review endpoints.
 - React + TypeScript + Vite frontend for an operational dashboard, a company Assets table, lazy-loaded data-backed asset details, work-order queue/detail/execution/review screens, left-nav ingestion view, engineer chat, recommendation panel, report export, and detailed feedback controls.
 - Sample steel-plant data for a hot strip mill drive, blast furnace blower, caster cooling pump, hot rolling hydraulic system, and melt shop overhead crane.
-- SQLite-backed persistence seeded from five sample assets with equipment, asset profiles, asset metrics, recommendations, subsystems, reliability metrics, alerts, sensor readings, spares, maintenance events, work orders, work logs, SOP/manual/log/history evidence, document chunks, document intelligence, maintenance labels, and feedback.
+- SQLite-backed persistence seeded from five sample assets with equipment, asset profiles, asset metrics, recommendations, subsystems, reliability metrics, alerts, sensor readings, spares, maintenance events, work orders, planner schedules, dispatch metadata, work logs, SOP/manual/log/history evidence, document chunks, document intelligence, maintenance labels, and feedback.
 - Local document chunk index with deterministic embeddings, hybrid retrieval scoring, optional LLM/SLM reranking, and relevance reasons for offline retrieval-augmented answers.
 - Time-series sensor readings with rolling-baseline anomaly detection, risk impact, and optional LLM/SLM context classification with inspection steps.
 - Provider-agnostic LLM/SLM adapters for OpenAI and Ollama with structured JSON validation and deterministic fallback reasoning.
@@ -248,7 +248,7 @@ Set `LEARNING_ARTIFACT_RETENTION_DAYS` above `0` to report expired local learnin
 
 Production RAG uses Qdrant as the vector database. Set `RAG_VECTOR_STORE=qdrant`, `RAG_QDRANT_URL=http://localhost:6333`, and `RAG_QDRANT_COLLECTION=maintenance_wizard_documents`. `RAG_EMBEDDING_PROVIDER`, `RAG_EMBEDDING_MODEL`, `RAG_EMBEDDING_VERSION`, `RAG_EMBEDDING_DIMENSIONS`, and `RAG_EMBEDDING_DISTANCE` describe the embedding profile attached to indexed chunks and surfaced in Learning Review. Uploaded and seeded document chunks are indexed into Qdrant when it is available. Approved, judge-qualified learning examples are also synchronized into Qdrant as separate RAG entries during learning refresh, approval changes, rejudge, and reviewer reindex flows. Retrieval queries Qdrant for both plant documents and approved learning examples, then falls back to SQLite-local vectors only when the vector DB is unavailable or explicitly disabled for tests. Learning Review includes a reviewer-only RAG reindex action for rebuilding chunks and repopulating the configured collection after an embedding profile or collection migration.
 
-The current SQLite schema version is `14`. Lightweight startup migrations add `feedback.equipment_id`, create asset detail tables, `document_intelligence`, `maintenance_labels`, `streaming_messages`, local auth tables, work orders, work-order logs, learning interactions, judged examples, dataset snapshots, model versions, prompt versions, evaluation runs, learning jobs, learning artifacts, model promotion audit records, adapter runtime deployment records, and RAG embedding profile metadata for older local databases.
+The current SQLite schema version is `15`. Lightweight startup migrations add `feedback.equipment_id`, create asset detail tables, `document_intelligence`, `maintenance_labels`, `streaming_messages`, local auth tables, work orders, work-order planning/dispatch metadata, work-order logs, learning interactions, judged examples, dataset snapshots, model versions, prompt versions, evaluation runs, learning jobs, learning artifacts, model promotion audit records, adapter runtime deployment records, and RAG embedding profile metadata for older local databases.
 
 The current production-aligned learning scope is intentionally constrained to what can run on the local Mac stack: SQLite, Qdrant, NATS, filesystem/S3-compatible artifact registration, local PEFT trainer hooks, and OpenAI-compatible or Ollama-style LLM serving. Future production phases track Postgres migration, bucket-native object-store lifecycle/access hardening, and environment-specific adapter-loader automation for LM Studio/Ollama or another serving runtime.
 
@@ -265,7 +265,7 @@ Demo users are loaded from `assets/sample_data/users_seed.sql` when `AUTH_SEED_D
 | `technician@plant.local` | Work-order execution and Neo technician AI assistant |
 | `supervisor@plant.local` | Work-order review and Neo supervisor AI assistant |
 | `reliability@plant.local` | Diagnosis, reports, feedback, ingestion, streaming status |
-| `planner@plant.local` | Dashboard, predictions, recommendations, reports |
+| `planner@plant.local` | Dashboard, predictions, recommendations, reports, maintenance scheduling and dispatch |
 | `operator@plant.local` | Read-only dashboard, alerts, health, anomalies |
 | `iot-service@plant.local` | API-only ingestion identity |
 

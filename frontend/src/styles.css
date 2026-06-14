@@ -2593,6 +2593,165 @@ h3 {
   grid-template-columns: minmax(0, 1.85fr) minmax(280px, 0.75fr);
 }
 
+.plannerDispatchBoard,
+.technicianScheduleQueue {
+  min-width: 0;
+}
+
+.plannerCardGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.plannerCard {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-left: 4px solid var(--state-info-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.plannerCard.unscheduled {
+  border-left-color: var(--state-warning-border);
+}
+
+.plannerCard.dispatched {
+  border-left-color: var(--state-success-border-strong);
+}
+
+.plannerCardHeader {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.plannerCardHeader strong,
+.technicianScheduleItem strong {
+  color: var(--color-text-strong);
+  line-height: 1.25;
+}
+
+.plannerCardHeader small,
+.technicianScheduleItem small,
+.plannerHint {
+  color: var(--color-text-muted);
+  line-height: 1.25;
+}
+
+.planningBadge {
+  align-items: center;
+  background: var(--state-info-bg);
+  border: 1px solid var(--state-info-border);
+  border-radius: 999px;
+  color: var(--state-info-text);
+  display: inline-flex;
+  font-size: 0.68rem;
+  font-weight: 900;
+  justify-content: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.planningBadge.unscheduled {
+  background: var(--state-warning-bg);
+  border-color: var(--state-warning-border);
+  color: var(--state-warning-text);
+}
+
+.planningBadge.dispatched {
+  background: var(--state-success-bg-muted);
+  border-color: var(--state-success-border-strong);
+  color: var(--state-success-text-strong);
+}
+
+.plannerFieldGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.plannerFieldGrid label,
+.plannerWideField {
+  color: var(--color-text-muted);
+  display: grid;
+  font-size: 0.68rem;
+  font-weight: 800;
+  gap: 4px;
+}
+
+.plannerFieldGrid input,
+.plannerFieldGrid select,
+.plannerWideField input,
+.plannerWideField textarea {
+  font-size: 0.72rem;
+  min-height: 32px;
+  padding: 6px 8px;
+}
+
+.plannerWideField textarea {
+  min-height: 58px;
+  resize: vertical;
+}
+
+.plannerActions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plannerActions .textButton,
+.plannerActions .outlineButton {
+  min-height: 32px;
+}
+
+.plannerHint {
+  margin: 0;
+}
+
+.technicianScheduleQueue {
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.technicianScheduleList {
+  display: grid;
+  gap: 8px;
+}
+
+.technicianScheduleItem {
+  align-items: start;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  color: var(--color-text);
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  min-height: 0;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.technicianScheduleItem.selected {
+  border-color: var(--color-brand-border-strong);
+  box-shadow: var(--focus-ring);
+}
+
+.technicianScheduleItem:not(:disabled):hover {
+  background: var(--color-surface-subtle);
+  box-shadow: none;
+}
+
 .workOrderCenterColumn,
 .workOrderRightColumn {
   display: grid;

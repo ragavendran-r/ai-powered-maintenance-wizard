@@ -79,6 +79,7 @@ from app.models.schemas import (
     WorkOrder,
     WorkOrderCreateRequest,
     WorkOrderLogRequest,
+    WorkOrderPlanningStatus,
     WorkOrderUpdateRequest,
 )
 from app.services.assets import get_asset_detail as load_asset_detail
@@ -392,6 +393,8 @@ def get_maintenance_labels(equipment_id: str):
 def list_work_orders(
     equipment_id: Optional[str] = None,
     follow_up_only: bool = False,
+    planning_status: Optional[WorkOrderPlanningStatus] = None,
+    open_only: bool = False,
     current_user: UserPublic = Depends(require_roles(*READ_ROLES)),
 ):
     assigned_to = current_user.display_name if current_user.role == "maintenance_technician" else None
@@ -399,6 +402,8 @@ def list_work_orders(
         equipment_id=equipment_id,
         assigned_to=assigned_to,
         follow_up_only=follow_up_only,
+        planning_status=planning_status,
+        open_only=open_only,
     )
 
 
@@ -412,6 +417,22 @@ def create_work_order(request: WorkOrderCreateRequest):
     if not repository.get_equipment(request.equipment_id):
         raise HTTPException(status_code=404, detail="Equipment not found")
     return repository.create_work_order(request.model_dump())
+
+
+@app.get(
+    "/api/work-orders/planning/board",
+    response_model=list[WorkOrder],
+    dependencies=[Depends(require_roles(*WORK_ORDER_ASSIGNMENT_ROLES))],
+)
+def list_work_order_planning_board(
+    planning_status: Optional[WorkOrderPlanningStatus] = None,
+    assigned_to: Optional[str] = None,
+):
+    return repository.list_work_orders(
+        assigned_to=assigned_to,
+        planning_status=planning_status,
+        open_only=True,
+    )
 
 
 @app.get("/api/work-orders/{work_order_id}", response_model=WorkOrder, dependencies=[Depends(require_roles(*READ_ROLES))])
@@ -438,9 +459,29 @@ def update_work_order(
     requested_status = payload.get("status")
     if requested_status == "APPR" and existing_work_order["status"] != "WAPPR":
         raise HTTPException(status_code=400, detail="Only WAPPR work orders can be approved")
+    if payload.get("planning_status") == "dispatched":
+        planned_start = payload.get("planned_start") or existing_work_order.get("planned_start")
+        material_readiness = payload.get("material_readiness") or existing_work_order.get("material_readiness")
+        if existing_work_order["status"] == "WAPPR":
+            raise HTTPException(status_code=400, detail="Approve work order before dispatch")
+        if not planned_start:
+            raise HTTPException(status_code=400, detail="Planned start is required before dispatch")
+        if material_readiness == "blocked":
+            raise HTTPException(status_code=400, detail="Resolve blocked materials before dispatch")
     if current_user.role == "maintenance_technician":
         if existing_work_order["assigned_to"] != current_user.display_name:
             raise HTTPException(status_code=403, detail="Technician can update only assigned work orders")
+        planning_fields = {
+            "planning_status",
+            "planned_start",
+            "planned_end",
+            "outage_window",
+            "material_readiness",
+            "dispatch_notes",
+            "dispatched_at",
+        }
+        if planning_fields.intersection(payload):
+            raise HTTPException(status_code=403, detail="Technicians cannot plan or dispatch work orders")
         if "assigned_to" in payload:
             raise HTTPException(status_code=403, detail="Technicians cannot reassign work orders")
         if requested_status == "INPRG" and existing_work_order["status"] not in {"APPR", "WMATL"}:

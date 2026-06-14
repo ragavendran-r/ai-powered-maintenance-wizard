@@ -85,6 +85,22 @@ test.describe('role capability rendering', () => {
     await expect(page.getByText('connected')).toBeVisible()
   })
 
+  test('planner sees scheduling and dispatch controls without assistant panels', async ({ page }) => {
+    await signInAs(page, 'planner')
+
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning', 'Users'])
+    await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Review follow-ups' })).toHaveCount(0)
+
+    await primaryNavButton(page, 'Work Orders').click()
+    await expect(page.getByLabel('Maintenance planning and dispatch board')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Planning, Scheduling & Dispatch' })).toBeVisible()
+    await expect(page.getByLabel('WO-8304 planner card')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Dispatch' }).first()).toBeEnabled()
+    await expect(page.getByLabel('Technician observation')).toHaveCount(0)
+    await expect(page.getByLabel('Supervisor question')).toHaveCount(0)
+  })
+
   test('admin sees administration surfaces and global review routes', async ({ page }) => {
     await signInAs(page, 'admin')
 
@@ -96,13 +112,14 @@ test.describe('role capability rendering', () => {
   })
 
   test('covers all requested role personas', async () => {
-    const requestedRoles: RoleKey[] = ['operator', 'technician', 'supervisor', 'engineer', 'reliability', 'admin']
+    const requestedRoles: RoleKey[] = ['operator', 'technician', 'supervisor', 'engineer', 'reliability', 'planner', 'admin']
     expect(requestedRoles.map((role) => roleUsers[role].role)).toEqual([
       'operator',
       'maintenance_technician',
       'maintenance_supervisor',
       'maintenance_engineer',
       'reliability_engineer',
+      'planner',
       'admin',
     ])
   })

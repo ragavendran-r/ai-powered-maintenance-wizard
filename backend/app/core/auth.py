@@ -28,7 +28,7 @@ WORK_ORDER_ACTION_ROLES = {
     "reliability_engineer",
     "planner",
 }
-WORK_ORDER_ASSIGNMENT_ROLES = {"admin", "maintenance_supervisor"}
+WORK_ORDER_ASSIGNMENT_ROLES = {"admin", "maintenance_supervisor", "planner"}
 TECHNICIAN_ASSISTANT_ROLES = {"maintenance_technician"}
 SUPERVISOR_ASSISTANT_ROLES = {"maintenance_supervisor"}
 FEEDBACK_ROLES = {"admin", "maintenance_engineer", "reliability_engineer"}
