@@ -1013,7 +1013,7 @@ def test_neo_chat_returns_dashboard_table_for_read_roles():
     assert "Material" in payload["table"]["columns"]
     assert payload["table"]["rows"]
     assert payload["used_live_provider"] is False
-    assert payload["provider"] == "deterministic"
+    assert payload["provider"] == "mock"
     assert all(row["Follow-up"] == "Yes" for row in payload["table"]["rows"])
 
 
@@ -1031,10 +1031,10 @@ def test_neo_chat_stream_returns_sse_done_event_for_table_query():
     assert "data:" in body
     assert '"type": "done"' in body
     assert '"title": "Work Orders"' in body
-    assert '"provider": "deterministic"' in body
+    assert '"provider": "mock"' in body
 
 
-def test_neo_chat_returns_asset_table_without_llm():
+def test_neo_chat_returns_asset_table_with_llm_answer():
     response = client.post(
         "/api/neo/chat",
         json={"message": "Show assets"},
@@ -1046,7 +1046,7 @@ def test_neo_chat_returns_asset_table_without_llm():
     assert "Asset" in payload["table"]["columns"]
     assert payload["table"]["rows"]
     assert payload["used_live_provider"] is False
-    assert payload["provider"] == "deterministic"
+    assert payload["provider"] == "mock"
 
 
 def test_neo_user_table_is_role_limited():
@@ -1058,7 +1058,7 @@ def test_neo_user_table_is_role_limited():
     assert operator_response.status_code == 200
     operator_payload = operator_response.json()
     assert operator_payload["table"]["title"] == "Current User"
-    assert operator_payload["provider"] == "deterministic"
+    assert operator_payload["provider"] == "mock"
 
     admin_response = client.post(
         "/api/neo/chat",
@@ -1068,10 +1068,10 @@ def test_neo_user_table_is_role_limited():
     assert admin_response.status_code == 200
     admin_payload = admin_response.json()
     assert admin_payload["table"]["title"] == "Users"
-    assert admin_payload["provider"] == "deterministic"
+    assert admin_payload["provider"] == "mock"
 
 
-def test_neo_user_table_supports_role_filters_without_llm():
+def test_neo_user_table_supports_role_filters_with_llm_answer():
     response = client.post(
         "/api/neo/chat",
         json={"message": "list all supervisors"},
@@ -1083,7 +1083,7 @@ def test_neo_user_table_supports_role_filters_without_llm():
     assert payload["table"]["rows"]
     assert {row["Role"] for row in payload["table"]["rows"]} == {"maintenance_supervisor"}
     assert payload["used_live_provider"] is False
-    assert payload["provider"] == "deterministic"
+    assert payload["provider"] == "mock"
 
 
 def test_neo_welcome_highlights_assigned_technician_work():
@@ -1132,7 +1132,7 @@ def test_neo_returns_asset_performance_summary_from_backend_data():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "deterministic"
+    assert payload["provider"] == "mock"
     assert payload["table"]["title"] == "BF-BLOWER-02 Performance"
     assert payload["action"]["type"] == "asset_performance"
     assert payload["action"]["status"] == "completed"
@@ -1148,7 +1148,7 @@ def test_neo_returns_asset_documents_from_backend_data():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "deterministic"
+    assert payload["provider"] == "mock"
     assert payload["table"]["title"] == "BF-BLOWER-02 Documents"
     assert any(row["Source"] in {"manual", "sop", "log", "history"} for row in payload["table"]["rows"])
 
@@ -1162,11 +1162,50 @@ def test_neo_technician_next_steps_use_assigned_work_order_only():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "deterministic"
+    assert payload["provider"] == "mock"
     assert payload["action"]["type"] == "work_order_next_steps"
     assert payload["action"]["target_id"] == "WO-8304"
     assert payload["table"]["rows"][0]["Work order"] == "WO-8304"
     assert "assigned to you" in payload["answer"].lower()
+
+
+def test_neo_technician_material_question_does_not_start_blocked_work_order():
+    before = repository.get_work_order("WO-8304")
+    assert before["status"] == "APPR"
+    assert before["material_readiness"] == "blocked"
+
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "when is Drive end bearing available and how to start work"},
+        headers=auth_headers("technician@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "mock"
+    assert payload["action"]["type"] == "work_order_material_status"
+    assert payload["action"]["target_id"] == "WO-8304"
+    assert payload["table"]["rows"][0]["Work order"] == "WO-8304"
+    assert "Drive end spherical roller bearing" in payload["answer"]
+    assert "2026-07-03" in payload["answer"]
+    assert "cannot be started" in payload["answer"].lower()
+    assert repository.get_work_order("WO-8304")["status"] == "APPR"
+
+
+def test_neo_blocks_explicit_start_when_material_is_not_ready():
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "start WO-8304"},
+        headers=auth_headers("technician@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "mock"
+    assert payload["action"]["type"] == "update_work_order_status"
+    assert payload["action"]["status"] == "not_allowed"
+    assert "cannot be started" in payload["answer"].lower()
+    assert repository.get_work_order("WO-8304")["status"] == "APPR"
 
 
 def test_neo_can_create_work_order_for_critical_asset_when_role_allows():
@@ -1178,7 +1217,7 @@ def test_neo_can_create_work_order_for_critical_asset_when_role_allows():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "deterministic"
+    assert payload["provider"] == "mock"
     assert payload["action"]["type"] == "create_work_order"
     assert payload["action"]["status"] == "completed"
     assert payload["action"]["target_id"].startswith("WO-")
@@ -1198,7 +1237,7 @@ def test_neo_blocks_work_order_creation_for_operator():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "deterministic"
+    assert payload["provider"] == "mock"
     assert payload["action"]["status"] == "not_allowed"
     assert payload["table"] is None
 

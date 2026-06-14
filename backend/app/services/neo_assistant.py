@@ -6,7 +6,7 @@ from typing import Optional
 from app.data import repository
 from app.models.schemas import Evidence, NeoAction, NeoChatRequest, NeoChatResponse, NeoTable, UserPublic, UserRole
 from app.services.ai_client import configured_llm_client
-from app.services.learning import record_assistant_interaction
+from app.services.learning import learning_context_for_asset, record_assistant_interaction
 from app.services.llm import LLMTextResponse
 from app.services.retrieval import retrieve_evidence
 
@@ -57,27 +57,16 @@ def neo_welcome(current_user: UserPublic) -> NeoChatResponse:
 
 
 def neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> NeoChatResponse:
-    deterministic_response = _deterministic_response_for_message(request.message, current_user)
-    if deterministic_response:
-        _record_neo_interaction(request.message, deterministic_response, current_user, "deterministic_action")
-        return deterministic_response
-
-    evidence = _general_evidence_for_message(request.message)
-    table = None
-    prompt = _neo_prompt(request, table, current_user, evidence)
-    fallback = NeoChatResponse(
-        answer=_fallback_answer(request.message, table, current_user, evidence=evidence),
-        table=table,
-        used_live_provider=False,
-        provider="mock",
-    )
+    grounded_response = _grounded_response_for_message(request.message, current_user)
+    evidence = _general_evidence_for_message(request.message, current_user)
+    prompt = _neo_prompt(request, grounded_response, current_user, evidence)
     response = _neo_llm_client().complete_text(
         prompt,
         _neo_system_prompt(),
         lambda provider, reason: LLMTextResponse(
             content=_fallback_answer(
                 request.message,
-                table,
+                grounded_response,
                 current_user,
                 evidence=evidence,
                 live_failure_reason=reason,
@@ -89,7 +78,8 @@ def neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> NeoChat
     )
     neo_response = NeoChatResponse(
         answer=response.content,
-        table=table,
+        table=grounded_response.table if grounded_response else None,
+        action=grounded_response.action if grounded_response else None,
         used_live_provider=response.used_live_provider,
         provider=response.provider,
     )
@@ -98,15 +88,9 @@ def neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> NeoChat
 
 
 def stream_neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> Iterator[dict[str, object]]:
-    deterministic_response = _deterministic_response_for_message(request.message, current_user)
-    if deterministic_response:
-        _record_neo_interaction(request.message, deterministic_response, current_user, "deterministic_action_stream")
-        yield {"type": "done", "response": deterministic_response.model_dump(mode="json")}
-        return
-
-    evidence = _general_evidence_for_message(request.message)
-    table = None
-    prompt = _neo_prompt(request, table, current_user, evidence)
+    grounded_response = _grounded_response_for_message(request.message, current_user)
+    evidence = _general_evidence_for_message(request.message, current_user)
+    prompt = _neo_prompt(request, grounded_response, current_user, evidence)
     content_parts: list[str] = []
     provider = "mock"
     used_live_provider = False
@@ -117,7 +101,7 @@ def stream_neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> 
         lambda fallback_provider, reason: LLMTextResponse(
             content=_fallback_answer(
                 request.message,
-                table,
+                grounded_response,
                 current_user,
                 evidence=evidence,
                 live_failure_reason=reason,
@@ -144,7 +128,7 @@ def stream_neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> 
     if not answer:
         fallback = _fallback_answer(
             request.message,
-            table,
+            grounded_response,
             current_user,
             evidence=evidence,
             live_failure_reason="stream returned no content",
@@ -157,7 +141,8 @@ def stream_neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> 
         yield {"type": "token", "content": fallback}
     response = NeoChatResponse(
         answer=answer,
-        table=None,
+        table=grounded_response.table if grounded_response else None,
+        action=grounded_response.action if grounded_response else None,
         used_live_provider=used_live_provider,
         provider=provider,
     )
@@ -359,52 +344,73 @@ def _operator_welcome(current_user: UserPublic) -> NeoChatResponse:
 def _neo_system_prompt() -> str:
     return (
         "You are Neo, a concise AI copilot for a steel-plant maintenance dashboard. "
-        "Answer like a helpful chatbot. "
-        "For general maintenance questions, use the supplied equipment and evidence context. "
-        "Give practical inspection steps, safety checks, escalation criteria, and closeout guidance. "
-        "Format general answers as concise Markdown with exactly four sections: Safety, Inspection, Escalation, Closeout. "
-        "Do not add Data Review, Documentation, Evidence Used, or any extra section headings. "
+        "Every user message has already been routed to you; answer the user's actual question before suggesting an action. "
+        "Use the supplied deterministic application facts, retrieved evidence, and approved learning context as grounding. "
+        "Do not override application-owned facts such as work-order status, material availability, inventory, permissions, or role guards. "
+        "If the action context says an update was blocked, explain why it was not performed. "
+        "If the user asks about spare availability, blockers, procurement, lead time, substitutes, or whether work can start, answer from the Material context first. "
+        "For general maintenance questions, give practical inspection steps, safety checks, escalation criteria, and closeout guidance. "
+        "Format general answers as concise Markdown with sections only when useful for the question. "
         "Do not include table names, column names, row counts, or table-update metadata in the chat answer. "
         f"Keep the complete answer under {NEO_GENERAL_TARGET_WORDS} words and finish all sections within "
         f"{NEO_GENERAL_MAX_TOKENS} output tokens. Do not start a section unless you can complete it. "
-        "Do not invent rows, permissions, private user details, or measurements not in the evidence."
+        "Do not invent rows, permissions, private user details, inventory, procurement dates, or measurements not in the context."
     )
 
 
 def _neo_prompt(
     request: NeoChatRequest,
-    table: Optional[NeoTable],
+    grounded_response: Optional[NeoChatResponse],
     current_user: UserPublic,
     evidence: Optional[list[Evidence]] = None,
 ) -> str:
+    table = grounded_response.table if grounded_response else None
+    action = grounded_response.action if grounded_response else None
     rows = table.rows[:8] if table else []
     evidence_lines = [
         f"- {item.source_type} {item.title} ({item.equipment_id or 'general'}): {item.excerpt[:180]}"
         for item in (evidence or [])[:2]
     ]
+    work_order = _contextual_work_order_for_message(request.message, current_user)
+    work_order_lines = _work_order_context_lines(work_order) if work_order else ["None"]
+    equipment_id = work_order["equipment_id"] if work_order else _equipment_id_for_message(request.message)
+    learning_lines = _learning_context_lines(equipment_id)
     return "\n".join(
         [
             f"User role: {current_user.role}",
             f"User question: {request.message}",
+            "Grounded app response:",
+            grounded_response.answer if grounded_response else "None",
+            "Action context:",
+            (
+                f"type={action.type}; status={action.status}; target={action.target_id or 'None'}; detail={action.detail or 'None'}"
+                if action
+                else "None"
+            ),
+            "Relevant work-order context:",
+            *work_order_lines,
             f"Table title: {table.title if table else 'None'}",
             f"Columns: {', '.join(table.columns) if table else 'None'}",
             "Rows:",
             *[str(row) for row in rows],
             "Evidence:",
             *(evidence_lines or ["None"]),
+            "Approved learning context:",
+            *(learning_lines or ["None"]),
         ]
     )
 
 
 def _fallback_answer(
     message: str,
-    table: Optional[NeoTable],
+    grounded_response: Optional[NeoChatResponse],
     current_user: UserPublic,
     evidence: Optional[list[Evidence]] = None,
     live_failure_reason: Optional[str] = None,
 ) -> str:
-    if table:
-        return "I loaded the requested results."
+    if grounded_response:
+        lead = "I could not get a timely live LLM response, so I used the configured LLM fallback over the grounded app context. "
+        return f"{lead}{grounded_response.answer}"
     if evidence:
         return _evidence_based_answer(message, evidence, live_failure_reason)
     return (
@@ -417,8 +423,11 @@ def _neo_llm_client():
     return configured_llm_client()
 
 
-def _general_evidence_for_message(message: str) -> list[Evidence]:
+def _general_evidence_for_message(message: str, current_user: Optional[UserPublic] = None) -> list[Evidence]:
     equipment_id = _equipment_id_for_message(message)
+    if not equipment_id and current_user:
+        work_order = _contextual_work_order_for_message(message, current_user)
+        equipment_id = work_order["equipment_id"] if work_order else None
     return retrieve_evidence(message, equipment_id=equipment_id, limit=3, use_reranker=False)
 
 
@@ -481,12 +490,13 @@ def _dedupe(items: list[str]) -> list[str]:
     return deduped
 
 
-def _deterministic_response_for_message(message: str, current_user: UserPublic) -> Optional[NeoChatResponse]:
+def _grounded_response_for_message(message: str, current_user: UserPublic) -> Optional[NeoChatResponse]:
     lowered = message.lower()
     for resolver in (
         _user_management_response,
         _work_order_creation_response,
         _work_order_status_action_response,
+        _work_order_material_question_response,
         _work_order_next_steps_response,
         _asset_section_response,
     ):
@@ -498,7 +508,7 @@ def _deterministic_response_for_message(message: str, current_user: UserPublic) 
     if not table:
         return None
     return NeoChatResponse(
-        answer=_fallback_answer(message, table, current_user),
+        answer="I loaded the requested results.",
         table=table,
         used_live_provider=False,
         provider="deterministic",
@@ -696,14 +706,84 @@ def _work_order_status_action_response(message: str, current_user: UserPublic) -
     updated = repository.update_work_order(work_order["id"], {"status": target_status})
     table = _work_order_rows_table([updated], title="Updated Work Order") if updated else None
     return NeoChatResponse(
-        answer=f"Updated {work_order['id']} to {target_status}.",
+        answer=f"Updated {work_order['id']} to {_work_order_status_label(target_status)}.",
         table=table,
         action=NeoAction(
             type="update_work_order_status",
             label="Updated work order status",
             status="completed",
             target_id=work_order["id"],
-            detail=f"Status moved from {work_order['status']} to {target_status}.",
+            detail=f"Status moved from {_work_order_status_label(work_order['status'])} to {_work_order_status_label(target_status)}.",
+        ),
+        used_live_provider=False,
+        provider="deterministic",
+    )
+
+
+def _work_order_material_question_response(message: str, current_user: UserPublic) -> Optional[NeoChatResponse]:
+    if not any(
+        term in message
+        for term in [
+            "spare",
+            "material",
+            "bearing",
+            "procurement",
+            "available",
+            "availability",
+            "lead time",
+            "substitute",
+            "blocker",
+        ]
+    ):
+        return None
+    work_order = _work_order_for_message(message, current_user)
+    if not work_order:
+        return None
+    if current_user.role == "maintenance_technician" and work_order["assigned_to"] != current_user.display_name:
+        return _action_response(
+            "You can only review material readiness for work orders assigned to you.",
+            NeoAction(
+                type="work_order_material_status",
+                label="Review material readiness",
+                status="not_allowed",
+                detail="The referenced work order is assigned to another technician or team.",
+            ),
+        )
+    reservations = work_order.get("spare_reservations", [])
+    material_lines = [
+        f"{work_order['id']} is {_work_order_status_label(work_order['status'])}.",
+        f"Material readiness is {_readable_status(work_order.get('material_readiness'))}; blocker status is {_readable_status(work_order.get('material_blocker_status'))}.",
+    ]
+    if work_order.get("material_blocker_note"):
+        material_lines.append(str(work_order["material_blocker_note"]))
+    if reservations:
+        for reservation in reservations[:2]:
+            spare_name = reservation.get("spare_name") or reservation.get("spare_id") or "Required spare"
+            expected = reservation.get("expected_available_date") or "not recorded"
+            lead_time = reservation.get("procurement_lead_time_days") or 0
+            material_lines.append(
+                f"{spare_name}: required {reservation.get('required_qty', 0)}, reserved {reservation.get('reserved_qty', 0)}, "
+                f"on hand {reservation.get('on_hand_qty', 0)}, procurement {reservation.get('procurement_status') or 'unknown'}, "
+                f"lead time {lead_time} day(s), expected availability {expected}."
+            )
+            if reservation.get("substitute_spare_name"):
+                material_lines.append(
+                    f"Possible substitute: {reservation['substitute_spare_name']}. "
+                    f"Limitations: {reservation.get('substitute_limitations') or 'not recorded'}."
+                )
+    if _work_order_has_material_blocker(work_order):
+        material_lines.append(_material_start_block_reason(work_order))
+    else:
+        material_lines.append("Material readiness does not block start based on the current work-order record.")
+    return NeoChatResponse(
+        answer=" ".join(material_lines),
+        table=_work_order_rows_table([work_order], title="Work Order Material Readiness"),
+        action=NeoAction(
+            type="work_order_material_status",
+            label="Reviewed material readiness",
+            status="completed",
+            target_id=work_order["id"],
+            detail=f"Material status reviewed for {work_order['id']}.",
         ),
         used_live_provider=False,
         provider="deterministic",
@@ -1009,6 +1089,65 @@ def _work_order_for_message(message: str, current_user: UserPublic) -> Optional[
     return (open_work_orders or work_orders or [None])[0]
 
 
+def _contextual_work_order_for_message(message: str, current_user: UserPublic) -> Optional[dict]:
+    lowered = message.lower()
+    if not (
+        _work_order_id_from_message(message)
+        or any(
+            term in lowered
+            for term in [
+                "work order",
+                "workorder",
+                "wo ",
+                "work",
+                "start",
+                "begin",
+                "spare",
+                "material",
+                "bearing",
+                "procurement",
+                "available",
+                "availability",
+                "lead time",
+                "substitute",
+                "blocker",
+            ]
+        )
+    ):
+        return None
+    return _work_order_for_message(message, current_user)
+
+
+def _work_order_context_lines(work_order: dict) -> list[str]:
+    lines = [
+        f"- Work order: {work_order['id']}",
+        f"- Asset: {work_order['equipment_id']}",
+        f"- Status: {_work_order_status_label(work_order['status'])}",
+        f"- Priority: {work_order['priority']}",
+        f"- Assigned to: {work_order['assigned_to']}",
+        f"- Recommended action: {work_order['recommended_action']}",
+        f"- Material readiness: {_readable_status(work_order.get('material_readiness'))}",
+        f"- Material blocker: {_readable_status(work_order.get('material_blocker_status'))}",
+        f"- Material blocker note: {work_order.get('material_blocker_note') or 'None'}",
+    ]
+    for reservation in work_order.get("spare_reservations", [])[:4]:
+        lines.extend(
+            [
+                f"- Spare: {reservation.get('spare_name') or reservation.get('spare_id')}",
+                f"  Required/reserved/on hand: {reservation.get('required_qty', 0)}/{reservation.get('reserved_qty', 0)}/{reservation.get('on_hand_qty', 0)}",
+                f"  Procurement: {reservation.get('procurement_status') or 'unknown'}; lead time: {reservation.get('procurement_lead_time_days', 0)} day(s); expected: {reservation.get('expected_available_date') or 'not recorded'}",
+                f"  Substitute: {reservation.get('substitute_spare_name') or 'none'}; substitute limitations: {reservation.get('substitute_limitations') or 'none'}",
+            ]
+        )
+    return lines
+
+
+def _learning_context_lines(equipment_id: Optional[str]) -> list[str]:
+    if not equipment_id:
+        return []
+    return [f"- {item}" for item in learning_context_for_asset(equipment_id, limit=3)]
+
+
 def _work_order_rows_table(work_orders: list[dict], title: str) -> NeoTable:
     return NeoTable(
         title=title,
@@ -1029,14 +1168,72 @@ def _work_order_table_row(item: dict) -> dict[str, object]:
     }
 
 
+def _work_order_status_label(status: str) -> str:
+    labels = {
+        "WAPPR": "Waiting for approval",
+        "APPR": "Approved",
+        "WMATL": "Waiting for material",
+        "INPRG": "In progress",
+        "COMP": "Completed",
+        "CLOSE": "Closed",
+    }
+    return labels.get(status, status)
+
+
+def _readable_status(status: object) -> str:
+    if not status:
+        return "Unknown"
+    return str(status).replace("_", " ").strip().capitalize()
+
+
+def _work_order_has_material_blocker(work_order: dict) -> bool:
+    if work_order.get("material_readiness") in {"blocked", "pending"}:
+        return True
+    if work_order.get("material_blocker_status") in {"blocked", "waiting_procurement", "reorder_requested"}:
+        return True
+    for reservation in work_order.get("spare_reservations", []):
+        required = int(reservation.get("required_qty") or 0)
+        reserved = int(reservation.get("reserved_qty") or 0)
+        on_hand = int(reservation.get("on_hand_qty") or 0)
+        if required and reserved < required and on_hand < required:
+            return True
+    return False
+
+
+def _material_start_block_reason(work_order: dict) -> str:
+    reservations = work_order.get("spare_reservations", [])
+    if reservations:
+        primary = reservations[0]
+        spare_name = primary.get("spare_name") or primary.get("spare_id") or "the required spare"
+        expected = primary.get("expected_available_date") or "not recorded"
+        lead_time = primary.get("procurement_lead_time_days")
+        lead_time_text = f" with {lead_time} day(s) lead time" if lead_time else ""
+        return (
+            f"{work_order['id']} cannot be started because {spare_name} is not ready. "
+            f"Expected availability is {expected}{lead_time_text}."
+        )
+    note = work_order.get("material_blocker_note") or "Material readiness is not clear."
+    return f"{work_order['id']} cannot be started because material readiness is blocked. {note}"
+
+
 def _requested_work_order_status_action(message: str) -> Optional[str]:
-    if re.search(r"\bapprove\b", message):
+    if _message_is_status_question(message):
+        return None
+    if re.search(r"\b(?:approve|authorize)\b", message):
         return "APPR"
-    if re.search(r"\b(start|begin)\b", message) or re.search(r"\b(?:set|move|update|mark)\b.*\b(?:in progress|inprg)\b", message):
+    if re.search(r"\b(?:start|begin|dispatch)\b", message) or re.search(r"\b(?:set|move|update|mark)\b.*\b(?:in progress|inprg)\b", message):
         return "INPRG"
     if re.search(r"\b(?:complete|submit completed)\b", message) or re.search(r"\b(?:set|move|update|mark)\b.*\b(?:complete|completed|comp)\b", message):
         return "COMP"
     return None
+
+
+def _message_is_status_question(message: str) -> bool:
+    if re.search(r"\b(?:how|when|what|why|where|which|should|would|could|is|are|do|does|did)\b", message):
+        return True
+    if any(term in message for term in ["?", "available", "availability", "expected", "lead time", "blocked spare", "material blocker"]):
+        return True
+    return False
 
 
 def _can_update_work_order_status(work_order: dict, target_status: str, current_user: UserPublic) -> tuple[bool, str]:
@@ -1050,6 +1247,8 @@ def _can_update_work_order_status(work_order: dict, target_status: str, current_
     if current_user.role == "maintenance_technician":
         if work_order["assigned_to"] != current_user.display_name:
             return False, "Technicians can update only work orders assigned to them."
+        if target_status == "INPRG" and _work_order_has_material_blocker(work_order):
+            return False, _material_start_block_reason(work_order)
         if target_status == "INPRG" and work_order["status"] not in {"APPR", "WMATL"}:
             return False, "Technicians can start only APPR or WMATL work orders."
         if target_status == "COMP" and work_order["status"] != "INPRG":
