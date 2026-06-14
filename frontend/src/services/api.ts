@@ -775,7 +775,7 @@ export interface LearningSummary {
   vector_store: LearningVectorStoreStatus
 }
 
-export type WorkOrderStatus = 'WAPPR' | 'WMATL' | 'APPR' | 'INPRG' | 'COMP' | 'CLOSE'
+export type WorkOrderStatus = 'WAPPR' | 'APPR' | 'WMATL' | 'INPRG' | 'COMP' | 'CLOSE'
 export type WorkOrderPlanningStatus = 'unscheduled' | 'planned' | 'dispatched'
 export type MaterialReadiness = 'unknown' | 'pending' | 'ready' | 'blocked'
 export type MaterialBlockerStatus =

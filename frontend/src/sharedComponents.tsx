@@ -339,7 +339,7 @@ export function TechnicianExecutionCard({
     },
     {
       title: 'Start field execution',
-      detail: canStart ? 'Move this approved work order to in progress before executing field work.' : 'Field execution has already moved past the start gate.',
+      detail: canStart ? 'Move this approved or material-ready work order to in progress before executing field work.' : 'Field execution has already moved past the start gate.',
       state: ['APPR', 'WMATL'].includes(workOrder.status) ? 'current' : ['INPRG', 'COMP', 'CLOSE'].includes(workOrder.status) ? 'done' : 'pending',
     },
     {

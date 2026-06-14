@@ -58,7 +58,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 - Degradation and remaining useful life estimates using explainable heuristic risk drivers, normalized maintenance labels, and grounded reasoning explanations.
 - Proactive abnormality detection through rolling baseline, z-score, threshold breach, trend-delta analysis, and context classification.
 - Prioritized maintenance actions based on risk level, active alerts, equipment criticality, spares availability, lead time, maintenance history, and feedback signals.
-- Work-order lifecycle support with WAPPR, WMATL, APPR, INPRG, COMP, and CLOSE status tracking, assignment, priority, problem code, recommended action, follow-up flags, and work logs.
+- Work-order lifecycle support with WAPPR, APPR, WMATL, INPRG, COMP, and CLOSE status tracking, assignment, priority, problem code, recommended action, follow-up flags, and work logs.
 - Structured Markdown report export with diagnosis, risk, RUL, root causes, immediate actions, planned actions, spares strategy, learning notes, evidence, and summary.
 - Continuous-improvement loop through equipment-linked engineer feedback, maintenance labels, work-order outcomes, approved assistant interactions, and LLM-as-a-Judge scores reused in future recommendation ranking, RAG prompt context, JSONL tuning snapshots, reports, and prediction drivers.
 
