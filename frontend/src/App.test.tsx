@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PredictionResponse, type Recommendation, type UserRole, type WorkOrder } from './services/api'
@@ -1408,24 +1408,28 @@ beforeEach(() => {
           const initialAnswer = blocked
             ? `WO-8304 is waiting for material. Drive end spherical roller bearing is not ready; expected availability is 2026-07-03. Do not start field execution until the blocker is resolved.`
             : `WO-8304 is approved and ready for technician execution. Review the current work order context before recording observations.`
-          return Promise.resolve(
-            assistantStreamResponse(
-              {
-                work_order_id: selectedOrder.id,
-                next_prompt: initialAnswer,
-                live_directions: [initialAnswer],
-                recommendations: ['Use Neo to record the next relevant observation.'],
-                safety_reminders: ['Apply lockout/tagout.'],
-                suggested_problem_code: selectedOrder.problem_code,
-                suggested_failure_class: selectedOrder.failure_class,
-                completion_summary: `${selectedOrder.id} initial context reviewed.`,
-                evidence: recommendation.evidence,
-                used_live_provider: false,
-                provider: 'mock',
-              },
-              [initialAnswer],
-            ),
+          const response = assistantStreamResponse(
+            {
+              work_order_id: selectedOrder.id,
+              next_prompt: initialAnswer,
+              live_directions: [initialAnswer],
+              recommendations: ['Use Neo to record the next relevant observation.'],
+              safety_reminders: ['Apply lockout/tagout.'],
+              suggested_problem_code: selectedOrder.problem_code,
+              suggested_failure_class: selectedOrder.failure_class,
+              completion_summary: `${selectedOrder.id} initial context reviewed.`,
+              evidence: recommendation.evidence,
+              used_live_provider: false,
+              provider: 'mock',
+            },
+            [initialAnswer],
           )
+          if (assistantResponseDelayMs > 0) {
+            return new Promise((resolve) => {
+              window.setTimeout(() => resolve(response), assistantResponseDelayMs)
+            })
+          }
+          return Promise.resolve(response)
         }
         const response = assistantStreamResponse(
           {
@@ -1600,6 +1604,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   window.sessionStorage.clear()
   api.setSession(null)
@@ -1789,6 +1794,35 @@ describe('Maintenance Wizard dashboard', () => {
         requested_step: 'initial_context',
       }),
     )
+  })
+
+  it('shows a slow LLM waiting state while technician initial context is still pending', async () => {
+    assistantResponseDelayMs = 20_000
+    render(<App />)
+    await signIn('technician@plant.local')
+    const workOrdersButton = (await screen.findAllByRole('button', { name: 'Work Orders' }))[0]
+
+    vi.useFakeTimers()
+    fireEvent.click(workOrdersButton)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(within(screen.getByLabelText('Neo technician chat')).getByText(/Thinking/)).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7_000)
+    })
+    expect(
+      within(screen.getByLabelText('Neo technician chat')).getByText(/Waiting for the LLM response/),
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(13_000)
+    })
+    expect(
+      within(screen.getByLabelText('Neo technician chat')).getByText(/approved and ready for technician execution/),
+    ).toBeInTheDocument()
   })
 
   it('formats Markdown-like Neo responses into readable sections', async () => {

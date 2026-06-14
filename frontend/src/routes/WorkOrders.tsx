@@ -26,6 +26,8 @@ import {
 } from '../sharedComponents'
 import { formatDate } from '../appModel'
 
+const TECHNICIAN_WAITING_MESSAGE_DELAY_MS = 7_000
+
 export function WorkOrdersRoute({
   approveWorkOrder,
   assignWorkOrder,
@@ -88,6 +90,16 @@ export function WorkOrdersRoute({
 }) {
   const selectedEffectiveStatus = selectedWorkOrder ? effectiveWorkOrderStatus(selectedWorkOrder) : undefined
   const selectedEffectiveStatusDetail = selectedEffectiveStatus ? workOrderStatusDetail(selectedEffectiveStatus) : undefined
+  const [technicianWaitingLong, setTechnicianWaitingLong] = useState(false)
+
+  useEffect(() => {
+    if (!technicianLoading || technicianStreaming) {
+      setTechnicianWaitingLong(false)
+      return
+    }
+    const timeoutId = window.setTimeout(() => setTechnicianWaitingLong(true), TECHNICIAN_WAITING_MESSAGE_DELAY_MS)
+    return () => window.clearTimeout(timeoutId)
+  }, [technicianLoading, technicianStreaming])
 
   return (
     <section className="workOrderLayout">
@@ -142,7 +154,12 @@ export function WorkOrdersRoute({
                       {technicianLoading && !technicianStreaming && (
                         <div className="chatBubble assistant" aria-live="polite">
                           <span>{technicianAssistantName}</span>
-                          <p><span className="loadingSpinner" aria-hidden="true" /> Thinking...</p>
+                          <p>
+                            <span className="loadingSpinner" aria-hidden="true" />
+                            {technicianWaitingLong
+                              ? ' Waiting for the LLM response. Local models can take longer on first token.'
+                              : ' Thinking...'}
+                          </p>
                         </div>
                       )}
                     </div>
