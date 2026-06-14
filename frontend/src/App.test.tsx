@@ -1885,14 +1885,18 @@ beforeEach(() => {
         if (init?.method === 'PATCH') {
           const body = JSON.parse((init.body as string) ?? '{}')
           const workOrderId = url.match(/\/api\/work-orders\/([^/?]+)/)?.[1]
-          const original = apiWorkOrders.find((item) => item.id === workOrderId) ?? apiWorkOrders[0]
+          const original = apiWorkOrders.find((item) => item.id === workOrderId) ?? { ...apiWorkOrders[0], id: workOrderId ?? apiWorkOrders[0].id }
+          const updated = {
+            ...original,
+            ...body,
+            dispatched_at: body.planning_status === 'dispatched' ? '2026-06-12T13:45:00+05:30' : original.dispatched_at,
+          }
+          apiWorkOrders = apiWorkOrders.some((item) => item.id === updated.id)
+            ? apiWorkOrders.map((item) => (item.id === updated.id ? updated : item))
+            : [updated, ...apiWorkOrders]
           return Promise.resolve(
             new Response(
-              JSON.stringify({
-                ...original,
-                ...body,
-                dispatched_at: body.planning_status === 'dispatched' ? '2026-06-12T13:45:00+05:30' : original.dispatched_at,
-              }),
+              JSON.stringify(updated),
               { status: 200 },
             ),
           )
@@ -2553,6 +2557,28 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       queue_name: 'waiting_approval',
       question,
     })
+  })
+
+  it('lets supervisor Neo approve an explicit work order command through the action tool', async () => {
+    render(<App />)
+    await signIn('supervisor@plant.local')
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
+    const transcript = await screen.findByLabelText('Neo supervisor chat')
+    expect(await within(transcript).findByText(/Neo reviewed 2 work orders/)).toBeInTheDocument()
+    const assistantRequestCount = supervisorAssistantRequests.length
+
+    fireEvent.change(screen.getByLabelText('Supervisor question'), { target: { value: 'Approve WO-8311' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await within(transcript).findByText(/Dhruv, approved WO-8311/)).toBeInTheDocument()
+    expect(within(transcript).getByText('Neo action')).toBeInTheDocument()
+    expect(supervisorAssistantRequests).toHaveLength(assistantRequestCount)
+    expect(await screen.findByText('WO-8311 approved')).toBeInTheDocument()
+    const approveCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => url.toString().includes('/api/work-orders/WO-8311') && init?.method === 'PATCH')
+    expect(JSON.parse((approveCall?.[1] as RequestInit).body as string)).toEqual({ status: 'APPR' })
   })
 
   it('logs out immediately even when the logout API is slow', async () => {

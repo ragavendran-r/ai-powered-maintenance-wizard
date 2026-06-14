@@ -150,6 +150,12 @@ function supervisorQueueNameForPrompt(prompt: string) {
   return 'all_work'
 }
 
+function supervisorApprovalWorkOrderId(prompt: string) {
+  if (/\b(?:do not|don't|dont|not)\s+approve\b/i.test(prompt)) return null
+  const match = prompt.match(/\bapprove\b[\s\S]{0,48}\b(WO-\d+)\b/i)
+  return match?.[1]?.toUpperCase() ?? null
+}
+
 function supervisorInitialContextPrompt(workOrder: WorkOrder | undefined, workOrders: WorkOrder[], userName?: string) {
   const approvals = workOrders.filter((item) => item.status === 'WAPPR')
   const followUps = workOrders.filter((item) => item.follow_up_required)
@@ -1915,11 +1921,78 @@ export function App() {
   async function approveWorkOrder(workOrderId: string) {
     try {
       const updated = await api.updateWorkOrder(workOrderId, { status: 'APPR' })
-      setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+      setWorkOrders((items) => (
+        items.some((item) => item.id === updated.id)
+          ? items.map((item) => (item.id === updated.id ? updated : item))
+          : [updated, ...items]
+      ))
       setSelectedWorkOrderId(updated.id)
       setWorkOrderMessage(`${updated.id} approved`)
     } catch {
       setWorkOrderMessage('Work order approval could not be saved')
+    }
+  }
+
+  async function runSupervisorApprovalAction(workOrderId: string) {
+    const existing = workOrders.find((item) => item.id === workOrderId)
+    const namePrefix = currentUser?.display_name ? `${currentUser.display_name}, ` : ''
+    const appendActionResponse = (response: SupervisorAssistantResponse) => {
+      setSupervisorAssistant(response)
+      setSupervisorChat((turns) => [
+        ...turns,
+        {
+          id: assistantTurnId('supervisor-action'),
+          role: 'assistant',
+          content: response.summary,
+          provider: response.provider,
+          usedLiveProvider: response.used_live_provider,
+        },
+      ])
+    }
+
+    if (existing && existing.status !== 'WAPPR') {
+      const statusLabel = workOrderStatusLabel(existing.status)
+      const response: SupervisorAssistantResponse = {
+        summary: `${namePrefix}${workOrderId} is already ${statusLabel}; only work orders waiting for approval can be approved.`,
+        follow_up_actions: [],
+        risks: [],
+        draft_work_order: null,
+        referenced_work_orders: [workOrderId],
+        used_live_provider: false,
+        provider: 'work_order_tool',
+      }
+      appendActionResponse(response)
+      setWorkOrderMessage(`${workOrderId} is already ${statusLabel}`)
+      return
+    }
+
+    try {
+      const updated = await api.updateWorkOrder(workOrderId, { status: 'APPR' })
+      setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+      setSelectedWorkOrderId(updated.id)
+      const response: SupervisorAssistantResponse = {
+        summary: `${namePrefix}approved ${updated.id}. It is now ${workOrderStatusLabel(updated.status)} and ready for planning, dispatch, or technician execution once materials and permits are clear.`,
+        follow_up_actions: [`Review planning, assignment, and material readiness for ${updated.id}.`],
+        risks: [],
+        draft_work_order: null,
+        referenced_work_orders: [updated.id],
+        used_live_provider: false,
+        provider: 'work_order_tool',
+      }
+      appendActionResponse(response)
+      setWorkOrderMessage(`${updated.id} approved`)
+    } catch {
+      const response: SupervisorAssistantResponse = {
+        summary: `${namePrefix}I could not approve ${workOrderId}. Confirm the work order exists, is waiting for approval, and has no approval blocker.`,
+        follow_up_actions: [],
+        risks: [`${workOrderId} approval was not saved.`],
+        draft_work_order: null,
+        referenced_work_orders: [workOrderId],
+        used_live_provider: false,
+        provider: 'work_order_tool',
+      }
+      appendActionResponse(response)
+      setWorkOrderMessage(`${workOrderId} approval could not be saved`)
     }
   }
 
@@ -2054,6 +2127,13 @@ export function App() {
     ])
     setSupervisorLoading(true)
     setSupervisorStreaming(false)
+    const approvalWorkOrderId = supervisorApprovalWorkOrderId(prompt)
+    if (approvalWorkOrderId) {
+      await runSupervisorApprovalAction(approvalWorkOrderId)
+      setSupervisorQuestion('')
+      setSupervisorLoading(false)
+      return
+    }
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
     const timeoutMs = WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS
     let firstTokenReceived = false
