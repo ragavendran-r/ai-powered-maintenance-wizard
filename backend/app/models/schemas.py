@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 RiskLevel = Literal["low", "medium", "high", "critical"]
 WorkOrderStatus = Literal["WAPPR", "WMATL", "APPR", "INPRG", "COMP", "CLOSE"]
+WorkOrderPlanningStatus = Literal["unscheduled", "planned", "dispatched"]
+MaterialReadiness = Literal["unknown", "pending", "ready", "blocked"]
 WorkOrderAssistantAudience = Literal["technician", "supervisor"]
 AnomalyContextClass = Literal[
     "requires_investigation",
@@ -170,6 +172,13 @@ class WorkOrder(BaseModel):
     assigned_to: str
     supervisor: str
     due_date: str
+    planning_status: WorkOrderPlanningStatus = "unscheduled"
+    planned_start: Optional[str] = None
+    planned_end: Optional[str] = None
+    outage_window: Optional[str] = None
+    material_readiness: MaterialReadiness = "unknown"
+    dispatch_notes: Optional[str] = None
+    dispatched_at: Optional[str] = None
     recommended_action: str
     follow_up_required: bool = False
     ai_summary: Optional[str] = None
@@ -192,6 +201,13 @@ class WorkOrderCreateRequest(BaseModel):
     assigned_to: str = "Maintenance Engineer"
     supervisor: str = "Maintenance Supervisor"
     due_date: str
+    planning_status: WorkOrderPlanningStatus = "unscheduled"
+    planned_start: Optional[str] = None
+    planned_end: Optional[str] = None
+    outage_window: Optional[str] = None
+    material_readiness: MaterialReadiness = "unknown"
+    dispatch_notes: Optional[str] = None
+    dispatched_at: Optional[str] = None
     recommended_action: str = "Inspect asset and update work log with findings."
     follow_up_required: bool = False
     ai_summary: Optional[str] = None
@@ -203,6 +219,13 @@ class WorkOrderUpdateRequest(BaseModel):
     assigned_to: Optional[str] = None
     supervisor: Optional[str] = None
     due_date: Optional[str] = None
+    planning_status: Optional[WorkOrderPlanningStatus] = None
+    planned_start: Optional[str] = None
+    planned_end: Optional[str] = None
+    outage_window: Optional[str] = None
+    material_readiness: Optional[MaterialReadiness] = None
+    dispatch_notes: Optional[str] = None
+    dispatched_at: Optional[str] = None
     recommended_action: Optional[str] = None
     problem_code: Optional[str] = None
     failure_class: Optional[str] = None

@@ -776,6 +776,8 @@ export interface LearningSummary {
 }
 
 export type WorkOrderStatus = 'WAPPR' | 'WMATL' | 'APPR' | 'INPRG' | 'COMP' | 'CLOSE'
+export type WorkOrderPlanningStatus = 'unscheduled' | 'planned' | 'dispatched'
+export type MaterialReadiness = 'unknown' | 'pending' | 'ready' | 'blocked'
 
 export interface WorkOrderLog {
   id: number
@@ -800,6 +802,13 @@ export interface WorkOrder {
   assigned_to: string
   supervisor: string
   due_date: string
+  planning_status: WorkOrderPlanningStatus
+  planned_start?: string | null
+  planned_end?: string | null
+  outage_window?: string | null
+  material_readiness: MaterialReadiness
+  dispatch_notes?: string | null
+  dispatched_at?: string | null
   recommended_action: string
   follow_up_required: boolean
   ai_summary?: string | null
@@ -822,6 +831,13 @@ export interface WorkOrderCreateRequest {
   assigned_to: string
   supervisor: string
   due_date: string
+  planning_status?: WorkOrderPlanningStatus
+  planned_start?: string | null
+  planned_end?: string | null
+  outage_window?: string | null
+  material_readiness?: MaterialReadiness
+  dispatch_notes?: string | null
+  dispatched_at?: string | null
   recommended_action: string
   follow_up_required?: boolean
   ai_summary?: string
@@ -1102,6 +1118,12 @@ export const api = {
     if (followUpOnly) params.set('follow_up_only', 'true')
     const query = params.toString()
     return request<WorkOrder[]>(`/api/work-orders${query ? `?${query}` : ''}`)
+  },
+  workOrderPlanningBoard: (planningStatus?: WorkOrderPlanningStatus) => {
+    const params = new URLSearchParams()
+    if (planningStatus) params.set('planning_status', planningStatus)
+    const query = params.toString()
+    return request<WorkOrder[]>(`/api/work-orders/planning/board${query ? `?${query}` : ''}`)
   },
   workOrder: (workOrderId: string) => request<WorkOrder>(`/api/work-orders/${workOrderId}`),
   createWorkOrder: (payload: WorkOrderCreateRequest) =>

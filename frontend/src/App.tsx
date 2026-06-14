@@ -70,7 +70,7 @@ import { AuthLoadingRoute, ApiOnlyRoute, LoginRoute } from './routes/Auth'
 import { DashboardRoute } from './routes/Dashboard'
 import { AssetsRoute } from './routes/Assets'
 import { AssetDetailRoute } from './routes/AssetDetail'
-import { WorkOrdersRoute } from './routes/WorkOrders'
+import { WorkOrdersRoute, type WorkOrderPlanningUpdate } from './routes/WorkOrders'
 import { IngestionRoute } from './routes/Ingestion'
 import { LearningReviewRoute } from './routes/LearningReview'
 import { UsersRoute } from './routes/Users'
@@ -1301,6 +1301,28 @@ export function App() {
     }
   }
 
+  async function planWorkOrder(workOrderId: string, payload: WorkOrderPlanningUpdate) {
+    try {
+      const updated = await api.updateWorkOrder(workOrderId, payload)
+      setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+      setSelectedWorkOrderId(updated.id)
+      setWorkOrderMessage(`${updated.id} planning saved`)
+    } catch {
+      setWorkOrderMessage('Work order plan could not be saved')
+    }
+  }
+
+  async function dispatchWorkOrder(workOrderId: string) {
+    try {
+      const updated = await api.updateWorkOrder(workOrderId, { planning_status: 'dispatched' })
+      setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+      setSelectedWorkOrderId(updated.id)
+      setWorkOrderMessage(`${updated.id} dispatched`)
+    } catch {
+      setWorkOrderMessage('Work order dispatch could not be saved')
+    }
+  }
+
   async function approveWorkOrder(workOrderId: string) {
     try {
       const updated = await api.updateWorkOrder(workOrderId, { status: 'APPR' })
@@ -1722,6 +1744,8 @@ export function App() {
         canSupervisorAssistant={canSupervisorAssistant}
         canTechnicianAssistant={canTechnicianAssistant}
         completeSelectedWorkOrder={completeSelectedWorkOrder}
+        dispatchWorkOrder={dispatchWorkOrder}
+        planWorkOrder={planWorkOrder}
         runSupervisorAssistant={runSupervisorAssistant}
         runTechnicianAssistant={runTechnicianAssistant}
         selectedWorkOrder={selectedWorkOrder}

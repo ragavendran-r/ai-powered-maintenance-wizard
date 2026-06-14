@@ -138,6 +138,8 @@ def list_work_orders(
     equipment_id: Optional[str] = None,
     assigned_to: Optional[str] = None,
     follow_up_only: bool = False,
+    planning_status: Optional[str] = None,
+    open_only: bool = False,
 ) -> list[dict[str, Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -149,6 +151,11 @@ def list_work_orders(
         params.append(assigned_to)
     if follow_up_only:
         clauses.append("follow_up_required = 1")
+    if planning_status:
+        clauses.append("planning_status = ?")
+        params.append(planning_status)
+    if open_only:
+        clauses.append("status NOT IN ('COMP', 'CLOSE')")
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = _fetch_all(
         f"""
@@ -188,13 +195,20 @@ def create_work_order(payload: dict[str, Any]) -> dict[str, Any]:
                 assigned_to,
                 supervisor,
                 due_date,
+                planning_status,
+                planned_start,
+                planned_end,
+                outage_window,
+                material_readiness,
+                dispatch_notes,
+                dispatched_at,
                 recommended_action,
                 follow_up_required,
                 ai_summary,
                 completion_summary,
                 completed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 work_order_id,
@@ -210,6 +224,13 @@ def create_work_order(payload: dict[str, Any]) -> dict[str, Any]:
                 payload.get("assigned_to") or "Maintenance Engineer",
                 payload.get("supervisor") or "Maintenance Supervisor",
                 payload["due_date"],
+                payload.get("planning_status") or "unscheduled",
+                payload.get("planned_start"),
+                payload.get("planned_end"),
+                payload.get("outage_window"),
+                payload.get("material_readiness") or "unknown",
+                payload.get("dispatch_notes"),
+                payload.get("dispatched_at"),
                 payload.get("recommended_action") or "Inspect asset and update work log with findings.",
                 1 if payload.get("follow_up_required") else 0,
                 payload.get("ai_summary"),
@@ -248,6 +269,13 @@ def update_work_order(work_order_id: str, payload: dict[str, Any]) -> Optional[d
         "assigned_to",
         "supervisor",
         "due_date",
+        "planning_status",
+        "planned_start",
+        "planned_end",
+        "outage_window",
+        "material_readiness",
+        "dispatch_notes",
+        "dispatched_at",
         "recommended_action",
         "problem_code",
         "failure_class",
@@ -261,6 +289,13 @@ def update_work_order(work_order_id: str, payload: dict[str, Any]) -> Optional[d
     if payload.get("follow_up_required") is not None:
         fields.append("follow_up_required = ?")
         values.append(1 if payload["follow_up_required"] else 0)
+    dispatch_requested = payload.get("planning_status") == "dispatched"
+    start_requested = payload.get("status") == "INPRG"
+    if (dispatch_requested or start_requested) and not existing.get("dispatched_at"):
+        fields.append("dispatched_at = CURRENT_TIMESTAMP")
+    if start_requested and payload.get("planning_status") is None and existing.get("planning_status") != "dispatched":
+        fields.append("planning_status = ?")
+        values.append("dispatched")
     if payload.get("status") in {"COMP", "CLOSE"} and not existing.get("completed_at"):
         fields.append("completed_at = CURRENT_TIMESTAMP")
     if not fields:
@@ -563,12 +598,25 @@ def add_records(payload: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
             "assigned_to",
             "supervisor",
             "due_date",
+            "planning_status",
+            "planned_start",
+            "planned_end",
+            "outage_window",
+            "material_readiness",
+            "dispatch_notes",
+            "dispatched_at",
             "recommended_action",
             "follow_up_required",
             "ai_summary",
             "completion_summary",
             "completed_at",
         ],
+    }
+    table_defaults = {
+        "work_orders": {
+            "planning_status": "unscheduled",
+            "material_readiness": "unknown",
+        },
     }
     counts: dict[str, int] = {}
     with connect() as connection:
@@ -585,7 +633,15 @@ def add_records(payload: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
                 VALUES ({placeholders})
                 ON CONFLICT(id) DO UPDATE SET {update_sql}
                 """,
-                [[row.get(column) for column in columns] for row in rows],
+                [
+                    [
+                        row[column]
+                        if row.get(column) is not None
+                        else table_defaults.get(table, {}).get(column)
+                        for column in columns
+                    ]
+                    for row in rows
+                ],
             )
             counts[table] = len(rows)
     return counts

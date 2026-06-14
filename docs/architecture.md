@@ -16,7 +16,7 @@ flowchart LR
   auth --> streamStatus["Streaming Status API"]
   auth --> diagnosis["Diagnosis, Chat, And Recommendation APIs"]
   auth --> prediction["Prediction API"]
-  auth --> workOrders["Work Order APIs<br/>Queue, detail, logs, lifecycle"]
+  auth --> workOrders["Work Order APIs<br/>Queue, planning, dispatch, logs, lifecycle"]
   auth --> assistants["Neo Work Order AI Modes<br/>Technician and supervisor"]
   auth --> report["Markdown Report API"]
   auth --> feedback["Feedback API<br/>Root cause, action, outcome"]
@@ -88,7 +88,7 @@ flowchart LR
 
 - React frontend: operational dashboard, company Assets table, lazy-loaded data-backed asset detail views, work-order queue/detail/execution/review screens, left-nav ingestion view, maintenance chat, recommendation, report, detailed feedback, and Learning Review views.
 - Auth/RBAC layer: local login, JWT validation, current-user context, role guards, and role-aware navigation for admin, maintenance engineer, maintenance technician, maintenance supervisor, reliability engineer, planner, operator, and API-only IoT service users.
-- FastAPI backend: HTTP API layer for dashboard data, work orders, role-specific assistants, ingestion, diagnosis, prediction, chat, reports, and feedback.
+- FastAPI backend: HTTP API layer for dashboard data, work orders, planning/scheduling/dispatch, role-specific assistants, ingestion, diagnosis, prediction, chat, reports, and feedback.
 - Async IoT streaming ingestion: optional NATS JetStream durable consumer for plant applications, PLC gateways, and historians that publish alerts, sensor readings, equipment, spares, and maintenance events.
 - Data services: seed SQLite from five sample steel-plant assets and expose repository functions for equipment, asset profiles, asset metrics, seeded asset recommendations, subsystems, reliability metrics, alerts, sensor readings, spares, maintenance history, related work orders, SOP/manual/log/history documents, document chunks, and feedback.
 - Document parser: extracts text from uploaded text-like files and embedded-text PDFs before indexing.
@@ -100,7 +100,7 @@ flowchart LR
 - Learning service: captures assistant interactions, converts feedback/labels/work-order outcomes/documents into candidate examples, scores them with an LLM-as-a-Judge rubric, preserves human approval state, exports judge-qualified JSONL snapshots for local adapter tuning, and provides reviewer controls for model versions, evaluation runs, artifact storage, adapter promotion/rollback, runtime deployment tracking/gating, and active serving-model resolution.
 - Async learning workers: NATS JetStream subjects under `maintenance.learning.*` drive judge, dataset, evaluation, and PEFT preparation jobs outside the FastAPI request path with retries, DLQ handling, persisted job status, and filesystem or S3-compatible artifact registration.
 - Recommendation service: combines retrieved evidence, approved judge-qualified learning examples, risk scoring, prediction, normalized labels, prior engineer feedback, reasoning explanations, and optional LLM-adapter context.
-- Work-order assistant service: combines persisted work-order state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM output to suggest live directions, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work. Neo has role-aware work-order modes: technician mode is restricted to `maintenance_technician`, and supervisor mode is restricted to `maintenance_supervisor`; both use the shared LLM provider, model, token-limit, and streaming configuration. Dashboard Neo starts with a deterministic role-aware welcome and attention table, then routes deterministic role-aware commands for asset section summaries, assigned-work next steps, work-order creation/status updates, and admin user management through backend repository functions. Chat panels consume streaming SSE responses and apply final structured events for app-owned fields.
+- Work-order and planning services: persist work-order lifecycle state plus planner-owned planned start/end, outage window, material readiness, dispatch notes, and dispatch timestamp fields. Planner, supervisor, and admin users can schedule and dispatch work after deterministic validation; technicians see only assigned work and cannot mutate planning metadata. Work-order assistant service combines persisted work-order state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM output to suggest live directions, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work. Neo has role-aware work-order modes: technician mode is restricted to `maintenance_technician`, and supervisor mode is restricted to `maintenance_supervisor`; both use the shared LLM provider, model, token-limit, and streaming configuration. Dashboard Neo starts with a deterministic role-aware welcome and attention table, then routes deterministic role-aware commands for asset section summaries, assigned-work next steps, work-order creation/status updates, and admin user management through backend repository functions. Chat panels consume streaming SSE responses and apply final structured events for app-owned fields.
 - Report service: formats recommendations as structured Markdown for supervisor handoff or demo export, including learning notes.
 - LLM adapter: common structured interface for mock, OpenAI-compatible chat completions, and Ollama chat providers.
 
@@ -130,10 +130,11 @@ flowchart LR
   - `POST /api/chat` and `POST /api/diagnose` generate evidence-backed recommendations.
   - `POST /api/predict` returns failure probability, estimated RUL, and drivers.
 - Work orders and assistants:
-  - `GET /api/work-orders` lists work orders, with optional asset and follow-up filters.
-  - `POST /api/work-orders` creates a work order with assignment, priority, problem code, recommended action, and follow-up fields.
+  - `GET /api/work-orders` lists work orders, with optional asset, follow-up, open-only, and planning-status filters. Technician users are scoped to assigned work.
+  - `POST /api/work-orders` creates a work order with assignment, priority, problem code, recommended action, follow-up, and optional planning fields.
+  - `GET /api/work-orders/planning/board` returns open work orders for planner, supervisor, and admin scheduling/dispatch review.
   - `GET /api/work-orders/{work_order_id}` returns detail and work logs.
-  - `PATCH /api/work-orders/{work_order_id}` updates lifecycle status, assignment, problem code, follow-up, and completion summary.
+  - `PATCH /api/work-orders/{work_order_id}` updates lifecycle status, assignment, schedule window, material readiness, outage window, dispatch notes, problem code, follow-up, and completion summary. Dispatch is blocked when a work order still waits for approval, has no planned start, or has blocked material readiness.
   - `POST /api/work-orders/{work_order_id}/logs` appends technician, supervisor, or assistant log entries.
   - `POST /api/work-orders/technician-assist` returns LLM-backed live directions, safety reminders, recommended actions, problem-code suggestions, and completion summary for technician users only.
   - `POST /api/work-orders/supervisor-assist` summarizes queue/follow-up risk and can draft a follow-up work order for supervisor users only.

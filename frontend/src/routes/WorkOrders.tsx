@@ -1,9 +1,12 @@
-import { Bot, Briefcase, FileText, Send } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Bot, Briefcase, CalendarClock, FileText, Send, Truck } from 'lucide-react'
 import type {
   AuthUser,
+  MaterialReadiness,
   SupervisorAssistantResponse,
   TechnicianAssistantResponse,
   WorkOrder,
+  WorkOrderPlanningStatus,
 } from '../services/api'
 import type { AssistantTurn } from '../assistantContent'
 import { AssistantMessageContent } from '../assistantContent'
@@ -28,6 +31,8 @@ export function WorkOrdersRoute({
   canSupervisorAssistant,
   canTechnicianAssistant,
   completeSelectedWorkOrder,
+  dispatchWorkOrder,
+  planWorkOrder,
   runSupervisorAssistant,
   runTechnicianAssistant,
   selectedWorkOrder,
@@ -55,6 +60,8 @@ export function WorkOrdersRoute({
   canSupervisorAssistant: boolean
   canTechnicianAssistant: boolean
   completeSelectedWorkOrder: () => void
+  dispatchWorkOrder: (workOrderId: string) => void
+  planWorkOrder: (workOrderId: string, payload: WorkOrderPlanningUpdate) => void
   runSupervisorAssistant: (workOrderId?: string) => void
   runTechnicianAssistant: () => void
   selectedWorkOrder?: WorkOrder
@@ -79,17 +86,33 @@ export function WorkOrdersRoute({
   return (
     <section className="workOrderLayout">
       <section className="workOrderCenterColumn" aria-label="Work order center pane">
+        {canAssignWorkOrders && (
+          <PlannerDispatchBoard
+            onDispatch={dispatchWorkOrder}
+            onOpen={setSelectedWorkOrderId}
+            onPlan={planWorkOrder}
+            technicians={technicians}
+            workOrders={workOrders}
+          />
+        )}
         <section className="detailPanel workOrderAssistantPanel">
           {selectedWorkOrder ? (
             <>
               {canTechnicianAssistant && (
-                <TechnicianExecutionCard
-                  assistant={technicianAssistant}
-                  isLoading={technicianLoading}
-                  onComplete={completeSelectedWorkOrder}
-                  onStart={startWorkOrder}
-                  workOrder={selectedWorkOrder}
-                />
+                <>
+                  <TechnicianScheduleQueue
+                    onOpen={setSelectedWorkOrderId}
+                    selectedWorkOrderId={selectedWorkOrder.id}
+                    workOrders={workOrders}
+                  />
+                  <TechnicianExecutionCard
+                    assistant={technicianAssistant}
+                    isLoading={technicianLoading}
+                    onComplete={completeSelectedWorkOrder}
+                    onStart={startWorkOrder}
+                    workOrder={selectedWorkOrder}
+                  />
+                </>
               )}
               <div className={canTechnicianAssistant && canSupervisorAssistant ? 'assistantSplit' : 'assistantSplit singleAssistant'}>
                 {canTechnicianAssistant && (
@@ -227,6 +250,18 @@ export function WorkOrdersRoute({
                   <dd>{technicianAssistant?.suggested_failure_class ?? selectedWorkOrder.failure_class}</dd>
                   <dt>Due date</dt>
                   <dd>{formatDate(selectedWorkOrder.due_date)}</dd>
+                  <dt>Planning status</dt>
+                  <dd>{planningStatusLabels[selectedWorkOrder.planning_status]}</dd>
+                  <dt>Planned window</dt>
+                  <dd>{formatPlanningWindow(selectedWorkOrder)}</dd>
+                  <dt>Material readiness</dt>
+                  <dd>{materialReadinessLabels[selectedWorkOrder.material_readiness]}</dd>
+                  {selectedWorkOrder.dispatch_notes && (
+                    <>
+                      <dt>Dispatch notes</dt>
+                      <dd>{selectedWorkOrder.dispatch_notes}</dd>
+                    </>
+                  )}
                 </dl>
               </div>
             </>
@@ -237,4 +272,280 @@ export function WorkOrdersRoute({
       </section>
     </section>
   )
+}
+
+export type WorkOrderPlanningUpdate = Partial<Pick<
+  WorkOrder,
+  | 'assigned_to'
+  | 'planning_status'
+  | 'planned_start'
+  | 'planned_end'
+  | 'outage_window'
+  | 'material_readiness'
+  | 'dispatch_notes'
+>>
+
+const planningStatusLabels: Record<WorkOrderPlanningStatus, string> = {
+  unscheduled: 'Unscheduled',
+  planned: 'Planned',
+  dispatched: 'Dispatched',
+}
+
+const materialReadinessLabels: Record<MaterialReadiness, string> = {
+  unknown: 'Unknown',
+  pending: 'Pending',
+  ready: 'Ready',
+  blocked: 'Blocked',
+}
+
+const materialReadinessOptions: MaterialReadiness[] = ['unknown', 'pending', 'ready', 'blocked']
+
+function PlannerDispatchBoard({
+  onDispatch,
+  onOpen,
+  onPlan,
+  technicians,
+  workOrders,
+}: {
+  onDispatch: (workOrderId: string) => void
+  onOpen: (workOrderId: string) => void
+  onPlan: (workOrderId: string, payload: WorkOrderPlanningUpdate) => void
+  technicians: AuthUser[]
+  workOrders: WorkOrder[]
+}) {
+  const openWorkOrders = workOrders.filter((order) => !['COMP', 'CLOSE'].includes(order.status))
+
+  return (
+    <section className="detailPanel plannerDispatchBoard" aria-label="Maintenance planning and dispatch board">
+      <div className="sectionHeader">
+        <CalendarClock size={18} />
+        <div>
+          <h2>Planning, Scheduling & Dispatch</h2>
+          <small>{openWorkOrders.length} open work order{openWorkOrders.length === 1 ? '' : 's'} ready for planner review</small>
+        </div>
+      </div>
+      <div className="plannerCardGrid">
+        {openWorkOrders.map((order) => (
+          <PlannerDispatchCard
+            key={order.id}
+            onDispatch={onDispatch}
+            onOpen={onOpen}
+            onPlan={onPlan}
+            order={order}
+            technicians={technicians}
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function PlannerDispatchCard({
+  onDispatch,
+  onOpen,
+  onPlan,
+  order,
+  technicians,
+}: {
+  onDispatch: (workOrderId: string) => void
+  onOpen: (workOrderId: string) => void
+  onPlan: (workOrderId: string, payload: WorkOrderPlanningUpdate) => void
+  order: WorkOrder
+  technicians: AuthUser[]
+}) {
+  const [assignedTo, setAssignedTo] = useState(order.assigned_to)
+  const [plannedStart, setPlannedStart] = useState(toDateTimeLocal(order.planned_start))
+  const [plannedEnd, setPlannedEnd] = useState(toDateTimeLocal(order.planned_end))
+  const [materialReadiness, setMaterialReadiness] = useState<MaterialReadiness>(order.material_readiness)
+  const [outageWindow, setOutageWindow] = useState(order.outage_window ?? '')
+  const [dispatchNotes, setDispatchNotes] = useState(order.dispatch_notes ?? '')
+
+  useEffect(() => {
+    setAssignedTo(order.assigned_to)
+    setPlannedStart(toDateTimeLocal(order.planned_start))
+    setPlannedEnd(toDateTimeLocal(order.planned_end))
+    setMaterialReadiness(order.material_readiness)
+    setOutageWindow(order.outage_window ?? '')
+    setDispatchNotes(order.dispatch_notes ?? '')
+  }, [
+    order.id,
+    order.assigned_to,
+    order.planned_start,
+    order.planned_end,
+    order.material_readiness,
+    order.outage_window,
+    order.dispatch_notes,
+  ])
+
+  const technicianOptions = technicians.some((technician) => technician.display_name === assignedTo)
+    ? technicians
+    : [
+        {
+          id: `current-${order.id}`,
+          email: '',
+          display_name: assignedTo,
+          role: 'maintenance_technician' as const,
+          is_active: true,
+        },
+        ...technicians,
+      ]
+  const dispatchBlockedReason = dispatchBlockReason(order, plannedStart, materialReadiness)
+
+  function savePlan() {
+    onPlan(order.id, {
+      assigned_to: assignedTo,
+      planning_status: plannedStart ? 'planned' : 'unscheduled',
+      planned_start: plannedStart || null,
+      planned_end: plannedEnd || null,
+      material_readiness: materialReadiness,
+      outage_window: outageWindow.trim() || null,
+      dispatch_notes: dispatchNotes.trim() || null,
+    })
+  }
+
+  return (
+    <article className={`plannerCard ${order.planning_status}`} aria-label={`${order.id} planner card`}>
+      <div className="plannerCardHeader">
+        <button className="workOrderCellButton workOrderIdButton" type="button" onClick={() => onOpen(order.id)}>
+          {order.id}
+        </button>
+        <div>
+          <strong>{order.title}</strong>
+          <small>{order.equipment_id} · Priority {order.priority}</small>
+        </div>
+        <span className={`planningBadge ${order.planning_status}`}>{planningStatusLabels[order.planning_status]}</span>
+      </div>
+      <div className="plannerFieldGrid">
+        <label>
+          Technician
+          <select value={assignedTo} onChange={(event) => setAssignedTo(event.target.value)}>
+            {technicianOptions.map((technician) => (
+              <option value={technician.display_name} key={`${order.id}-${technician.id}`}>
+                {technician.display_name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Start
+          <input
+            aria-label={`Planned start ${order.id}`}
+            type="datetime-local"
+            value={plannedStart}
+            onChange={(event) => setPlannedStart(event.target.value)}
+          />
+        </label>
+        <label>
+          End
+          <input
+            aria-label={`Planned end ${order.id}`}
+            type="datetime-local"
+            value={plannedEnd}
+            onChange={(event) => setPlannedEnd(event.target.value)}
+          />
+        </label>
+        <label>
+          Materials
+          <select
+            aria-label={`Material readiness ${order.id}`}
+            value={materialReadiness}
+            onChange={(event) => setMaterialReadiness(event.target.value as MaterialReadiness)}
+          >
+            {materialReadinessOptions.map((option) => (
+              <option value={option} key={option}>{materialReadinessLabels[option]}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <label className="plannerWideField">
+        Outage window
+        <input value={outageWindow} onChange={(event) => setOutageWindow(event.target.value)} />
+      </label>
+      <label className="plannerWideField">
+        Dispatch notes
+        <textarea value={dispatchNotes} onChange={(event) => setDispatchNotes(event.target.value)} />
+      </label>
+      <div className="plannerActions">
+        <button className="outlineButton" type="button" onClick={savePlan}>
+          Save plan
+        </button>
+        <button
+          className="textButton"
+          type="button"
+          disabled={Boolean(dispatchBlockedReason)}
+          onClick={() => onDispatch(order.id)}
+        >
+          <Truck size={16} />
+          Dispatch
+        </button>
+      </div>
+      {dispatchBlockedReason && <p className="plannerHint">{dispatchBlockedReason}</p>}
+    </article>
+  )
+}
+
+function TechnicianScheduleQueue({
+  onOpen,
+  selectedWorkOrderId,
+  workOrders,
+}: {
+  onOpen: (workOrderId: string) => void
+  selectedWorkOrderId: string
+  workOrders: WorkOrder[]
+}) {
+  const assignedWorkOrders = workOrders
+    .filter((order) => !['COMP', 'CLOSE'].includes(order.status))
+    .sort((left, right) => planningSortValue(left) - planningSortValue(right))
+
+  return (
+    <section className="technicianScheduleQueue" aria-label="Technician assigned schedule">
+      <div className="sectionHeader">
+        <CalendarClock size={18} />
+        <div>
+          <h2>Assigned Schedule</h2>
+          <small>{assignedWorkOrders.length} open assigned job{assignedWorkOrders.length === 1 ? '' : 's'}</small>
+        </div>
+      </div>
+      <div className="technicianScheduleList">
+        {assignedWorkOrders.map((order) => (
+          <button
+            className={`technicianScheduleItem ${order.id === selectedWorkOrderId ? 'selected' : ''}`}
+            key={order.id}
+            type="button"
+            onClick={() => onOpen(order.id)}
+          >
+            <span>{order.id}</span>
+            <strong>{order.title}</strong>
+            <small>{planningStatusLabels[order.planning_status]} · {formatPlanningWindow(order)}</small>
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function dispatchBlockReason(order: WorkOrder, plannedStart: string, materialReadiness: MaterialReadiness) {
+  if (order.planning_status === 'dispatched') return 'Already dispatched to the assigned technician.'
+  if (order.status === 'WAPPR') return 'Approval is required before dispatch.'
+  if (!plannedStart) return 'Set a planned start before dispatch.'
+  if (materialReadiness === 'blocked') return 'Resolve blocked materials before dispatch.'
+  return ''
+}
+
+function toDateTimeLocal(value?: string | null) {
+  return value ? value.slice(0, 16) : ''
+}
+
+function formatPlanningWindow(order: WorkOrder) {
+  if (!order.planned_start) return 'Not scheduled'
+  if (!order.planned_end) return formatDate(order.planned_start)
+  return `${formatDate(order.planned_start)} to ${formatDate(order.planned_end)}`
+}
+
+function planningSortValue(order: WorkOrder) {
+  if (order.planned_start) {
+    const parsed = new Date(order.planned_start).getTime()
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return new Date(order.due_date).getTime()
 }
