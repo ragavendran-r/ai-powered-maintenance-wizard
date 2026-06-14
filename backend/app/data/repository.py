@@ -200,6 +200,8 @@ def create_work_order(payload: dict[str, Any]) -> dict[str, Any]:
                 planned_end,
                 outage_window,
                 material_readiness,
+                material_blocker_status,
+                material_blocker_note,
                 dispatch_notes,
                 dispatched_at,
                 recommended_action,
@@ -208,7 +210,7 @@ def create_work_order(payload: dict[str, Any]) -> dict[str, Any]:
                 completion_summary,
                 completed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 work_order_id,
@@ -229,6 +231,8 @@ def create_work_order(payload: dict[str, Any]) -> dict[str, Any]:
                 payload.get("planned_end"),
                 payload.get("outage_window"),
                 payload.get("material_readiness") or "unknown",
+                payload.get("material_blocker_status") or "not_required",
+                payload.get("material_blocker_note"),
                 payload.get("dispatch_notes"),
                 payload.get("dispatched_at"),
                 payload.get("recommended_action") or "Inspect asset and update work log with findings.",
@@ -238,6 +242,7 @@ def create_work_order(payload: dict[str, Any]) -> dict[str, Any]:
                 payload.get("completed_at"),
             ),
         )
+        _replace_work_order_spares(connection, work_order_id, payload.get("spare_reservations", []))
         connection.execute(
             """
             INSERT INTO work_order_logs (work_order_id, author, entry_type, content)
@@ -274,6 +279,8 @@ def update_work_order(work_order_id: str, payload: dict[str, Any]) -> Optional[d
         "planned_end",
         "outage_window",
         "material_readiness",
+        "material_blocker_status",
+        "material_blocker_note",
         "dispatch_notes",
         "dispatched_at",
         "recommended_action",
@@ -289,6 +296,7 @@ def update_work_order(work_order_id: str, payload: dict[str, Any]) -> Optional[d
     if payload.get("follow_up_required") is not None:
         fields.append("follow_up_required = ?")
         values.append(1 if payload["follow_up_required"] else 0)
+    spare_reservations = payload.get("spare_reservations")
     dispatch_requested = payload.get("planning_status") == "dispatched"
     start_requested = payload.get("status") == "INPRG"
     if (dispatch_requested or start_requested) and not existing.get("dispatched_at"):
@@ -298,12 +306,16 @@ def update_work_order(work_order_id: str, payload: dict[str, Any]) -> Optional[d
         values.append("dispatched")
     if payload.get("status") in {"COMP", "CLOSE"} and not existing.get("completed_at"):
         fields.append("completed_at = CURRENT_TIMESTAMP")
-    if not fields:
+    if not fields and spare_reservations is None:
         return existing
-    fields.append("updated_at = CURRENT_TIMESTAMP")
-    values.append(work_order_id)
     with connect() as connection:
-        connection.execute(f"UPDATE work_orders SET {', '.join(fields)} WHERE id = ?", values)
+        if fields:
+            fields.append("updated_at = CURRENT_TIMESTAMP")
+            values.append(work_order_id)
+            connection.execute(f"UPDATE work_orders SET {', '.join(fields)} WHERE id = ?", values)
+        if spare_reservations is not None:
+            _replace_work_order_spares(connection, work_order_id, spare_reservations)
+            connection.execute("UPDATE work_orders SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (work_order_id,))
     return get_work_order(work_order_id)
 
 
@@ -326,6 +338,57 @@ def add_work_order_log(work_order_id: str, payload: dict[str, Any]) -> Optional[
         )
         connection.execute("UPDATE work_orders SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (work_order_id,))
     return get_work_order(work_order_id)
+
+
+def _replace_work_order_spares(
+    connection: sqlite3.Connection,
+    work_order_id: str,
+    reservations: list[dict[str, Any]],
+) -> None:
+    connection.execute("DELETE FROM work_order_spares WHERE work_order_id = ?", (work_order_id,))
+    if not reservations:
+        return
+    connection.executemany(
+        """
+        INSERT INTO work_order_spares (
+            work_order_id,
+            spare_id,
+            spare_name,
+            required_qty,
+            reserved_qty,
+            available_qty,
+            reorder_requested,
+            procurement_status,
+            procurement_lead_time_days,
+            expected_available_date,
+            substitute_spare_id,
+            substitute_name,
+            blocker_status,
+            blocker_note
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                work_order_id,
+                reservation.get("spare_id"),
+                reservation["spare_name"],
+                int(reservation.get("required_qty") or 0),
+                int(reservation.get("reserved_qty") or 0),
+                int(reservation.get("available_qty") or 0),
+                1 if reservation.get("reorder_requested") else 0,
+                reservation.get("procurement_status") or "not_requested",
+                int(reservation.get("procurement_lead_time_days") or 0),
+                reservation.get("expected_available_date"),
+                reservation.get("substitute_spare_id"),
+                reservation.get("substitute_name"),
+                reservation.get("blocker_status") or "not_required",
+                reservation.get("blocker_note"),
+            )
+            for reservation in reservations
+            if str(reservation.get("spare_name", "")).strip()
+        ],
+    )
 
 
 def list_documents(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
@@ -582,6 +645,23 @@ def add_records(payload: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
         "equipment": ["id", "name", "area", "process", "criticality", "status"],
         "alerts": ["id", "equipment_id", "timestamp", "signal", "value", "unit", "threshold", "severity", "message"],
         "spares": ["id", "equipment_id", "name", "available_qty", "lead_time_days", "criticality"],
+        "work_order_spares": [
+            "id",
+            "work_order_id",
+            "spare_id",
+            "spare_name",
+            "required_qty",
+            "reserved_qty",
+            "available_qty",
+            "reorder_requested",
+            "procurement_status",
+            "procurement_lead_time_days",
+            "expected_available_date",
+            "substitute_spare_id",
+            "substitute_name",
+            "blocker_status",
+            "blocker_note",
+        ],
         "sensor_readings": ["id", "equipment_id", "timestamp", "signal", "value", "unit", "threshold"],
         "maintenance_events": ["id", "equipment_id", "date", "issue", "root_cause", "action", "downtime_hours"],
         "work_orders": [
@@ -603,6 +683,8 @@ def add_records(payload: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
             "planned_end",
             "outage_window",
             "material_readiness",
+            "material_blocker_status",
+            "material_blocker_note",
             "dispatch_notes",
             "dispatched_at",
             "recommended_action",
@@ -616,6 +698,16 @@ def add_records(payload: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
         "work_orders": {
             "planning_status": "unscheduled",
             "material_readiness": "unknown",
+            "material_blocker_status": "not_required",
+        },
+        "work_order_spares": {
+            "required_qty": 1,
+            "reserved_qty": 0,
+            "available_qty": 0,
+            "reorder_requested": 0,
+            "procurement_status": "not_requested",
+            "procurement_lead_time_days": 0,
+            "blocker_status": "not_required",
         },
     }
     counts: dict[str, int] = {}
@@ -1952,6 +2044,13 @@ def _decode_learning_model_deployment(row: dict[str, Any]) -> dict[str, Any]:
 def _decode_work_order(row: dict[str, Any], include_logs: bool) -> dict[str, Any]:
     decoded = dict(row)
     decoded["follow_up_required"] = bool(decoded.get("follow_up_required"))
+    decoded["spare_reservations"] = [
+        _decode_work_order_spare(item)
+        for item in _fetch_all(
+            "SELECT * FROM work_order_spares WHERE work_order_id = ? ORDER BY id ASC",
+            (decoded["id"],),
+        )
+    ]
     if include_logs:
         decoded["logs"] = _fetch_all(
             "SELECT * FROM work_order_logs WHERE work_order_id = ? ORDER BY created_at ASC, id ASC",
@@ -1959,6 +2058,12 @@ def _decode_work_order(row: dict[str, Any], include_logs: bool) -> dict[str, Any
         )
     else:
         decoded["logs"] = []
+    return decoded
+
+
+def _decode_work_order_spare(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["reorder_requested"] = bool(decoded.get("reorder_requested"))
     return decoded
 
 

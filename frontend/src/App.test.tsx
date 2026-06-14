@@ -287,6 +287,8 @@ const workOrders = [
     planned_end: '2026-06-12T18:00:00+05:30',
     outage_window: 'Finishing stand load-reduction window',
     material_readiness: 'ready',
+    material_blocker_status: 'reserved',
+    material_blocker_note: 'Bearing inspection kit is staged for the planned window.',
     dispatch_notes: 'Stage vibration tools and confirm bearing spare status.',
     dispatched_at: null,
     recommended_action: 'Reduce load if vibration persists and verify coupling alignment.',
@@ -297,6 +299,25 @@ const workOrders = [
     updated_at: '2026-06-11T11:00:00+05:30',
     completed_at: null,
     logs: [],
+    spare_reservations: [
+      {
+        id: 1,
+        work_order_id: 'WO-8304',
+        spare_id: 'SP-001',
+        spare_name: 'Drive end spherical roller bearing',
+        required_qty: 1,
+        reserved_qty: 1,
+        available_qty: 1,
+        reorder_requested: false,
+        procurement_status: 'not_requested',
+        procurement_lead_time_days: 21,
+        expected_available_date: null,
+        substitute_spare_id: 'SP-002',
+        substitute_name: 'High-temperature coupling grease',
+        blocker_status: 'reserved',
+        blocker_note: 'Reserved for planned inspection window.',
+      },
+    ],
   },
   {
     id: 'WO-8297',
@@ -317,6 +338,8 @@ const workOrders = [
     planned_end: null,
     outage_window: null,
     material_readiness: 'unknown',
+    material_blocker_status: 'not_required',
+    material_blocker_note: null,
     dispatch_notes: null,
     dispatched_at: null,
     recommended_action: 'Plan brake shoe replacement follow-up.',
@@ -327,6 +350,7 @@ const workOrders = [
     updated_at: '2026-06-11T16:35:00+05:30',
     completed_at: '2026-06-11T16:35:00+05:30',
     logs: [],
+    spare_reservations: [],
   },
   {
     id: 'WO-8275',
@@ -347,6 +371,8 @@ const workOrders = [
     planned_end: '2026-06-14T10:00:00+05:30',
     outage_window: 'Morning roll-gap correction maintenance window',
     material_readiness: 'pending',
+    material_blocker_status: 'waiting_procurement',
+    material_blocker_note: 'Pump cartridge is on order; seal kit can support limited inspection.',
     dispatch_notes: 'Pump cartridge assembly reservation is pending.',
     dispatched_at: null,
     recommended_action: 'Reserve pump cartridge assembly and inspect cooler differential temperature.',
@@ -357,6 +383,25 @@ const workOrders = [
     updated_at: '2026-06-11T10:30:00+05:30',
     completed_at: null,
     logs: [],
+    spare_reservations: [
+      {
+        id: 2,
+        work_order_id: 'WO-8275',
+        spare_id: 'SP-004',
+        spare_name: 'Hydraulic pump cartridge assembly',
+        required_qty: 1,
+        reserved_qty: 0,
+        available_qty: 0,
+        reorder_requested: true,
+        procurement_status: 'ordered',
+        procurement_lead_time_days: 18,
+        expected_available_date: '2026-07-02',
+        substitute_spare_id: 'SP-005',
+        substitute_name: 'Servo valve seal kit',
+        blocker_status: 'waiting_procurement',
+        blocker_note: 'Procurement lead time blocks pump replacement.',
+      },
+    ],
   },
 ]
 
@@ -1392,6 +1437,9 @@ beforeEach(() => {
                 planned_end: null,
                 outage_window: null,
                 material_readiness: 'unknown',
+                material_blocker_status: 'not_required',
+                material_blocker_note: null,
+                spare_reservations: [],
                 dispatch_notes: null,
                 dispatched_at: null,
                 ...body,
@@ -1741,6 +1789,9 @@ describe('Maintenance Wizard dashboard', () => {
     expect(within(plannerCard).getByDisplayValue('Maintenance Technician')).toBeInTheDocument()
     expect(within(plannerCard).getByLabelText('Planned start WO-8304')).toHaveAttribute('type', 'datetime-local')
     expect(within(plannerCard).getByLabelText('Planned start WO-8304')).not.toHaveAttribute('placeholder')
+    expect(within(plannerCard).getByLabelText('Spare availability WO-8304')).toBeInTheDocument()
+    expect(within(plannerCard).getByDisplayValue('Drive end spherical roller bearing')).toBeInTheDocument()
+    expect(within(plannerCard).getByLabelText('Material blocker WO-8304')).toHaveValue('reserved')
 
     fireEvent.change(within(plannerCard).getByLabelText('Planned start WO-8304'), {
       target: { value: '2026-06-12T15:00' },
@@ -1748,6 +1799,10 @@ describe('Maintenance Wizard dashboard', () => {
     fireEvent.change(within(plannerCard).getByLabelText('Material readiness WO-8304'), {
       target: { value: 'ready' },
     })
+    fireEvent.change(within(plannerCard).getByLabelText('Procurement status WO-8304 1'), {
+      target: { value: 'ordered' },
+    })
+    fireEvent.click(within(plannerCard).getByLabelText('Reorder requested WO-8304 1'))
     fireEvent.click(within(plannerCard).getByRole('button', { name: 'Save plan' }))
     await screen.findByText('WO-8304 planning saved')
 
@@ -1763,6 +1818,15 @@ describe('Maintenance Wizard dashboard', () => {
       planning_status: 'planned',
       planned_start: '2026-06-12T15:00',
       material_readiness: 'ready',
+      material_blocker_status: 'reserved',
+      spare_reservations: [
+        expect.objectContaining({
+          spare_name: 'Drive end spherical roller bearing',
+          procurement_status: 'ordered',
+          reorder_requested: true,
+          blocker_status: 'reserved',
+        }),
+      ],
     })
 
     fireEvent.click(within(plannerCard).getByRole('button', { name: /dispatch/i }))

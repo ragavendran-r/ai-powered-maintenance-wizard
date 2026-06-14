@@ -778,6 +778,14 @@ export interface LearningSummary {
 export type WorkOrderStatus = 'WAPPR' | 'WMATL' | 'APPR' | 'INPRG' | 'COMP' | 'CLOSE'
 export type WorkOrderPlanningStatus = 'unscheduled' | 'planned' | 'dispatched'
 export type MaterialReadiness = 'unknown' | 'pending' | 'ready' | 'blocked'
+export type MaterialBlockerStatus =
+  | 'not_required'
+  | 'reserved'
+  | 'reorder_requested'
+  | 'waiting_procurement'
+  | 'substitute_available'
+  | 'blocked'
+export type ProcurementStatus = 'not_required' | 'not_requested' | 'requested' | 'ordered' | 'received'
 
 export interface WorkOrderLog {
   id: number
@@ -786,6 +794,24 @@ export interface WorkOrderLog {
   entry_type: string
   content: string
   created_at: string
+}
+
+export interface WorkOrderSpareReservation {
+  id?: number | null
+  work_order_id?: string | null
+  spare_id?: string | null
+  spare_name: string
+  required_qty: number
+  reserved_qty: number
+  available_qty: number
+  reorder_requested: boolean
+  procurement_status: ProcurementStatus
+  procurement_lead_time_days: number
+  expected_available_date?: string | null
+  substitute_spare_id?: string | null
+  substitute_name?: string | null
+  blocker_status: MaterialBlockerStatus
+  blocker_note?: string | null
 }
 
 export interface WorkOrder {
@@ -807,6 +833,8 @@ export interface WorkOrder {
   planned_end?: string | null
   outage_window?: string | null
   material_readiness: MaterialReadiness
+  material_blocker_status: MaterialBlockerStatus
+  material_blocker_note?: string | null
   dispatch_notes?: string | null
   dispatched_at?: string | null
   recommended_action: string
@@ -817,6 +845,7 @@ export interface WorkOrder {
   updated_at: string
   completed_at?: string | null
   logs: WorkOrderLog[]
+  spare_reservations: WorkOrderSpareReservation[]
 }
 
 export interface WorkOrderCreateRequest {
@@ -836,6 +865,9 @@ export interface WorkOrderCreateRequest {
   planned_end?: string | null
   outage_window?: string | null
   material_readiness?: MaterialReadiness
+  material_blocker_status?: MaterialBlockerStatus
+  material_blocker_note?: string | null
+  spare_reservations?: WorkOrderSpareReservation[]
   dispatch_notes?: string | null
   dispatched_at?: string | null
   recommended_action: string

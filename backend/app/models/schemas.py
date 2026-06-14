@@ -8,6 +8,15 @@ RiskLevel = Literal["low", "medium", "high", "critical"]
 WorkOrderStatus = Literal["WAPPR", "WMATL", "APPR", "INPRG", "COMP", "CLOSE"]
 WorkOrderPlanningStatus = Literal["unscheduled", "planned", "dispatched"]
 MaterialReadiness = Literal["unknown", "pending", "ready", "blocked"]
+MaterialBlockerStatus = Literal[
+    "not_required",
+    "reserved",
+    "reorder_requested",
+    "waiting_procurement",
+    "substitute_available",
+    "blocked",
+]
+ProcurementStatus = Literal["not_required", "not_requested", "requested", "ordered", "received"]
 WorkOrderAssistantAudience = Literal["technician", "supervisor"]
 AnomalyContextClass = Literal[
     "requires_investigation",
@@ -158,6 +167,24 @@ class WorkOrderLog(BaseModel):
     created_at: str
 
 
+class WorkOrderSpareReservation(BaseModel):
+    id: Optional[int] = None
+    work_order_id: Optional[str] = None
+    spare_id: Optional[str] = None
+    spare_name: str
+    required_qty: int = Field(default=1, ge=0)
+    reserved_qty: int = Field(default=0, ge=0)
+    available_qty: int = Field(default=0, ge=0)
+    reorder_requested: bool = False
+    procurement_status: ProcurementStatus = "not_requested"
+    procurement_lead_time_days: int = Field(default=0, ge=0)
+    expected_available_date: Optional[str] = None
+    substitute_spare_id: Optional[str] = None
+    substitute_name: Optional[str] = None
+    blocker_status: MaterialBlockerStatus = "not_required"
+    blocker_note: Optional[str] = None
+
+
 class WorkOrder(BaseModel):
     id: str
     equipment_id: str
@@ -177,6 +204,8 @@ class WorkOrder(BaseModel):
     planned_end: Optional[str] = None
     outage_window: Optional[str] = None
     material_readiness: MaterialReadiness = "unknown"
+    material_blocker_status: MaterialBlockerStatus = "not_required"
+    material_blocker_note: Optional[str] = None
     dispatch_notes: Optional[str] = None
     dispatched_at: Optional[str] = None
     recommended_action: str
@@ -187,6 +216,7 @@ class WorkOrder(BaseModel):
     updated_at: str
     completed_at: Optional[str] = None
     logs: list[WorkOrderLog] = []
+    spare_reservations: list[WorkOrderSpareReservation] = []
 
 
 class WorkOrderCreateRequest(BaseModel):
@@ -206,6 +236,9 @@ class WorkOrderCreateRequest(BaseModel):
     planned_end: Optional[str] = None
     outage_window: Optional[str] = None
     material_readiness: MaterialReadiness = "unknown"
+    material_blocker_status: MaterialBlockerStatus = "not_required"
+    material_blocker_note: Optional[str] = None
+    spare_reservations: list[WorkOrderSpareReservation] = []
     dispatch_notes: Optional[str] = None
     dispatched_at: Optional[str] = None
     recommended_action: str = "Inspect asset and update work log with findings."
@@ -224,6 +257,9 @@ class WorkOrderUpdateRequest(BaseModel):
     planned_end: Optional[str] = None
     outage_window: Optional[str] = None
     material_readiness: Optional[MaterialReadiness] = None
+    material_blocker_status: Optional[MaterialBlockerStatus] = None
+    material_blocker_note: Optional[str] = None
+    spare_reservations: Optional[list[WorkOrderSpareReservation]] = None
     dispatch_notes: Optional[str] = None
     dispatched_at: Optional[str] = None
     recommended_action: Optional[str] = None

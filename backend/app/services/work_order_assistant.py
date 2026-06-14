@@ -59,8 +59,16 @@ def technician_assistance(
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")
     summary = health_summary(work_order["equipment_id"])
+    material_lines = _material_context_lines(work_order)
     evidence = retrieve_evidence(
-        " ".join([work_order["title"], work_order["description"], request.observation or ""]),
+        " ".join(
+            [
+                work_order["title"],
+                work_order["description"],
+                request.observation or "",
+                *material_lines,
+            ]
+        ),
         work_order["equipment_id"],
     )
     fallback = _technician_fallback(request, work_order, summary, evidence)
@@ -73,6 +81,8 @@ def technician_assistance(
             f"Recommended action: {work_order['recommended_action']}",
             f"Technician observation: {request.observation or 'No observation yet'}",
             f"Current risk: {summary.risk_level}, health score: {summary.health_score}",
+            "Material plan:",
+            *material_lines,
             "Active alerts:",
             *[f"- {alert.message}" for alert in summary.active_alerts[:4]],
             "Evidence:",
@@ -126,8 +136,16 @@ def stream_technician_assistance(
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")
     summary = health_summary(work_order["equipment_id"])
+    material_lines = _material_context_lines(work_order)
     evidence = retrieve_evidence(
-        " ".join([work_order["title"], work_order["description"], request.observation or ""]),
+        " ".join(
+            [
+                work_order["title"],
+                work_order["description"],
+                request.observation or "",
+                *material_lines,
+            ]
+        ),
         work_order["equipment_id"],
     )
     fallback = _technician_fallback(request, work_order, summary, evidence)
@@ -360,6 +378,8 @@ def _technician_text_prompt(request, work_order, equipment, summary, evidence, f
             f"Current risk: {summary.risk_level}, health score: {summary.health_score}",
             f"Suggested problem code from app rules: {fallback.suggested_problem_code}",
             f"Suggested failure class from app rules: {fallback.suggested_failure_class}",
+            "Material plan:",
+            *_material_context_lines(work_order),
             "Active alerts:",
             *[f"- {alert.message}" for alert in summary.active_alerts[:4]],
             "Evidence:",
@@ -377,6 +397,8 @@ def _supervisor_text_prompt(request, work_orders, selected, fallback) -> str:
             _work_order_line(selected) if selected else "None selected",
             "Queue work orders:",
             *[_work_order_line(item) for item in work_orders[:8]],
+            "Material blockers:",
+            *[_material_summary_line(item) for item in work_orders if item.get("material_blocker_status") not in {None, "not_required", "reserved"}][:6],
             "Current app-identified follow-up actions:",
             *[f"- {item}" for item in fallback.follow_up_actions[:5]],
             "Current app-identified risks:",
@@ -475,6 +497,17 @@ def _technician_fallback(request, work_order, summary, evidence) -> TechnicianAs
     ]
     if evidence:
         recommendations.insert(0, f"Reference {evidence[0].title} while executing the task.")
+    material_blocker = _material_blocker_sentence(work_order)
+    if material_blocker:
+        directions.insert(0, material_blocker)
+        recommendations.append("Do not start intrusive replacement work until the planner-reserved spare or approved substitute is available.")
+    substitute_names = [
+        item.get("substitute_name")
+        for item in work_order.get("spare_reservations", [])
+        if item.get("substitute_name")
+    ]
+    if substitute_names:
+        recommendations.append(f"Planner listed substitute option: {substitute_names[0]}. Confirm it matches the task scope before use.")
     completion_summary = (
         request.observation.strip()
         if request.observation
@@ -502,6 +535,20 @@ def _supervisor_fallback(request, work_orders, selected) -> SupervisorAssistantR
     target = selected or (work_orders[0] if work_orders else None)
     follow_ups = [item for item in work_orders if item.get("follow_up_required")]
     overdue_or_urgent = [item for item in work_orders if item["priority"] == 1 and item["status"] not in {"COMP", "CLOSE"}]
+    material_blockers = [
+        item
+        for item in work_orders
+        if item.get("material_blocker_status") in {"blocked", "waiting_procurement", "reorder_requested"}
+        and item["status"] not in {"COMP", "CLOSE"}
+    ]
+    material_risks = [
+        f"{item['id']} material blocker: {item.get('material_blocker_note') or item.get('material_blocker_status')}."
+        for item in material_blockers[:3]
+    ]
+    priority_risks = [
+        f"{item['id']} is priority {item['priority']} and still {item['status']}."
+        for item in overdue_or_urgent[:4]
+    ]
     draft = None
     if target and target.get("follow_up_required"):
         draft = WorkOrderCreateRequest(
@@ -526,10 +573,7 @@ def _supervisor_fallback(request, work_orders, selected) -> SupervisorAssistantR
             f"Review {item['id']} with {item['assigned_to']}: {item['recommended_action']}"
             for item in follow_ups[:4]
         ] or ["No follow-up work orders are currently flagged."],
-        risks=[
-            f"{item['id']} is priority {item['priority']} and still {item['status']}."
-            for item in overdue_or_urgent[:4]
-        ] or ["No open priority-1 work orders found in the current queue."],
+        risks=material_risks + priority_risks or ["No open priority-1 work orders found in the current queue."],
         draft_work_order=draft,
         referenced_work_orders=[item["id"] for item in work_orders[:6]],
         used_live_provider=False,
@@ -542,6 +586,43 @@ def _work_order_line(work_order) -> str:
         return ""
     return (
         f"{work_order['id']} asset={work_order['equipment_id']} status={work_order['status']} "
-        f"priority={work_order['priority']} follow_up={work_order['follow_up_required']} "
+        f"priority={work_order['priority']} material={work_order.get('material_readiness')} "
+        f"blocker={work_order.get('material_blocker_status')} follow_up={work_order['follow_up_required']} "
         f"title={work_order['title']}"
     )
+
+
+def _material_context_lines(work_order) -> list[str]:
+    lines = [
+        f"- Readiness: {work_order.get('material_readiness', 'unknown')}; blocker: {work_order.get('material_blocker_status', 'not_required')}",
+    ]
+    if work_order.get("material_blocker_note"):
+        lines.append(f"- Blocker note: {work_order['material_blocker_note']}")
+    for reservation in work_order.get("spare_reservations", [])[:4]:
+        reorder = "reorder requested" if reservation.get("reorder_requested") else "no reorder request"
+        expected = reservation.get("expected_available_date") or "not scheduled"
+        substitute = f"; substitute: {reservation['substitute_name']}" if reservation.get("substitute_name") else ""
+        lines.append(
+            "- "
+            f"{reservation['spare_name']}: required {reservation.get('required_qty', 0)}, "
+            f"reserved {reservation.get('reserved_qty', 0)}, available {reservation.get('available_qty', 0)}, "
+            f"{reorder}, procurement {reservation.get('procurement_status', 'not_requested')}, "
+            f"lead time {reservation.get('procurement_lead_time_days', 0)} days, expected {expected}, "
+            f"row blocker {reservation.get('blocker_status', 'not_required')}{substitute}"
+        )
+    return lines
+
+
+def _material_summary_line(work_order) -> str:
+    return (
+        f"- {work_order['id']}: {work_order.get('material_blocker_status')} - "
+        f"{work_order.get('material_blocker_note') or 'No blocker note supplied'}"
+    )
+
+
+def _material_blocker_sentence(work_order) -> str:
+    blocker_status = work_order.get("material_blocker_status")
+    if blocker_status not in {"blocked", "waiting_procurement", "reorder_requested", "substitute_available"}:
+        return ""
+    note = work_order.get("material_blocker_note") or blocker_status.replace("_", " ")
+    return f"Material status: {note}"

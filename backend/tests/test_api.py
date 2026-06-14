@@ -83,7 +83,7 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "15"
+    assert status["schema_version"] == "16"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["asset_profiles"] == 5
     assert status["counts"]["asset_metric_snapshots"] == 15
@@ -97,6 +97,8 @@ def test_database_status_reports_seeded_tables():
     assert "maintenance_labels" in status["counts"]
     assert "streaming_messages" in status["counts"]
     assert "work_orders" in status["counts"]
+    assert "work_order_spares" in status["counts"]
+    assert status["counts"]["work_order_spares"] >= 4
     assert "work_order_logs" in status["counts"]
     assert status["counts"]["users"] == 8
     assert "learning_interactions" in status["counts"]
@@ -366,6 +368,10 @@ def test_work_orders_are_seeded_and_filter_by_asset():
     assert any(item["id"] == "WO-8304" for item in payload)
     assert all(item["equipment_id"] == "RM-DRIVE-01" for item in payload)
     assert payload[0]["logs"] == []
+    drive_order = next(item for item in payload if item["id"] == "WO-8304")
+    assert drive_order["material_blocker_status"] == "blocked"
+    assert drive_order["spare_reservations"][0]["spare_name"] == "Drive end spherical roller bearing"
+    assert drive_order["spare_reservations"][0]["reorder_requested"] is True
 
 
 def test_technician_sees_only_assigned_work_orders():
@@ -420,6 +426,25 @@ def test_planner_can_schedule_and_dispatch_approved_work_order():
             "planned_end": "2026-06-13T10:00:00+05:30",
             "outage_window": "Blast furnace blower reduced-load window",
             "material_readiness": "ready",
+            "material_blocker_status": "substitute_available",
+            "material_blocker_note": "Actuator is on hand; calibration kit can be used if replacement is deferred.",
+            "spare_reservations": [
+                {
+                    "spare_id": "SP-003",
+                    "spare_name": "Blower inlet guide vane actuator",
+                    "required_qty": 1,
+                    "reserved_qty": 1,
+                    "available_qty": 1,
+                    "reorder_requested": False,
+                    "procurement_status": "not_requested",
+                    "procurement_lead_time_days": 12,
+                    "expected_available_date": None,
+                    "substitute_spare_id": None,
+                    "substitute_name": "Actuator calibration kit",
+                    "blocker_status": "substitute_available",
+                    "blocker_note": "Use calibration kit before consuming the actuator.",
+                }
+            ],
             "dispatch_notes": "Carry actuator calibration kit and compare feedback trend.",
         },
         headers=headers,
@@ -431,6 +456,10 @@ def test_planner_can_schedule_and_dispatch_approved_work_order():
     assert planned["assigned_to"] == "Maintenance Technician"
     assert planned["planned_start"] == "2026-06-13T08:00:00+05:30"
     assert planned["material_readiness"] == "ready"
+    assert planned["material_blocker_status"] == "substitute_available"
+    assert planned["spare_reservations"][0]["spare_name"] == "Blower inlet guide vane actuator"
+    assert planned["spare_reservations"][0]["reserved_qty"] == 1
+    assert planned["spare_reservations"][0]["substitute_name"] == "Actuator calibration kit"
 
     dispatch_response = client.patch(
         "/api/work-orders/WO-8311",
@@ -461,6 +490,14 @@ def test_dispatch_requires_approval_schedule_and_unblocked_materials():
     assert waiting_response.json()["detail"] == "Approve work order before dispatch"
     assert blocked_response.status_code == 400
     assert blocked_response.json()["detail"] == "Resolve blocked materials before dispatch"
+
+    procurement_response = client.patch(
+        "/api/work-orders/WO-8275",
+        json={"planning_status": "dispatched", "material_readiness": "pending"},
+        headers=headers,
+    )
+    assert procurement_response.status_code == 400
+    assert procurement_response.json()["detail"] == "Resolve material blocker before dispatch"
 
 
 def test_technician_cannot_modify_planning_fields():
@@ -616,6 +653,8 @@ def test_technician_assistant_suggests_problem_code_from_observation():
     assert payload["work_order_id"] == "WO-8304"
     assert payload["suggested_problem_code"] in {"LWTQCONNECT", "INSUL"}
     assert payload["live_directions"]
+    assert any("Material status" in item for item in payload["live_directions"])
+    assert any("substitute" in item.lower() for item in payload["recommendations"])
     assert payload["completion_summary"]
     assert payload["evidence"]
 
@@ -951,6 +990,7 @@ def test_neo_chat_returns_dashboard_table_for_read_roles():
     assert "Neo" in payload["answer"] or payload["answer"]
     assert payload["table"]["title"] == "Work Orders"
     assert "Work order" in payload["table"]["columns"]
+    assert "Material" in payload["table"]["columns"]
     assert payload["table"]["rows"]
     assert payload["used_live_provider"] is False
     assert payload["provider"] == "deterministic"
