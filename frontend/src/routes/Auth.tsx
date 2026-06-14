@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
 import { Database, LogIn, LogOut, ShieldAlert } from 'lucide-react'
 import type { AuthUser } from '../services/api'
+import { applicationTitle } from '../appModel'
 
 export function AuthLoadingRoute() {
   return (
@@ -8,7 +9,7 @@ export function AuthLoadingRoute() {
       <section className="loginPanel">
         <div className="sectionHeader">
           <ShieldAlert size={20} />
-          <h1>Maintenance Wizard</h1>
+          <h1>{applicationTitle}</h1>
         </div>
         <p className="emptyState">Checking session...</p>
       </section>
@@ -36,7 +37,7 @@ export function LoginRoute({
       <form className="loginPanel" onSubmit={onLogin}>
         <div className="sectionHeader">
           <ShieldAlert size={20} />
-          <h1>Maintenance Wizard</h1>
+          <h1>{applicationTitle}</h1>
         </div>
         <p className="eyebrow">Steel Plant Maintenance</p>
         <label className="field">
@@ -70,7 +71,7 @@ export function ApiOnlyRoute({
       <header className="topBar">
         <div>
           <p className="eyebrow">Steel Plant Maintenance</p>
-          <h1>Maintenance Wizard</h1>
+          <h1>{applicationTitle}</h1>
         </div>
         <button className="logoutButton" onClick={onLogout}>
           <LogOut size={16} />

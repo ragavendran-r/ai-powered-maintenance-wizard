@@ -46,6 +46,7 @@ import {
 } from './services/api'
 import { getUserPermissions } from './permissions'
 import {
+  applicationTitle,
   assetSectionsByTab,
   diagnosisAssistantName,
   fallbackWorkOrders,
@@ -2194,7 +2195,7 @@ export function App() {
       <header className="topBar">
         <div>
           <p className="eyebrow">Steel Plant Maintenance</p>
-          <h1>Maintenance Wizard</h1>
+          <h1>{applicationTitle}</h1>
         </div>
         <div className="statusCluster">
           <div className="userPill">

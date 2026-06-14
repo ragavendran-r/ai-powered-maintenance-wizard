@@ -1720,7 +1720,7 @@ afterEach(() => {
   api.onUnauthorized(null)
 })
 
-describe('Maintenance Wizard dashboard', () => {
+describe('Intelligent Maintenance Wizard dashboard', () => {
   it('renders dashboard metrics, anomalies, and selected asset details', async () => {
     render(<App />)
     await signIn()
@@ -2015,7 +2015,7 @@ describe('Maintenance Wizard dashboard', () => {
     })
   })
 
-  it('hides role-specific work order assistants from admin users', async () => {
+  it('hides non-applicable work order assistant panels from admin users', async () => {
     render(<App />)
     await signIn()
 
@@ -2025,10 +2025,10 @@ describe('Maintenance Wizard dashboard', () => {
     const rightPane = screen.getByLabelText('Work order right pane')
     expect(screen.getByText('Work Order 8304')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
-    const assistantUnavailable = within(centerPane).getByText('Neo is available to technician and supervisor accounts.')
     const workOrdersHeading = screen.getByRole('heading', { name: 'Assigned and follow-up work' })
-    expect(assistantUnavailable).toBeInTheDocument()
-    expect(Boolean(assistantUnavailable.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(workOrdersHeading).toBeInTheDocument()
+    expect(within(centerPane).queryByText('Neo is available to technician and supervisor accounts.')).not.toBeInTheDocument()
+    expect(within(centerPane).queryByText('Select a work order to use the assistant.')).not.toBeInTheDocument()
     expect(within(rightPane).queryByText('Neo is available to technician and supervisor accounts.')).not.toBeInTheDocument()
 
     expect(screen.queryByLabelText('Assign WO-8297')).not.toBeInTheDocument()
