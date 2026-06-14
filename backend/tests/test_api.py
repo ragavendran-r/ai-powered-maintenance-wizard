@@ -920,7 +920,7 @@ def test_technician_assistant_streams_sse_response():
     assert forbidden_response.status_code == 403
 
 
-def test_technician_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
+def test_technician_assistant_stream_uses_stream_llm_timeout(monkeypatch):
     import app.services.work_order_assistant as assistant_module
     from app.services.llm import LLMTextResponse
 
@@ -947,7 +947,7 @@ def test_technician_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
         assert response.status_code == 200
         body = "".join(response.iter_text())
 
-    assert captured["timeout_seconds"] == 15.0
+    assert captured["timeout_seconds"] == 60.0
     assert "Technician name: Vinoth" in captured["prompt"]
     assert "Address the technician by this name; do not address them by role." in captured["prompt"]
     assert "address them by name and not by role" in captured["system_prompt"]
@@ -1089,7 +1089,7 @@ def test_supervisor_assistant_uses_apology_for_off_topic_query_without_llm():
     assert "supervisor review only" not in body
 
 
-def test_supervisor_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
+def test_supervisor_assistant_stream_uses_stream_llm_timeout(monkeypatch):
     import app.services.work_order_assistant as assistant_module
     from app.services.llm import LLMTextResponse
 
@@ -1116,7 +1116,7 @@ def test_supervisor_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
         assert response.status_code == 200
         body = "".join(response.iter_text())
 
-    assert captured["timeout_seconds"] == 15.0
+    assert captured["timeout_seconds"] == 60.0
     assert "Supervisor name: Dhruv" in captured["prompt"]
     assert "address them by name and not by role" in captured["system_prompt"]
     assert "Neo supervisor bounded review" in body

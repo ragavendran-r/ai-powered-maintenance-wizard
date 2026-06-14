@@ -88,7 +88,7 @@ import { LearningReviewRoute } from './routes/LearningReview'
 import { RcaWorkspace } from './routes/RcaWorkspace'
 import { UsersRoute } from './routes/Users'
 
-const WORK_EXECUTION_NEO_TIMEOUT_MS = 15_000
+const WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS = 60_000
 
 function isAbortError(error: unknown) {
   return Boolean(error && typeof error === 'object' && 'name' in error && error.name === 'AbortError')
@@ -1698,7 +1698,7 @@ export function App() {
     setTechnicianLoading(true)
     setTechnicianStreaming(false)
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-    const timeoutMs = WORK_EXECUTION_NEO_TIMEOUT_MS
+    const timeoutMs = WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS
     let firstTokenReceived = false
     let timeoutId = controller
       ? window.setTimeout(() => controller.abort(), timeoutMs)
@@ -1930,7 +1930,7 @@ export function App() {
     setSupervisorLoading(true)
     setSupervisorStreaming(false)
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-    const timeoutMs = WORK_EXECUTION_NEO_TIMEOUT_MS
+    const timeoutMs = WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS
     let firstTokenReceived = false
     let timeoutId = controller
       ? window.setTimeout(() => controller.abort(), timeoutMs)
@@ -2055,7 +2055,7 @@ export function App() {
     setSupervisorLoading(true)
     setSupervisorStreaming(false)
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-    const timeoutMs = WORK_EXECUTION_NEO_TIMEOUT_MS
+    const timeoutMs = WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS
     let firstTokenReceived = false
     let timeoutId = controller
       ? window.setTimeout(() => controller.abort(), timeoutMs)

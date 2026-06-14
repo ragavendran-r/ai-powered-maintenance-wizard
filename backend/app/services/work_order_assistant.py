@@ -202,7 +202,7 @@ def stream_technician_assistance(
             provider=fallback_provider,
         ),
         max_tokens=_technician_stream_max_tokens(request),
-        timeout_seconds=get_settings().llm_timeout_seconds,
+        timeout_seconds=get_settings().llm_stream_timeout_seconds,
     ):
         provider = chunk.provider
         used_live_provider = chunk.used_live_provider
@@ -328,7 +328,7 @@ def stream_supervisor_assistance(
             provider=fallback_provider,
         ),
         max_tokens=WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS,
-        timeout_seconds=get_settings().llm_timeout_seconds,
+        timeout_seconds=get_settings().llm_stream_timeout_seconds,
     ):
         provider = chunk.provider
         used_live_provider = chunk.used_live_provider

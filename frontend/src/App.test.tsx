@@ -2158,7 +2158,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     )
   })
 
-  it('falls back when technician initial context does not receive an LLM token within 15 seconds', async () => {
+  it('keeps waiting for technician initial context past 15 seconds while the stream is still pending', async () => {
     assistantResponseDelayMs = 20_000
     vi.useFakeTimers()
     render(<App />)
@@ -2185,12 +2185,19 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(8_100)
     })
+    const transcript = screen.getByLabelText('Neo technician chat')
     expect(
-      within(screen.getByLabelText('Neo technician chat')).getByText(/could not get a live LLM response within 15 seconds/),
-    ).toBeInTheDocument()
+      within(transcript).queryByText(/could not get a live LLM response within \d+ seconds/),
+    ).not.toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+      await Promise.resolve()
+    })
+    expect(transcript.textContent).toContain('Vinoth, WO-8304')
   })
 
-  it('falls back when a submitted technician query receives no LLM token within 15 seconds', async () => {
+  it('keeps waiting for a submitted technician query past 15 seconds while the stream is still pending', async () => {
     render(<App />)
     await signIn('technician@plant.local')
 
@@ -2210,7 +2217,38 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     })
 
     const transcript = screen.getByLabelText('Neo technician chat')
-    expect(within(transcript).getByText(/could not get a live LLM response within 15 seconds/)).toBeInTheDocument()
+    expect(within(transcript).queryByText(/could not get a live LLM response within \d+ seconds/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_100)
+      await Promise.resolve()
+    })
+
+    expect(transcript.textContent).toContain('Neo recommends verifying torque')
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled()
+  })
+
+  it('falls back when a submitted technician query receives no LLM token within the stream timeout', async () => {
+    render(<App />)
+    await signIn('technician@plant.local')
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
+    expect(await within(screen.getByLabelText('Neo technician chat')).findByText(/approved and ready for technician execution/)).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    assistantResponseDelayMs = 70_000
+    fireEvent.change(screen.getByLabelText('Technician observation'), {
+      target: { value: 'Connections 3 and 5 were loose.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_100)
+    })
+
+    const transcript = screen.getByLabelText('Neo technician chat')
+    expect(within(transcript).getByText(/could not get a live LLM response within 60 seconds/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled()
   })
 
