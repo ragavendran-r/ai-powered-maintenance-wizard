@@ -88,11 +88,10 @@ import { LearningReviewRoute } from './routes/LearningReview'
 import { RcaWorkspace } from './routes/RcaWorkspace'
 import { UsersRoute } from './routes/Users'
 
-const TECHNICIAN_INITIAL_CONTEXT_TIMEOUT_MS = 90_000
-const TECHNICIAN_ASSISTANT_TIMEOUT_MS = 120_000
+const WORK_EXECUTION_NEO_TIMEOUT_MS = 15_000
 
 function isAbortError(error: unknown) {
-  return error instanceof Error && error.name === 'AbortError'
+  return Boolean(error && typeof error === 'object' && 'name' in error && error.name === 'AbortError')
 }
 
 function navigationIcon(icon: NavigationIcon) {
@@ -132,6 +131,82 @@ function technicianInitialContextPrompt(workOrder: WorkOrder) {
     'Summarize the immediate technician context from the work order, material plan, asset evidence, and approved learning notes.',
     'Ask for the next observation only if field execution is allowed.',
   ].join(' ')
+}
+
+function supervisorQueueNameForPrompt(prompt: string) {
+  const lowered = prompt.toLowerCase()
+  if (['approval', 'approve', 'waiting approval', 'waiting for approval', 'pending approval', 'wappr'].some((term) => lowered.includes(term))) {
+    return 'waiting_approval'
+  }
+  if (['material', 'blocked', 'procurement', 'spare'].some((term) => lowered.includes(term))) {
+    return 'material_blockers'
+  }
+  if (['follow-up', 'follow up', 'followup'].some((term) => lowered.includes(term))) {
+    return 'follow_up'
+  }
+  return 'all_work'
+}
+
+function supervisorInitialContextPrompt(workOrder: WorkOrder | undefined, workOrders: WorkOrder[]) {
+  const approvals = workOrders.filter((item) => item.status === 'WAPPR')
+  const followUps = workOrders.filter((item) => item.follow_up_required)
+  const materialBlocked = workOrders.filter((item) => (
+    ['blocked', 'waiting_procurement', 'reorder_requested'].includes(item.material_blocker_status)
+    && !['COMP', 'CLOSE'].includes(item.status)
+  ))
+  const selected = workOrder
+    ? `Selected work order: ${workOrder.id} ${workOrder.title}, status ${workOrderStatusLabel(workOrder.status)}.`
+    : 'No selected work order.'
+  return [
+    'Open supervisor Work Execution initial context.',
+    selected,
+    `Queue context: ${approvals.length} waiting approval, ${followUps.length} follow-up, ${materialBlocked.length} material-blocked.`,
+    'Write the initial supervisor welcome/context from this work execution queue.',
+  ].join(' ')
+}
+
+function supervisorContextKey(workOrder: WorkOrder | undefined, workOrders: WorkOrder[], userId?: string) {
+  const approvals = workOrders.filter((item) => item.status === 'WAPPR').map((item) => item.id).join('|')
+  const followUps = workOrders.filter((item) => item.follow_up_required).map((item) => item.id).join('|')
+  const materialBlocked = workOrders
+    .filter((item) => ['blocked', 'waiting_procurement', 'reorder_requested'].includes(item.material_blocker_status))
+    .map((item) => item.id)
+    .join('|')
+  return [userId ?? 'anonymous', workOrder?.id ?? 'none', approvals, followUps, materialBlocked].join('::')
+}
+
+function technicianTimeoutFallbackResponse(workOrder: WorkOrder, _prompt: string, timeoutMs: number): TechnicianAssistantResponse {
+  const nextPrompt = `Sorry, ${technicianAssistantName} could not get a live LLM response within ${Math.round(timeoutMs / 1000)} seconds. Please retry after confirming the LLM service is responding.`
+  return {
+    work_order_id: workOrder.id,
+    next_prompt: nextPrompt,
+    live_directions: [],
+    recommendations: [],
+    safety_reminders: [],
+    suggested_problem_code: workOrder.problem_code,
+    suggested_failure_class: workOrder.failure_class,
+    completion_summary: `${workOrder.id} Neo query timed out before a live LLM answer was received.`,
+    evidence: [],
+    used_live_provider: false,
+    provider: 'timeout_fallback',
+  }
+}
+
+function supervisorTimeoutFallbackResponse(
+  _prompt: string,
+  workOrders: WorkOrder[],
+  _selectedWorkOrder: WorkOrder | undefined,
+  timeoutMs: number,
+): SupervisorAssistantResponse {
+  return {
+    summary: `Sorry, ${supervisorAssistantName} could not get a live LLM response within ${Math.round(timeoutMs / 1000)} seconds. Please retry after confirming the LLM service is responding.`,
+    follow_up_actions: [],
+    risks: [],
+    draft_work_order: null,
+    referenced_work_orders: workOrders.map((item) => item.id),
+    used_live_provider: false,
+    provider: 'timeout_fallback',
+  }
 }
 
 function technicianContextKey(workOrder: WorkOrder, userId?: string) {
@@ -203,22 +278,12 @@ export function App() {
   const [supervisorLoading, setSupervisorLoading] = useState(false)
   const [supervisorStreaming, setSupervisorStreaming] = useState(false)
   const [supervisorChat, setSupervisorChat] = useState<AssistantTurn[]>([
-    {
-      id: 'supervisor-welcome',
-      role: 'assistant',
-      content: `I’m ${supervisorAssistantName}. Ask me to summarize follow-ups, risks, or draft a follow-up work order.`,
-    },
   ])
   const [neoQuestion, setNeoQuestion] = useState('Show work orders needing follow-up')
   const [neoTable, setNeoTable] = useState<NeoTable | null>(null)
   const [neoLoading, setNeoLoading] = useState(false)
   const [neoStreaming, setNeoStreaming] = useState(false)
   const [neoMessages, setNeoMessages] = useState<AssistantTurn[]>([
-    {
-      id: 'neo-welcome',
-      role: 'assistant',
-      content: 'I’m Neo. I’m checking your role-aware attention queue.',
-    },
   ])
   const [apiState, setApiState] = useState<'connected' | 'fallback'>('fallback')
   const [ingestSourceType, setIngestSourceType] = useState('sop')
@@ -274,6 +339,7 @@ export function App() {
   const morpheusProgressRef = useRef<HTMLDivElement | null>(null)
   const reliabilityStreamRef = useRef<HTMLDivElement | null>(null)
   const technicianInitialContextRef = useRef('')
+  const supervisorInitialContextRef = useRef('')
 
   const currentUser = session?.user
   const {
@@ -330,6 +396,7 @@ export function App() {
     setTechnicianLoading(false)
     setTechnicianStreaming(false)
     technicianInitialContextRef.current = ''
+    supervisorInitialContextRef.current = ''
     setNeoTable(null)
     setLearningSummary(null)
     setLearningExamples([])
@@ -381,11 +448,7 @@ export function App() {
   }
 
   async function handleLogout() {
-    try {
-      await api.logout()
-    } catch {
-      // Client-side token removal is still valid if the logout request fails.
-    }
+    void api.logout().catch(() => undefined)
     clearSession('')
   }
 
@@ -816,27 +879,74 @@ export function App() {
   }
 
   function loadNeoWelcome() {
-    setNeoMessages([
-      {
-        id: 'neo-welcome-loading',
-        role: 'assistant',
-        content: 'I’m Neo. I’m checking your role-aware attention queue.',
-      },
-    ])
+    setNeoMessages([])
     setNeoTable(null)
+    setNeoLoading(true)
+    setNeoStreaming(false)
+    let messageId: string | null = null
+    let streamedContent = ''
+    let streamProvider = 'openai'
+    let streamUsedLiveProvider = true
+    const ensureMessage = () => {
+      if (messageId) return messageId
+      messageId = 'neo-welcome'
+      setNeoStreaming(true)
+      setNeoMessages([
+        {
+          id: messageId,
+          role: 'assistant',
+          content: '',
+          provider: streamProvider,
+          usedLiveProvider: streamUsedLiveProvider,
+        },
+      ])
+      return messageId
+    }
+    const updateMessage = (updates: Partial<AssistantTurn>) => {
+      if (!messageId) return
+      setNeoMessages((turns) => turns.map((turn) => (turn.id === messageId ? { ...turn, ...updates } : turn)))
+    }
     return api
-      .neoWelcome()
-      .then((response) => {
-        setNeoTable(response.table ?? null)
-        setNeoMessages([
-          {
-            id: 'neo-welcome',
-            role: 'assistant',
-            content: response.answer,
-            provider: response.provider,
-            usedLiveProvider: response.used_live_provider,
-          },
-        ])
+      .neoWelcomeStream((event) => {
+        if (event.type === 'meta') {
+          streamProvider = event.provider
+          streamUsedLiveProvider = event.used_live_provider
+          updateMessage({ provider: streamProvider, usedLiveProvider: streamUsedLiveProvider })
+          return
+        }
+        if (event.type === 'token') {
+          ensureMessage()
+          streamedContent += event.content
+          updateMessage({
+            content: streamedContent,
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+          })
+          return
+        }
+        if (event.type === 'done') {
+          setNeoTable(event.response.table ?? null)
+          if (event.response.action) void refreshAfterNeoAction(event.response.action)
+          if (messageId) {
+            updateMessage({
+              content: streamedContent || event.response.answer,
+              provider: event.response.provider,
+              usedLiveProvider: event.response.used_live_provider,
+            })
+          } else {
+            setNeoMessages([
+              {
+                id: 'neo-welcome',
+                role: 'assistant',
+                content: event.response.answer,
+                provider: event.response.provider,
+                usedLiveProvider: event.response.used_live_provider,
+              },
+            ])
+          }
+        }
+      })
+      .then(() => {
         setApiState('connected')
       })
       .catch(() => {
@@ -844,12 +954,16 @@ export function App() {
           {
             id: 'neo-welcome-fallback',
             role: 'assistant',
-            content: 'I’m Neo. I could not load your role-aware attention queue yet. Ask me for assigned work, assets, work orders, or users and I’ll use your role permissions.',
+            content: 'Sorry, Neo could not get a live LLM response right now. Please retry after confirming the LLM service is responding.',
             provider: 'fallback',
             usedLiveProvider: false,
           },
         ])
         setApiState('fallback')
+      })
+      .finally(() => {
+        setNeoLoading(false)
+        setNeoStreaming(false)
       })
   }
 
@@ -1023,6 +1137,10 @@ export function App() {
     () => selectedWorkOrder ? technicianContextKey(selectedWorkOrder, currentUser?.id) : '',
     [currentUser?.id, selectedWorkOrder],
   )
+  const selectedSupervisorContextKey = useMemo(
+    () => supervisorContextKey(selectedWorkOrder, workOrders, currentUser?.id),
+    [currentUser?.id, selectedWorkOrder, workOrders],
+  )
   const assetWorkOrders = useMemo(
     () => assetDetail?.work_orders ?? workOrders.filter((item) => item.equipment_id === selectedEquipment),
     [assetDetail, selectedEquipment, workOrders],
@@ -1050,6 +1168,21 @@ export function App() {
     selectedTechnicianContextKey,
     selectedWorkOrder,
     session,
+  ])
+
+  useEffect(() => {
+    if (!authReady || !session || activeView !== 'workExecution' || !canSupervisorAssistant) return
+    if (!selectedSupervisorContextKey || supervisorInitialContextRef.current === selectedSupervisorContextKey) return
+    supervisorInitialContextRef.current = selectedSupervisorContextKey
+    void loadSupervisorInitialContext(selectedWorkOrder, selectedSupervisorContextKey)
+  }, [
+    activeView,
+    authReady,
+    canSupervisorAssistant,
+    selectedSupervisorContextKey,
+    selectedWorkOrder?.id,
+    session,
+    workOrders,
   ])
 
   function openAsset(equipmentId: string) {
@@ -1218,7 +1351,7 @@ export function App() {
       setNeoQuestion('')
     } catch {
       const fallback: NeoChatResponse = {
-        answer: 'Neo could not reach the assistant service. Try assets, work orders, or users again after the backend reconnects.',
+        answer: 'Sorry, Neo could not get a live LLM response right now. Please retry after confirming the LLM service is responding.',
         table: null,
         used_live_provider: false,
         provider: 'fallback',
@@ -1561,12 +1694,17 @@ export function App() {
     setTechnicianLoading(true)
     setTechnicianStreaming(false)
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-    const timeoutMs = requestedStep === 'initial_context'
-      ? TECHNICIAN_INITIAL_CONTEXT_TIMEOUT_MS
-      : TECHNICIAN_ASSISTANT_TIMEOUT_MS
-    const timeoutId = controller
+    const timeoutMs = WORK_EXECUTION_NEO_TIMEOUT_MS
+    let firstTokenReceived = false
+    let timeoutId = controller
       ? window.setTimeout(() => controller.abort(), timeoutMs)
       : undefined
+    const clearFirstTokenTimeout = () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId)
+        timeoutId = undefined
+      }
+    }
     try {
       let assistantMessageId: string | null = null
       let streamedContent = ''
@@ -1606,6 +1744,10 @@ export function App() {
         }
         if (event.type === 'token') {
           ensureAssistantMessage()
+          if (!firstTokenReceived) {
+            firstTokenReceived = true
+            clearFirstTokenTimeout()
+          }
           streamedContent += event.content
           updateAssistantMessage({
             content: streamedContent,
@@ -1639,8 +1781,26 @@ export function App() {
       return true
     } catch (error) {
       if (isCurrentContext()) {
+        const timeoutResponse = isAbortError(error)
+          ? technicianTimeoutFallbackResponse(workOrder, prompt, timeoutMs)
+          : {
+              ...technicianTimeoutFallbackResponse(workOrder, prompt, timeoutMs),
+              next_prompt: `Sorry, ${technicianAssistantName} could not reach the LLM service. Please retry after confirming the LLM service is responding.`,
+              provider: 'fallback',
+            }
+        setTechnicianAssistant(timeoutResponse)
+        setTechnicianChat((turns) => [
+          ...turns,
+          {
+            id: assistantTurnId('technician-timeout-fallback'),
+            role: 'assistant',
+            content: timeoutResponse.next_prompt,
+            provider: timeoutResponse.provider,
+            usedLiveProvider: timeoutResponse.used_live_provider,
+          },
+        ])
         const message = isAbortError(error)
-          ? `${technicianAssistantName} did not receive a complete LLM response for ${workOrder.id} within ${Math.round(timeoutMs / 1000)} seconds`
+          ? `${technicianAssistantName} timed out after ${Math.round(timeoutMs / 1000)} seconds and showed an LLM unavailable notice`
           : `${technicianAssistantName} could not reach the LLM service for ${workOrder.id}`
         setWorkOrderMessage(message)
       }
@@ -1759,6 +1919,128 @@ export function App() {
     }
   }
 
+  async function loadSupervisorInitialContext(workOrder: WorkOrder | undefined, contextKey: string) {
+    const isCurrentContext = () => supervisorInitialContextRef.current === contextKey
+    setSupervisorAssistant(null)
+    setSupervisorChat([])
+    setSupervisorLoading(true)
+    setSupervisorStreaming(false)
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+    const timeoutMs = WORK_EXECUTION_NEO_TIMEOUT_MS
+    let firstTokenReceived = false
+    let timeoutId = controller
+      ? window.setTimeout(() => controller.abort(), timeoutMs)
+      : undefined
+    const clearFirstTokenTimeout = () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId)
+        timeoutId = undefined
+      }
+    }
+    try {
+      let assistantMessageId: string | null = null
+      let streamedContent = ''
+      let streamProvider = 'openai'
+      let streamUsedLiveProvider = true
+      const ensureAssistantMessage = () => {
+        if (!isCurrentContext()) return null
+        if (assistantMessageId) return assistantMessageId
+        assistantMessageId = assistantTurnId('supervisor-assistant')
+        setSupervisorStreaming(true)
+        setSupervisorChat((turns) => [
+          ...turns,
+          {
+            id: assistantMessageId ?? assistantTurnId('supervisor-assistant'),
+            role: 'assistant',
+            content: '',
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+          },
+        ])
+        return assistantMessageId
+      }
+      const updateAssistantMessage = (updates: Partial<AssistantTurn>) => {
+        if (!assistantMessageId || !isCurrentContext()) return
+        setSupervisorChat((turns) => turns.map((turn) => (turn.id === assistantMessageId ? { ...turn, ...updates } : turn)))
+      }
+      await api.supervisorAssistStream({
+        work_order_id: workOrder?.id,
+        queue_name: 'all_work',
+        question: supervisorInitialContextPrompt(workOrder, workOrders),
+      }, (event) => {
+        if (!isCurrentContext()) return
+        if (event.type === 'meta') {
+          streamProvider = event.provider
+          streamUsedLiveProvider = event.used_live_provider
+          updateAssistantMessage({ provider: streamProvider, usedLiveProvider: streamUsedLiveProvider })
+          return
+        }
+        if (event.type === 'token') {
+          ensureAssistantMessage()
+          if (!firstTokenReceived) {
+            firstTokenReceived = true
+            clearFirstTokenTimeout()
+          }
+          streamedContent += event.content
+          updateAssistantMessage({
+            content: streamedContent,
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+          })
+          return
+        }
+        if (event.type === 'done') {
+          setSupervisorAssistant(event.response)
+          if (assistantMessageId) {
+            updateAssistantMessage({
+              content: streamedContent || event.response.summary,
+              provider: event.response.provider,
+              usedLiveProvider: event.response.used_live_provider,
+            })
+          } else {
+            setSupervisorChat((turns) => [
+              ...turns,
+              {
+                id: assistantTurnId('supervisor-assistant'),
+                role: 'assistant',
+                content: event.response.summary,
+                provider: event.response.provider,
+                usedLiveProvider: event.response.used_live_provider,
+              },
+            ])
+          }
+        }
+      }, controller?.signal)
+    } catch (error) {
+      if (isCurrentContext()) {
+        const fallbackResponse = supervisorTimeoutFallbackResponse('', workOrders, workOrder, timeoutMs)
+        const response = isAbortError(error)
+          ? fallbackResponse
+          : {
+              ...fallbackResponse,
+              summary: `Sorry, ${supervisorAssistantName} could not reach the LLM service. Please retry after confirming the LLM service is responding.`,
+              provider: 'fallback',
+            }
+        setSupervisorAssistant(response)
+        setSupervisorChat([
+          {
+            id: assistantTurnId('supervisor-fallback'),
+            role: 'assistant',
+            content: response.summary,
+            provider: response.provider,
+            usedLiveProvider: response.used_live_provider,
+          },
+        ])
+      }
+    } finally {
+      if (timeoutId) window.clearTimeout(timeoutId)
+      if (isCurrentContext()) {
+        setSupervisorLoading(false)
+        setSupervisorStreaming(false)
+      }
+    }
+  }
+
   async function runSupervisorAssistant(workOrderId?: string) {
     if (supervisorLoading) return
     const prompt = supervisorQuestion.trim() || 'Review follow-up status.'
@@ -1768,6 +2050,18 @@ export function App() {
     ])
     setSupervisorLoading(true)
     setSupervisorStreaming(false)
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+    const timeoutMs = WORK_EXECUTION_NEO_TIMEOUT_MS
+    let firstTokenReceived = false
+    let timeoutId = controller
+      ? window.setTimeout(() => controller.abort(), timeoutMs)
+      : undefined
+    const clearFirstTokenTimeout = () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId)
+        timeoutId = undefined
+      }
+    }
     try {
       let assistantMessageId: string | null = null
       let streamedContent = ''
@@ -1775,7 +2069,7 @@ export function App() {
       let streamUsedLiveProvider = true
       const payload = {
         work_order_id: workOrderId,
-        queue_name: 'follow_up',
+        queue_name: supervisorQueueNameForPrompt(prompt),
         question: prompt,
       }
 
@@ -1810,6 +2104,10 @@ export function App() {
         }
         if (event.type === 'token') {
           ensureAssistantMessage()
+          if (!firstTokenReceived) {
+            firstTokenReceived = true
+            clearFirstTokenTimeout()
+          }
           streamedContent += event.content
           updateAssistantMessage({
             content: streamedContent,
@@ -1839,33 +2137,36 @@ export function App() {
             ])
           }
         }
-      })
+      }, controller?.signal)
       setSupervisorQuestion('')
       setWorkOrderMessage(`${supervisorAssistantName} reviewed follow-ups`)
-    } catch {
-      const fallbackResponse: SupervisorAssistantResponse = {
-        summary: `${workOrders.length} work order(s) reviewed locally.`,
-        follow_up_actions: workOrders.filter((item) => item.follow_up_required).map((item) => `${item.id}: ${item.recommended_action}`),
-        risks: workOrders
-          .filter((item) => item.priority === 1 && !['COMP', 'CLOSE'].includes(item.status))
-          .map((item) => `${item.id} remains ${workOrderStatusLabel(item.status)}`),
-        draft_work_order: null,
-        referenced_work_orders: workOrders.map((item) => item.id),
-        used_live_provider: false,
-        provider: 'fallback',
-      }
-      setSupervisorAssistant(fallbackResponse)
+    } catch (error) {
+      const fallbackResponse = supervisorTimeoutFallbackResponse(prompt, workOrders, selectedWorkOrder, timeoutMs)
+      const response = isAbortError(error)
+        ? fallbackResponse
+        : {
+            ...fallbackResponse,
+            summary: `Sorry, ${supervisorAssistantName} could not reach the LLM service. Please retry after confirming the LLM service is responding.`,
+            provider: 'fallback',
+          }
+      setSupervisorAssistant(response)
       setSupervisorChat((turns) => [
         ...turns,
         {
           id: assistantTurnId('supervisor-fallback'),
           role: 'assistant',
-          content: fallbackResponse.summary,
-          provider: fallbackResponse.provider,
-          usedLiveProvider: fallbackResponse.used_live_provider,
+          content: response.summary,
+          provider: response.provider,
+          usedLiveProvider: response.used_live_provider,
         },
       ])
+      setWorkOrderMessage(
+        isAbortError(error)
+          ? `${supervisorAssistantName} timed out after ${Math.round(timeoutMs / 1000)} seconds and showed an LLM unavailable notice`
+          : `${supervisorAssistantName} could not reach the LLM service`,
+      )
     } finally {
+      if (timeoutId) window.clearTimeout(timeoutId)
       setSupervisorLoading(false)
       setSupervisorStreaming(false)
     }

@@ -15,7 +15,7 @@ import type {
   WorkOrderSpareReservation,
 } from '../services/api'
 import type { AssistantTurn } from '../assistantContent'
-import { AssistantMessageContent, FormattedAssistantContent } from '../assistantContent'
+import { AssistantMessageContent, FormattedAssistantContent, usePinnedStreamScroll } from '../assistantContent'
 import {
   supervisorAssistantName,
   technicianAssistantName,
@@ -112,8 +112,19 @@ export function WorkOrdersRoute({
   const selectedEffectiveStatus = selectedWorkOrder ? effectiveWorkOrderStatus(selectedWorkOrder) : undefined
   const selectedEffectiveStatusDetail = selectedEffectiveStatus ? workOrderStatusDetail(selectedEffectiveStatus) : undefined
   const [technicianWaitingLong, setTechnicianWaitingLong] = useState(false)
+  const technicianTranscriptRef = useRef<HTMLDivElement | null>(null)
+  const supervisorTranscriptRef = useRef<HTMLDivElement | null>(null)
   const isPlanningMode = mode === 'planning'
   const canUseAssistant = canTechnicianAssistant || canSupervisorAssistant
+
+  usePinnedStreamScroll(
+    technicianTranscriptRef,
+    `${technicianChat.length}:${technicianChat[technicianChat.length - 1]?.content.length ?? 0}:${technicianLoading}:${technicianStreaming}`,
+  )
+  usePinnedStreamScroll(
+    supervisorTranscriptRef,
+    `${supervisorChat.length}:${supervisorChat[supervisorChat.length - 1]?.content.length ?? 0}:${supervisorLoading}:${supervisorStreaming}`,
+  )
 
   useEffect(() => {
     if (!technicianLoading || technicianStreaming) {
@@ -179,7 +190,7 @@ export function WorkOrdersRoute({
                           <small>Technician AI assistant with shared LLM configuration</small>
                         </div>
                       </div>
-                      <div className="assistantTranscript" aria-label={`${technicianAssistantName} technician chat`}>
+                      <div ref={technicianTranscriptRef} className="assistantTranscript" aria-label={`${technicianAssistantName} technician chat`}>
                         {technicianChat.map((turn) => (
                           <div className={`chatBubble ${turn.role}`} key={turn.id}>
                             <span>{turn.role === 'assistant' ? technicianAssistantName : 'You'}</span>
@@ -225,7 +236,7 @@ export function WorkOrdersRoute({
                           <small>Supervisor AI assistant with shared LLM configuration</small>
                         </div>
                       </div>
-                      <div className="assistantTranscript" aria-label={`${supervisorAssistantName} supervisor chat`}>
+                      <div ref={supervisorTranscriptRef} className="assistantTranscript" aria-label={`${supervisorAssistantName} supervisor chat`}>
                         {supervisorChat.map((turn) => (
                           <div className={`chatBubble ${turn.role}`} key={turn.id}>
                             <span>{turn.role === 'assistant' ? supervisorAssistantName : 'You'}</span>

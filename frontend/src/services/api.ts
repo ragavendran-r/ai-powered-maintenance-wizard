@@ -1185,6 +1185,14 @@ export const api = {
       body: JSON.stringify({ equipment_id: equipmentId, message }),
     }),
   neoWelcome: () => request<NeoChatResponse>('/api/neo/welcome'),
+  neoWelcomeStream: (onEvent: (event: NeoStreamEvent) => void) =>
+    streamRequest<NeoStreamEvent>(
+      '/api/neo/welcome/stream',
+      {
+        method: 'GET',
+      },
+      onEvent,
+    ),
   neoChat: (message: string, history: { role: 'user' | 'assistant'; content: string }[] = []) =>
     request<NeoChatResponse>('/api/neo/chat', {
       method: 'POST',
@@ -1501,12 +1509,14 @@ export const api = {
   supervisorAssistStream: (
     payload: { work_order_id?: string; queue_name?: string; question?: string },
     onEvent: (event: AssistantStreamEvent<SupervisorAssistantResponse>) => void,
+    signal?: AbortSignal,
   ) =>
     streamRequest<AssistantStreamEvent<SupervisorAssistantResponse>>(
       '/api/work-orders/supervisor-assist/stream',
       {
         method: 'POST',
         body: JSON.stringify(payload),
+        signal,
       },
       onEvent,
     ),

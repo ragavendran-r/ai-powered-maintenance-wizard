@@ -119,7 +119,7 @@ from app.services.learning import (
 )
 from app.services.vector_store import vector_store_status
 from app.services.maintenance_labeling import label_feedback, label_maintenance_event, label_maintenance_history, stored_labels
-from app.services.neo_assistant import neo_assistance, neo_welcome, stream_neo_assistance
+from app.services.neo_assistant import neo_assistance, neo_welcome, stream_neo_assistance, stream_neo_welcome
 from app.services.pm_plans import PM_PLAN_ROLES
 from app.services.pm_plans import convert_plan_to_work_order as convert_pm_plan_to_work_order
 from app.services.pm_plans import draft_plan as draft_pm_plan
@@ -770,6 +770,22 @@ def neo_role_welcome(current_user: UserPublic = Depends(require_roles(*READ_ROLE
         outcome_status=response.action.status if response.action else None,
     )
     return response
+
+
+@app.get("/api/neo/welcome/stream")
+def neo_role_welcome_stream(current_user: UserPublic = Depends(require_roles(*READ_ROLES))):
+    def events():
+        for event in stream_neo_welcome(current_user):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/neo/chat/stream")

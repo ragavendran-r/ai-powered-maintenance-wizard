@@ -90,6 +90,15 @@ wait_for_url() {
   return 1
 }
 
+load_root_env() {
+  if [[ -f "${ROOT_DIR}/.env" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${ROOT_DIR}/.env"
+    set +a
+  fi
+}
+
 pid_running() {
   local pid_file="$1"
   [[ -f "$pid_file" ]] || return 1
@@ -184,6 +193,7 @@ start_backend() {
   echo "Starting FastAPI backend with STREAMING_ENABLED=true and LEARNING_ASYNC_ENABLED=true"
   (
     cd "$BACKEND_DIR"
+    load_root_env
     env STREAMING_ENABLED=true \
       LEARNING_ASYNC_ENABLED=true \
       NATS_URL="$NATS_URL" \
@@ -208,6 +218,7 @@ start_learning_worker() {
   echo "Starting learning worker with LEARNING_ASYNC_ENABLED=true"
   (
     cd "$BACKEND_DIR"
+    load_root_env
     env LEARNING_ASYNC_ENABLED=true \
       NATS_URL="$NATS_URL" \
       RAG_VECTOR_STORE=qdrant \
