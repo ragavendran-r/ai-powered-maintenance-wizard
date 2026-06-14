@@ -494,6 +494,35 @@ h3 {
   grid-template-columns: 280px minmax(0, 1fr);
 }
 
+.roleContextBar {
+  align-items: stretch;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius);
+  display: grid;
+  gap: 1px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.roleContextBar > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.roleContextBar > div:first-child {
+  background: var(--color-brand-soft);
+}
+
+.roleContextBar strong {
+  color: var(--color-text-heading);
+}
+
+.roleContextBar span {
+  color: var(--color-text-muted);
+}
+
 .leftNav,
 .detailPanel {
   background: var(--panel-bg);
@@ -522,10 +551,28 @@ h3 {
   color: var(--color-text-heading);
   display: flex;
   gap: 8px;
-  min-height: 42px;
-  padding: 0 10px;
+  min-height: 54px;
+  padding: 8px 10px;
   text-align: left;
   width: 100%;
+}
+
+.navButton > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.navButton strong,
+.navButton small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.navButton small {
+  color: var(--color-text-muted);
+  font-weight: 600;
 }
 
 .navButton:not(:disabled):hover,
@@ -540,6 +587,10 @@ h3 {
   border-color: var(--color-brand-border-strong);
   color: var(--color-brand-text);
   font-weight: 700;
+}
+
+.navButton.selected small {
+  color: var(--color-brand-text);
 }
 
 .navFavorites {
@@ -573,6 +624,16 @@ h3 {
   min-height: 38px;
   padding: 0 10px;
   width: 100%;
+}
+
+.adminRouteStack {
+  display: grid;
+  gap: 16px;
+}
+
+.pageIntroPanel {
+  display: grid;
+  gap: 8px;
 }
 
 .sectionHeader {

@@ -1615,6 +1615,7 @@ describe('Maintenance Wizard dashboard', () => {
   it('renders dashboard metrics, anomalies, and selected asset details', async () => {
     render(<App />)
     await signIn()
+    fireEvent.click(await screen.findByRole('button', { name: 'Command Center' }))
 
     expect(screen.queryByText('API connected')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Assets at risk' })).toBeInTheDocument()
@@ -1654,8 +1655,8 @@ describe('Maintenance Wizard dashboard', () => {
     expect(await screen.findByRole('heading', { name: 'Performance metrics' })).toBeInTheDocument()
     expect(screen.getByText('Signal time')).toBeInTheDocument()
     expect(screen.getByText('Value (mm/s)')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Ingestion' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Users' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Command Center' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Admin' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Ingestion file')).not.toBeInTheDocument()
   })
 
@@ -1676,7 +1677,11 @@ describe('Maintenance Wizard dashboard', () => {
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) => url.toString().includes('/api/assets/RM-DRIVE-01?sections=summary')),
     ).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: 'Reliability' }))
+    const assetReliabilityTab = screen
+      .getAllByRole('button', { name: 'Reliability' })
+      .find((button) => button.className === '')
+    if (!assetReliabilityTab) throw new Error('Missing asset Reliability tab')
+    fireEvent.click(assetReliabilityTab)
     expect(await screen.findByText('MTBF')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Smith' })).toBeInTheDocument()
     expect(screen.getByText('Predictive failure assistant')).toBeInTheDocument()
@@ -1731,6 +1736,7 @@ describe('Maintenance Wizard dashboard', () => {
   it('loads a role-aware Neo welcome with technician immediate work guidance', async () => {
     render(<App />)
     await signIn('technician@plant.local')
+    fireEvent.click(await screen.findByRole('button', { name: 'Command Center' }))
 
     const transcript = screen.getByLabelText('Neo chat transcript')
     expect(await within(transcript).findByText(/Immediate attention: 1 open work order is assigned to you/)).toBeInTheDocument()
@@ -1773,7 +1779,7 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn('technician@plant.local')
 
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
 
     const transcript = screen.getByLabelText('Neo technician chat')
     expect(await within(transcript).findByText(/WO-8304 is waiting for material/)).toBeInTheDocument()
@@ -1798,12 +1804,15 @@ describe('Maintenance Wizard dashboard', () => {
 
   it('shows a slow LLM waiting state while technician initial context is still pending', async () => {
     assistantResponseDelayMs = 20_000
-    render(<App />)
-    await signIn('technician@plant.local')
-    const workOrdersButton = (await screen.findAllByRole('button', { name: 'Work Orders' }))[0]
-
     vi.useFakeTimers()
-    fireEvent.click(workOrdersButton)
+    render(<App />)
+    await act(async () => {})
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'technician@plant.local' } })
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('button', { name: 'Logout' })).toBeInTheDocument()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1)
@@ -1811,7 +1820,7 @@ describe('Maintenance Wizard dashboard', () => {
     expect(within(screen.getByLabelText('Neo technician chat')).getByText(/Thinking/)).toBeInTheDocument()
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(7_000)
+      await vi.advanceTimersByTimeAsync(7_100)
     })
     expect(
       within(screen.getByLabelText('Neo technician chat')).getByText(/Waiting for the LLM response/),
@@ -1828,6 +1837,7 @@ describe('Maintenance Wizard dashboard', () => {
   it('formats Markdown-like Neo responses into readable sections', async () => {
     render(<App />)
     await signIn()
+    fireEvent.click(await screen.findByRole('button', { name: 'Command Center' }))
 
     fireEvent.change(screen.getByLabelText('Ask Neo'), { target: { value: 'Format markdown response' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
@@ -1900,18 +1910,21 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn()
 
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
-    expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
+    expect(await screen.findByText('Assigned and follow-up work')).toBeInTheDocument()
     const centerPane = screen.getByLabelText('Work order center pane')
     const rightPane = screen.getByLabelText('Work order right pane')
     expect(screen.getByText('Work Order 8304')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
     const assistantUnavailable = within(centerPane).getByText('Neo is available to technician and supervisor accounts.')
-    const workOrdersHeading = screen.getByRole('heading', { name: 'WOs with follow up actions' })
+    const workOrdersHeading = screen.getByRole('heading', { name: 'Assigned and follow-up work' })
     expect(assistantUnavailable).toBeInTheDocument()
     expect(Boolean(assistantUnavailable.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(within(rightPane).queryByText('Neo is available to technician and supervisor accounts.')).not.toBeInTheDocument()
 
+    expect(screen.queryByLabelText('Assign WO-8297')).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: 'Planning' }))
+    expect(await screen.findByText('Planning backlog')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approve WO-8297' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve WO-8275' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Approve WO-8297' }))
@@ -1936,7 +1949,7 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn('planner@plant.local')
 
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
+    fireEvent.click(await screen.findByRole('button', { name: 'Planning' }))
     const centerPane = screen.getByLabelText('Work order center pane')
     const dispatchBoard = await within(centerPane).findByLabelText('Maintenance planning and dispatch board')
     expect(within(dispatchBoard).getByRole('heading', { name: 'Planning, Scheduling & Dispatch' })).toBeInTheDocument()
@@ -2008,12 +2021,12 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn('technician@plant.local')
 
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
-    expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
+    expect(await screen.findByText('Assigned and follow-up work')).toBeInTheDocument()
     const centerPane = screen.getByLabelText('Work order center pane')
     const rightPane = screen.getByLabelText('Work order right pane')
     const neoHeading = within(centerPane).getByRole('heading', { name: 'Neo' })
-    const workOrdersHeading = screen.getByRole('heading', { name: 'WOs with follow up actions' })
+    const workOrdersHeading = screen.getByRole('heading', { name: 'Assigned and follow-up work' })
     expect(neoHeading).toBeInTheDocument()
     expect(Boolean(neoHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(within(centerPane).getByText('Technician AI assistant with shared LLM configuration')).toBeInTheDocument()
@@ -2063,17 +2076,17 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn('supervisor@plant.local')
 
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
-    expect(await screen.findByText('WOs with follow up actions')).toBeInTheDocument()
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
+    expect(await screen.findByText('Assigned and follow-up work')).toBeInTheDocument()
     const centerPane = screen.getByLabelText('Work order center pane')
     const rightPane = screen.getByLabelText('Work order right pane')
     const neoHeading = within(centerPane).getByRole('heading', { name: 'Neo' })
-    const workOrdersHeading = screen.getByRole('heading', { name: 'WOs with follow up actions' })
+    const workOrdersHeading = screen.getByRole('heading', { name: 'Assigned and follow-up work' })
     expect(neoHeading).toBeInTheDocument()
     expect(Boolean(neoHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(within(centerPane).getByText('Supervisor AI assistant with shared LLM configuration')).toBeInTheDocument()
     expect(within(rightPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Assign WO-8304')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Assign WO-8304')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approve WO-8297' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve WO-8275' })).not.toBeInTheDocument()
 
@@ -2092,7 +2105,7 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Ingestion' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
     expect(await screen.findByText('IoT Stream')).toBeInTheDocument()
     expect(screen.getByText('MW_IOT')).toBeInTheDocument()
     const file = new File(['Inspect bearing housing when vibration increases.'], 'uploaded_sop.txt', { type: 'text/plain' })
@@ -2112,7 +2125,7 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Ingestion' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
     expect(await screen.findByText('IoT Stream')).toBeInTheDocument()
 
     for (const sample of sampleFiles) {
@@ -2121,7 +2134,7 @@ describe('Maintenance Wizard dashboard', () => {
         throw new Error(`Missing asset button for ${sample.assetName}`)
       }
       fireEvent.click(assetButton)
-      fireEvent.click(screen.getByRole('button', { name: 'Ingestion' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Admin' }))
       fireEvent.change(screen.getByLabelText('Source'), { target: { value: sample.sourceType } })
       const content = readFileSync(sample.path, 'utf8')
       const file = new File([content], sample.fileName, { type: sample.mimeType })
@@ -2146,7 +2159,7 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Ingestion' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
     fireEvent.change(await screen.findByLabelText('Ingestion JSON'), {
       target: {
         value:
@@ -2168,7 +2181,7 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn('reliability@plant.local')
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Learning' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Reliability' }))
 
     expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
     expect(screen.getByText(/Review approved human feedback/)).toBeInTheDocument()
@@ -2270,9 +2283,13 @@ describe('Maintenance Wizard dashboard', () => {
     await signIn('operator@plant.local')
 
     expect(screen.getByText('Shift Operator')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Ingestion' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Users' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Learning' })).not.toBeInTheDocument()
+    const navigation = screen.getByLabelText('Maintenance navigation')
+    expect(within(navigation).getByRole('button', { name: 'Command Center' })).toBeInTheDocument()
+    expect(within(navigation).getByRole('button', { name: 'Assets' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Admin' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reliability' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Planning' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Work Execution' })).not.toBeInTheDocument()
     expect(screen.queryByText('Run Morpheus')).not.toBeInTheDocument()
     expect(screen.queryByText('Engineer Query')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /create work order/i })).not.toBeInTheDocument()
@@ -2288,7 +2305,7 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Users' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
     expect(await screen.findByText('Shift Operator')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new.operator@plant.local' } })
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Operator' } })
@@ -2304,7 +2321,7 @@ describe('Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Users' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
     expect(await screen.findByText('Shift Operator')).toBeInTheDocument()
 
     expect(screen.queryByLabelText('New Password')).not.toBeInTheDocument()

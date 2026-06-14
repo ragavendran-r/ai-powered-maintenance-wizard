@@ -55,6 +55,7 @@ export function WorkOrdersRoute({
   technicianObservation,
   technicianStreaming,
   technicians,
+  mode,
   workOrderMessage,
   workOrders,
 }: {
@@ -85,12 +86,14 @@ export function WorkOrdersRoute({
   technicianObservation: string
   technicianStreaming: boolean
   technicians: AuthUser[]
+  mode: 'execution' | 'planning'
   workOrderMessage: string
   workOrders: WorkOrder[]
 }) {
   const selectedEffectiveStatus = selectedWorkOrder ? effectiveWorkOrderStatus(selectedWorkOrder) : undefined
   const selectedEffectiveStatusDetail = selectedEffectiveStatus ? workOrderStatusDetail(selectedEffectiveStatus) : undefined
   const [technicianWaitingLong, setTechnicianWaitingLong] = useState(false)
+  const isPlanningMode = mode === 'planning'
 
   useEffect(() => {
     if (!technicianLoading || technicianStreaming) {
@@ -104,7 +107,7 @@ export function WorkOrdersRoute({
   return (
     <section className="workOrderLayout">
       <section className="workOrderCenterColumn" aria-label="Work order center pane">
-        {canAssignWorkOrders && (
+        {isPlanningMode && canAssignWorkOrders && (
           <PlannerDispatchBoard
             onDispatch={dispatchWorkOrder}
             onOpen={setSelectedWorkOrderId}
@@ -114,6 +117,7 @@ export function WorkOrdersRoute({
             workOrders={workOrders}
           />
         )}
+        {!isPlanningMode && (
         <section className="detailPanel workOrderAssistantPanel">
           {selectedWorkOrder ? (
             <>
@@ -232,17 +236,18 @@ export function WorkOrdersRoute({
             <p className="emptyState">Select a work order to use the assistant.</p>
           )}
         </section>
+        )}
         <section className="detailPanel workOrderQueuePanel">
           <div className="sectionHeader">
             <Briefcase size={18} />
-            <h2>WOs with follow up actions</h2>
+            <h2>{isPlanningMode ? 'Planning backlog' : 'Assigned and follow-up work'}</h2>
           </div>
           <WorkOrderTable
             workOrders={workOrders}
             onOpen={(id) => setSelectedWorkOrderId(id)}
-            canAssign={canAssignWorkOrders}
+            canAssign={isPlanningMode && canAssignWorkOrders}
             canApprove={canApproveWorkOrders}
-            canStart={canTechnicianAssistant}
+            canStart={!isPlanningMode && canTechnicianAssistant}
             technicians={technicians}
             onAssign={assignWorkOrder}
             onApprove={approveWorkOrder}

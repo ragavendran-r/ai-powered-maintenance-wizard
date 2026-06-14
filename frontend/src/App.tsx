@@ -5,12 +5,12 @@ import {
   AlertTriangle,
   Bot,
   Briefcase,
+  CalendarClock,
   ClipboardList,
   Gauge,
   LogOut,
   ShieldAlert,
   Sparkles,
-  Upload,
   Users,
   Wrench,
 } from 'lucide-react'
@@ -59,6 +59,14 @@ import {
   type AssetTab,
 } from './appModel'
 import {
+  canAccessAppView,
+  homeViewForRole,
+  navigationForRole,
+  navigationItemForView,
+  roleUiProfiles,
+  type NavigationIcon,
+} from './navigation'
+import {
   assistantTurnId,
   scrollStreamToBottom,
   usePinnedStreamScroll,
@@ -80,6 +88,24 @@ const TECHNICIAN_ASSISTANT_TIMEOUT_MS = 120_000
 
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError'
+}
+
+function navigationIcon(icon: NavigationIcon) {
+  switch (icon) {
+    case 'assets':
+      return <Activity size={17} />
+    case 'execution':
+      return <Briefcase size={17} />
+    case 'planning':
+      return <CalendarClock size={17} />
+    case 'reliability':
+      return <Sparkles size={17} />
+    case 'admin':
+      return <Users size={17} />
+    case 'command':
+    default:
+      return <ClipboardList size={17} />
+  }
 }
 
 function technicianInitialContextPrompt(workOrder: WorkOrder) {
@@ -142,7 +168,7 @@ export function App() {
   const [assetReliabilityMessage, setAssetReliabilityMessage] = useState('')
   const [assetReliabilityStreamAsset, setAssetReliabilityStreamAsset] = useState('')
   const [assetMessage, setAssetMessage] = useState('')
-  const [activeView, setActiveView] = useState<AppView>('dashboard')
+  const [activeView, setActiveView] = useState<AppView>('commandCenter')
   const [selectedEquipment, setSelectedEquipment] = useState('RM-DRIVE-01')
   const [assetTab, setAssetTab] = useState<AssetTab>('summary')
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null)
@@ -245,11 +271,17 @@ export function App() {
     canSupervisorAssistant,
     canTechnicianAssistant,
   } = useMemo(() => getUserPermissions(currentUser), [currentUser])
+  const roleProfile = currentUser ? roleUiProfiles[currentUser.role] : null
+  const navigationItems = useMemo(
+    () => currentUser ? navigationForRole(currentUser.role) : [],
+    [currentUser?.role],
+  )
+  const activeNavigationItem = navigationItemForView(activeView)
 
   function clearSession(message = '') {
     api.setSession(null)
     setSession(null)
-    setActiveView('dashboard')
+    setActiveView('commandCenter')
     setWorkOrders(fallbackWorkOrders)
     setAssets([])
     setAssetDetail(null)
@@ -315,7 +347,7 @@ export function App() {
       setSession(nextSession)
       setWorkOrders(fallbackWorkOrdersForUser(result.user))
       setLoginPassword('')
-      setActiveView('dashboard')
+      setActiveView(homeViewForRole(result.user.role))
     } catch {
       setAuthMessage('Invalid email or password')
     }
@@ -770,6 +802,7 @@ export function App() {
         api.setSession(nextSession)
         setSession(nextSession)
         setWorkOrders(fallbackWorkOrdersForUser(user))
+        setActiveView((current) => canAccessAppView(user.role, current) ? current : homeViewForRole(user.role))
       })
       .catch(() => clearSession('Session expired. Sign in again.'))
       .finally(() => setAuthReady(true))
@@ -787,18 +820,20 @@ export function App() {
   }, [authReady, session?.user.id])
 
   useEffect(() => {
-    if (activeView === 'ingestion' && canStreaming) loadStreamingStatus()
-    if (activeView === 'ingestion' && !canIngest) setActiveView('dashboard')
-    if (activeView === 'learning' && !canReviewLearning) setActiveView('dashboard')
-    if (activeView === 'users' && !canAdminUsers) setActiveView('dashboard')
-  }, [activeView, canIngest, canReviewLearning, canStreaming, canAdminUsers])
+    if (!currentUser) return
+    if (!canAccessAppView(currentUser.role, activeView)) {
+      setActiveView(homeViewForRole(currentUser.role))
+      return
+    }
+    if (activeView === 'admin' && canStreaming) loadStreamingStatus()
+  }, [activeView, canStreaming, currentUser?.role])
 
   useEffect(() => {
-    if (activeView === 'users' && canAdminUsers) loadUsers()
+    if (activeView === 'admin' && canAdminUsers) loadUsers()
   }, [activeView, canAdminUsers])
 
   useEffect(() => {
-    if (activeView === 'learning' && canReviewLearning) void loadLearning()
+    if (activeView === 'reliability' && canReviewLearning) void loadLearning()
   }, [activeView, canReviewLearning])
 
   useEffect(() => {
@@ -925,7 +960,7 @@ export function App() {
   }, [dashboard, workOrders])
 
   useEffect(() => {
-    if (!authReady || !session || activeView !== 'workOrders' || !canTechnicianAssistant || !selectedWorkOrder) return
+    if (!authReady || !session || activeView !== 'workExecution' || !canTechnicianAssistant || !selectedWorkOrder) return
     if (!selectedTechnicianContextKey || technicianInitialContextRef.current === selectedTechnicianContextKey) return
     technicianInitialContextRef.current = selectedTechnicianContextKey
     void loadTechnicianInitialContext(selectedWorkOrder, selectedTechnicianContextKey)
@@ -1209,7 +1244,7 @@ export function App() {
       const created = await api.createWorkOrder(draftWorkOrderPayload(source))
       setWorkOrders((items) => [created, ...items.filter((item) => item.id !== created.id)])
       setSelectedWorkOrderId(created.id)
-      setActiveView('workOrders')
+      setActiveView('workExecution')
       setWorkOrderMessage(`Created ${created.id}`)
     } catch {
       setWorkOrderMessage('Work order could not be created')
@@ -1765,11 +1800,11 @@ export function App() {
 
   const openWorkOrderRoute = (workOrderId: string) => {
     setSelectedWorkOrderId(workOrderId)
-    setActiveView('workOrders')
+    setActiveView('workExecution')
   }
 
   const activeRoute =
-    activeView === 'dashboard' ? (
+    activeView === 'commandCenter' ? (
       <DashboardRoute
         approveWorkOrder={approveWorkOrder}
         canApproveWorkOrders={canApproveWorkOrders}
@@ -1843,7 +1878,7 @@ export function App() {
         setFeedbackRootCause={setFeedbackRootCause}
         startWorkOrder={startWorkOrder}
       />
-    ) : activeView === 'workOrders' ? (
+    ) : activeView === 'workExecution' || activeView === 'planning' ? (
       <WorkOrdersRoute
         approveWorkOrder={approveWorkOrder}
         assignWorkOrder={assignWorkOrder}
@@ -1872,28 +1907,11 @@ export function App() {
         technicianObservation={technicianObservation}
         technicianStreaming={technicianStreaming}
         technicians={technicians}
+        mode={activeView === 'planning' ? 'planning' : 'execution'}
         workOrderMessage={workOrderMessage}
         workOrders={workOrders}
       />
-    ) : activeView === 'ingestion' ? (
-      <IngestionRoute
-        ingestJsonPayload={ingestJsonPayload}
-        ingestSelectedFile={ingestSelectedFile}
-        ingestSourceType={ingestSourceType}
-        ingestTitle={ingestTitle}
-        ingestionMessage={ingestionMessage}
-        jsonMode={jsonMode}
-        jsonPayload={jsonPayload}
-        selectedEquipment={selectedEquipment}
-        selectedHealth={selectedHealth}
-        setIngestFile={setIngestFile}
-        setIngestSourceType={setIngestSourceType}
-        setIngestTitle={setIngestTitle}
-        setJsonMode={setJsonMode}
-        setJsonPayload={setJsonPayload}
-        streamingStatus={streamingStatus}
-      />
-    ) : activeView === 'learning' ? (
+    ) : activeView === 'reliability' ? (
       <LearningReviewRoute
         activateSelectedEmbeddingProfile={activateSelectedEmbeddingProfile}
         adapterBaseModel={adapterBaseModel}
@@ -1945,26 +1963,76 @@ export function App() {
         setSelectedEmbeddingProfileId={setSelectedEmbeddingProfileId}
         toggleLearningApproval={toggleLearningApproval}
       />
+    ) : activeView === 'admin' && canAdminUsers ? (
+      <section className="adminRouteStack" aria-label="Admin workspace">
+        <section className="detailPanel pageIntroPanel">
+          <div className="sectionHeader">
+            <Users size={18} />
+            <div>
+              <h2>Admin</h2>
+              <small>Users, ingestion, and system status</small>
+            </div>
+          </div>
+          <p className="emptyState">Admin controls are isolated from every non-admin role.</p>
+        </section>
+        {canIngest && (
+          <IngestionRoute
+            ingestJsonPayload={ingestJsonPayload}
+            ingestSelectedFile={ingestSelectedFile}
+            ingestSourceType={ingestSourceType}
+            ingestTitle={ingestTitle}
+            ingestionMessage={ingestionMessage}
+            jsonMode={jsonMode}
+            jsonPayload={jsonPayload}
+            selectedEquipment={selectedEquipment}
+            selectedHealth={selectedHealth}
+            setIngestFile={setIngestFile}
+            setIngestSourceType={setIngestSourceType}
+            setIngestTitle={setIngestTitle}
+            setJsonMode={setJsonMode}
+            setJsonPayload={setJsonPayload}
+            streamingStatus={streamingStatus}
+          />
+        )}
+        <UsersRoute
+          closeResetPassword={closeResetPassword}
+          createNewUser={createNewUser}
+          newUserEmail={newUserEmail}
+          newUserName={newUserName}
+          newUserPassword={newUserPassword}
+          newUserRole={newUserRole}
+          openResetPassword={openResetPassword}
+          resetPassword={resetPassword}
+          resetPasswordValue={resetPasswordValue}
+          resetUser={resetUser}
+          setNewUserEmail={setNewUserEmail}
+          setNewUserName={setNewUserName}
+          setNewUserPassword={setNewUserPassword}
+          setNewUserRole={setNewUserRole}
+          setResetPasswordValue={setResetPasswordValue}
+          toggleUserActive={toggleUserActive}
+          userMessage={userMessage}
+          users={users}
+        />
+      </section>
     ) : (
-      <UsersRoute
-        closeResetPassword={closeResetPassword}
-        createNewUser={createNewUser}
-        newUserEmail={newUserEmail}
-        newUserName={newUserName}
-        newUserPassword={newUserPassword}
-        newUserRole={newUserRole}
-        openResetPassword={openResetPassword}
-        resetPassword={resetPassword}
-        resetPasswordValue={resetPasswordValue}
-        resetUser={resetUser}
-        setNewUserEmail={setNewUserEmail}
-        setNewUserName={setNewUserName}
-        setNewUserPassword={setNewUserPassword}
-        setNewUserRole={setNewUserRole}
-        setResetPasswordValue={setResetPasswordValue}
-        toggleUserActive={toggleUserActive}
-        userMessage={userMessage}
-        users={users}
+      <DashboardRoute
+        approveWorkOrder={approveWorkOrder}
+        canApproveWorkOrders={canApproveWorkOrders}
+        canTechnicianAssistant={canTechnicianAssistant}
+        dashboard={dashboard}
+        dashboardMetrics={dashboardMetrics}
+        neoLoading={neoLoading}
+        neoMessages={neoMessages}
+        neoQuestion={neoQuestion}
+        neoStreaming={neoStreaming}
+        neoTable={neoTable}
+        neoTranscriptRef={neoTranscriptRef}
+        openWorkOrder={openWorkOrderRoute}
+        sendNeoQuestion={sendNeoQuestion}
+        setNeoQuestion={setNeoQuestion}
+        startWorkOrder={startWorkOrder}
+        workOrders={workOrders}
       />
     )
 
@@ -2015,43 +2083,51 @@ export function App() {
         <Metric icon={<Activity />} label="Assets Tracked" value={dashboard.equipment_count.toString()} />
       </section>
 
-      <section className={`workArea ${activeView !== 'dashboard' || !canDecision ? 'ingestionMode' : ''}`}>
+      {roleProfile && (
+        <section className="roleContextBar" aria-label="Role workspace context">
+          <div>
+            <strong>{roleProfile.focus}</strong>
+            <span>{roleProfile.mission}</span>
+          </div>
+          <div>
+            <strong>{activeNavigationItem.label}</strong>
+            <span>{activeNavigationItem.purpose}</span>
+          </div>
+        </section>
+      )}
+
+      <section className={`workArea ${activeView !== 'commandCenter' || !canDecision ? 'ingestionMode' : ''}`}>
         <aside className="leftNav" aria-label="Maintenance navigation">
           <nav className="primaryNav" aria-label="Primary navigation">
-            <button className={`navButton ${activeView === 'dashboard' ? 'selected' : ''}`} onClick={() => setActiveView('dashboard')}>
-              <ClipboardList size={17} />
-              Dashboard
-            </button>
-            <button className={`navButton ${activeView === 'assets' || activeView === 'asset' ? 'selected' : ''}`} onClick={() => setActiveView('assets')}>
-              <Activity size={17} />
-              Assets
-            </button>
-            <button className={`navButton ${activeView === 'workOrders' ? 'selected' : ''}`} onClick={() => setActiveView('workOrders')}>
-              <Briefcase size={17} />
-              Work Orders
-            </button>
-            {canIngest && (
-              <button className={`navButton ${activeView === 'ingestion' ? 'selected' : ''}`} onClick={() => setActiveView('ingestion')}>
-                <Upload size={17} />
-                Ingestion
-              </button>
-            )}
-            {canReviewLearning && (
-              <button className={`navButton ${activeView === 'learning' ? 'selected' : ''}`} onClick={() => setActiveView('learning')}>
-                <Sparkles size={17} />
-                Learning
-              </button>
-            )}
-            {canAdminUsers && (
-              <button className={`navButton ${activeView === 'users' ? 'selected' : ''}`} onClick={() => setActiveView('users')}>
-                <Users size={17} />
-                Users
-              </button>
-            )}
+            {navigationItems.map((item) => {
+              const selected = item.id === 'assets'
+                ? activeView === 'assets' || activeView === 'asset'
+                : activeView === item.id
+              return (
+                <button
+                  className={`navButton ${selected ? 'selected' : ''}`}
+                  key={item.id}
+                  aria-label={item.label}
+                  onClick={() => setActiveView(item.id)}
+                  title={item.purpose}
+                >
+                  {navigationIcon(item.icon)}
+                  <span>
+                    <strong>{item.label}</strong>
+                    <small>{item.purpose}</small>
+                  </span>
+                </button>
+              )
+            })}
           </nav>
           <section className="navFavorites" aria-label="Favorite shortcuts">
-            <h2>Favorites</h2>
-            <button className="linkButton" onClick={() => setActiveView('workOrders')}>Work Orders</button>
+            <h2>{roleProfile?.focus ?? 'Favorites'}</h2>
+            {currentUser && canAccessAppView(currentUser.role, 'workExecution') && (
+              <button className="linkButton" onClick={() => setActiveView('workExecution')}>Assigned work</button>
+            )}
+            {currentUser && canAccessAppView(currentUser.role, 'planning') && (
+              <button className="linkButton" onClick={() => setActiveView('planning')}>Planning board</button>
+            )}
             <button className="linkButton" onClick={() => openAsset(selectedEquipment)}>Selected Asset</button>
           </section>
           {(canCreateWorkOrders || canSupervisorAssistant) && (
