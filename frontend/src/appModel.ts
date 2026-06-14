@@ -9,7 +9,7 @@ import type {
 
 export const riskRank = { low: 1, medium: 2, high: 3, critical: 4 }
 
-export type AppView = 'dashboard' | 'assets' | 'asset' | 'workOrders' | 'ingestion' | 'learning' | 'users'
+export type AppView = 'commandCenter' | 'assets' | 'asset' | 'workExecution' | 'planning' | 'reliability' | 'admin'
 export type AssetTab = 'summary' | 'maintenance' | 'performance' | 'reliability' | 'documents' | 'workOrders'
 
 export const assetSectionsByTab: Record<AssetTab, AssetDetailSection[]> = {

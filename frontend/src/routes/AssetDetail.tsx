@@ -343,7 +343,7 @@ export function AssetDetailRoute({
         <h1>{assetProfile?.name ?? selectedEquipment}</h1>
         <span>{assetProfile ? `Last updated ${formatDate(assetProfile.last_updated)}` : 'Loading live asset data'}</span>
       </div>
-      <div className="tabRow">
+      <div className="tabRow" aria-label="Asset detail tabs">
         {(['summary', 'maintenance', 'performance', 'reliability', 'documents', 'workOrders'] as AssetTab[]).map((tab) => (
           <button className={assetTab === tab ? 'selected' : ''} onClick={() => setAssetTab(tab)} key={tab}>
             {tab === 'workOrders' ? 'Work Orders' : tab[0].toUpperCase() + tab.slice(1)}
