@@ -511,32 +511,60 @@ def test_technician_cannot_modify_planning_fields():
     assert response.json()["detail"] == "Technicians cannot plan or dispatch work orders"
 
 
-def test_assigned_technician_can_start_approved_or_material_waiting_work_order():
+def test_technician_cannot_start_material_blocked_work_order():
+    technician_headers = auth_headers("technician@plant.local")
+
+    before = repository.get_work_order("WO-8304")
+    assert before["status"] == "WMATL"
+    assert before["material_readiness"] == "blocked"
+
+    response = client.patch(
+        "/api/work-orders/WO-8304",
+        json={"status": "INPRG"},
+        headers=technician_headers,
+    )
+
+    assert response.status_code == 400
+    assert "Resolve material blocker before starting work" in response.json()["detail"]
+    assert repository.get_work_order("WO-8304")["status"] == "WMATL"
+
+
+def test_assigned_technician_can_start_when_material_blocker_is_resolved():
     technician_headers = auth_headers("technician@plant.local")
     admin_headers = auth_headers()
-
-    approved_response = client.patch(
-        "/api/work-orders/WO-8304",
-        json={"status": "INPRG"},
-        headers=technician_headers,
+    spare_reservation = repository.get_work_order("WO-8304")["spare_reservations"][0]
+    spare_reservation.update(
+        {
+            "reserved_qty": 1,
+            "available_qty": 1,
+            "reorder_requested": False,
+            "procurement_status": "received",
+            "expected_available_date": None,
+            "blocker_status": "reserved",
+            "blocker_note": "Bearing reserved for execution.",
+        }
     )
-    assert approved_response.status_code == 200
-    assert approved_response.json()["status"] == "INPRG"
 
-    material_response = client.patch(
+    material_resolved_response = client.patch(
         "/api/work-orders/WO-8304",
-        json={"status": "WMATL"},
+        json={
+            "material_readiness": "ready",
+            "material_blocker_status": "reserved",
+            "material_blocker_note": "Bearing reserved for execution.",
+            "spare_reservations": [spare_reservation],
+        },
         headers=admin_headers,
     )
-    assert material_response.status_code == 200
+    assert material_resolved_response.status_code == 200
+    assert material_resolved_response.json()["status"] == "APPR"
 
-    started_from_material_response = client.patch(
+    started_response = client.patch(
         "/api/work-orders/WO-8304",
         json={"status": "INPRG"},
         headers=technician_headers,
     )
-    assert started_from_material_response.status_code == 200
-    assert started_from_material_response.json()["status"] == "INPRG"
+    assert started_response.status_code == 200
+    assert started_response.json()["status"] == "INPRG"
 
 
 def test_technician_cannot_start_unassigned_work_order():
@@ -1171,7 +1199,7 @@ def test_neo_technician_next_steps_use_assigned_work_order_only():
 
 def test_neo_technician_material_question_does_not_start_blocked_work_order():
     before = repository.get_work_order("WO-8304")
-    assert before["status"] == "APPR"
+    assert before["status"] == "WMATL"
     assert before["material_readiness"] == "blocked"
 
     response = client.post(
@@ -1189,7 +1217,7 @@ def test_neo_technician_material_question_does_not_start_blocked_work_order():
     assert "Drive end spherical roller bearing" in payload["answer"]
     assert "2026-07-03" in payload["answer"]
     assert "cannot be started" in payload["answer"].lower()
-    assert repository.get_work_order("WO-8304")["status"] == "APPR"
+    assert repository.get_work_order("WO-8304")["status"] == "WMATL"
 
 
 def test_neo_blocks_explicit_start_when_material_is_not_ready():
@@ -1205,7 +1233,7 @@ def test_neo_blocks_explicit_start_when_material_is_not_ready():
     assert payload["action"]["type"] == "update_work_order_status"
     assert payload["action"]["status"] == "not_allowed"
     assert "cannot be started" in payload["answer"].lower()
-    assert repository.get_work_order("WO-8304")["status"] == "APPR"
+    assert repository.get_work_order("WO-8304")["status"] == "WMATL"
 
 
 def test_neo_can_create_work_order_for_critical_asset_when_role_allows():

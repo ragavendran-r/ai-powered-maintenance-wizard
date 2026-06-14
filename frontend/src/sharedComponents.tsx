@@ -20,9 +20,12 @@ import type {
 } from './services/api'
 import { formatDate } from './appModel'
 import {
+  effectiveWorkOrderStatus,
   formatTableCell,
+  hasWorkOrderMaterialBlocker,
   workOrderStatusDetail,
   workOrderStatusFlow,
+  workOrderStartBlockReason,
 } from './workOrderStatus'
 
 export function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
@@ -328,24 +331,30 @@ export function TechnicianExecutionCard({
   onStart: (workOrderId: string) => void
   workOrder: WorkOrder
 }) {
-  const statusDetail = workOrderStatusDetail(workOrder.status)
-  const canStart = ['APPR', 'WMATL'].includes(workOrder.status)
-  const canComplete = Boolean(assistant) && !['COMP', 'CLOSE'].includes(workOrder.status)
+  const effectiveStatus = effectiveWorkOrderStatus(workOrder)
+  const statusDetail = workOrderStatusDetail(effectiveStatus)
+  const materialStartBlockReason = workOrderStartBlockReason(workOrder)
+  const canStart = ['APPR', 'WMATL'].includes(effectiveStatus) && !materialStartBlockReason
+  const canComplete = Boolean(assistant) && effectiveStatus === 'INPRG'
   const steps = [
     {
       title: 'Confirm readiness',
-      detail: `${statusDetail.label}: ${statusDetail.description}`,
-      state: ['WAPPR'].includes(workOrder.status) ? 'current' : 'done',
+      detail: materialStartBlockReason ? `Waiting for material: ${materialStartBlockReason}` : `${statusDetail.label}: ${statusDetail.description}`,
+      state: materialStartBlockReason || ['WAPPR'].includes(effectiveStatus) ? 'current' : 'done',
     },
     {
       title: 'Start field execution',
-      detail: canStart ? 'Move this approved or material-ready work order to in progress before executing field work.' : 'Field execution has already moved past the start gate.',
-      state: ['APPR', 'WMATL'].includes(workOrder.status) ? 'current' : ['INPRG', 'COMP', 'CLOSE'].includes(workOrder.status) ? 'done' : 'pending',
+      detail: materialStartBlockReason
+        ? 'Field execution is locked until the material blocker is resolved.'
+        : canStart
+          ? 'Move this approved or material-ready work order to in progress before executing field work.'
+          : 'Field execution has already moved past the start gate.',
+      state: materialStartBlockReason ? 'pending' : ['APPR', 'WMATL'].includes(effectiveStatus) ? 'current' : ['INPRG', 'COMP', 'CLOSE'].includes(effectiveStatus) ? 'done' : 'pending',
     },
     {
       title: 'Capture observations',
       detail: assistant ? assistant.next_prompt : 'Use Neo to record abnormal conditions, measurements, and evidence from the asset.',
-      state: assistant ? 'done' : ['INPRG'].includes(workOrder.status) ? 'current' : 'pending',
+      state: assistant ? 'done' : ['INPRG'].includes(effectiveStatus) ? 'current' : 'pending',
     },
     {
       title: 'Apply guided action',
@@ -355,7 +364,7 @@ export function TechnicianExecutionCard({
     {
       title: 'Submit completion',
       detail: assistant?.completion_summary ?? 'Completion unlocks after Neo provides the problem code, failure class, and summary.',
-      state: ['COMP', 'CLOSE'].includes(workOrder.status) ? 'done' : assistant ? 'current' : 'pending',
+      state: ['COMP', 'CLOSE'].includes(effectiveStatus) ? 'done' : assistant ? 'current' : 'pending',
     },
   ]
 
@@ -369,7 +378,7 @@ export function TechnicianExecutionCard({
         </div>
       </div>
       <div className="executionStatusLine">
-        <StatusBadge status={workOrder.status} />
+        <StatusBadge status={effectiveStatus} />
         <span>{statusDetail.description}</span>
       </div>
       <ol className="executionSteps">
@@ -439,6 +448,7 @@ export function WorkOrderTable({
         {canAssign && !compact && <span>Assigned to</span>}
       </div>
       {workOrders.map((order) => {
+        const effectiveStatus = effectiveWorkOrderStatus(order)
         const technicianOptions = technicians.some((technician) => technician.display_name === order.assigned_to)
           ? technicians
           : [
@@ -452,7 +462,8 @@ export function WorkOrderTable({
               ...technicians,
             ]
         const canApproveOrder = canApprove && order.status === 'WAPPR'
-        const canStartOrder = canStart && ['APPR', 'WMATL'].includes(order.status)
+        const canStartOrder = canStart && ['APPR', 'WMATL'].includes(effectiveStatus) && !hasWorkOrderMaterialBlocker(order)
+        const materialBlockReason = workOrderStartBlockReason(order)
         return (
           <div className="workOrderRow" key={order.id}>
             <button className="workOrderCellButton workOrderIdButton" type="button" onClick={() => onOpen(order.id)}>
@@ -463,8 +474,8 @@ export function WorkOrderTable({
             </button>
             {!compact && <span>{order.recommended_action}</span>}
             <span className="workOrderStatusCell">
-              <StatusBadge status={order.status} />
-              {!compact && <small>{workOrderStatusDetail(order.status).description}</small>}
+              <StatusBadge status={effectiveStatus} />
+              {!compact && <small>{materialBlockReason || workOrderStatusDetail(effectiveStatus).description}</small>}
               {canApproveOrder && (
                 <button
                   aria-label={`Approve ${order.id}`}

@@ -64,7 +64,7 @@ import {
   usePinnedStreamScroll,
   type AssistantTurn,
 } from './assistantContent'
-import { workOrderStatusLabel } from './workOrderStatus'
+import { hasWorkOrderMaterialBlocker, workOrderStartBlockReason, workOrderStatusLabel } from './workOrderStatus'
 import { Metric } from './sharedComponents'
 import { AuthLoadingRoute, ApiOnlyRoute, LoginRoute } from './routes/Auth'
 import { DashboardRoute } from './routes/Dashboard'
@@ -1279,6 +1279,12 @@ export function App() {
   }
 
   async function startWorkOrder(workOrderId: string) {
+    const workOrder = workOrders.find((item) => item.id === workOrderId)
+    if (workOrder && hasWorkOrderMaterialBlocker(workOrder)) {
+      setSelectedWorkOrderId(workOrderId)
+      setWorkOrderMessage(`Resolve material blocker before starting ${workOrderId}: ${workOrderStartBlockReason(workOrder)}`)
+      return
+    }
     try {
       const updated = await api.updateWorkOrder(workOrderId, { status: 'INPRG' })
       setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
