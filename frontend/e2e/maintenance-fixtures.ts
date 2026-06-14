@@ -1,6 +1,7 @@
 import { expect, type Page, type Route } from '@playwright/test'
 import type {
   AssetDetail,
+  AssetReliabilityPredictionStreamEvent,
   AssetListItem,
   AuthUser,
   DashboardSummary,
@@ -529,6 +530,53 @@ export const assetDetail: AssetDetail = {
     risk_level: 'critical',
     failure_probability: 0.76,
     remaining_useful_life_days: 18,
+    confidence_interval: {
+      lower_probability: 0.67,
+      upper_probability: 0.84,
+      lower_rul_days: 14,
+      upper_rul_days: 22,
+      confidence_level: 0.8,
+      rationale: 'Interval width reflects active alerts, anomaly findings, maintenance events, and feedback records.',
+    },
+    model_version: {
+      id: 'rul-risk-heuristic-v2',
+      name: 'Maintenance Wizard RUL Risk Model',
+      version: '2.0.0',
+      algorithm: 'deterministic weighted risk score with rolling-baseline anomaly features',
+      feature_set: ['active alert severity', 'rolling-baseline anomaly severity'],
+      trained_on: 'seeded maintenance history, active alerts, sensor readings, and approved feedback labels',
+      status: 'active',
+    },
+    model_evaluation: {
+      evaluation_id: 'backtest-2.0.0-RM-DRIVE-01',
+      backtest_window_days: 180,
+      sample_count: 14,
+      precision: 0.74,
+      recall: 0.69,
+      mean_absolute_rul_error_days: 16,
+      calibration_error: 0.14,
+      summary: 'Backtest compares historical alert/anomaly windows against recorded maintenance events.',
+    },
+    prediction_evidence: [
+      {
+        source_type: 'alert',
+        source_id: 'ALT-1001',
+        title: 'drive_end_vibration critical alert',
+        detail: 'Drive end vibration exceeds trip advisory threshold.',
+        contribution: 1,
+      },
+    ],
+    degradation_trend: [
+      {
+        timestamp: '2026-06-06T08:15:00+05:30',
+        signal: 'drive_end_vibration',
+        value: 9.8,
+        unit: 'mm/s',
+        threshold: 7.1,
+        normalized_severity: 1,
+        estimated_rul_days: 18,
+      },
+    ],
     drivers: ['Vibration trend', 'Open approved work order'],
     reasoning_explanation: null,
   },
@@ -558,6 +606,23 @@ function pmDraftStreamBody(response: PmPlanDraftResponse): string {
     { type: 'token', content: '### Generated Task List\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '- Inspect bearing condition and coupling alignment.\n', provider: 'openai', used_live_provider: true },
     { type: 'done', response },
+  ]
+  return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
+}
+
+function reliabilityPredictionStreamBody(): string {
+  const answer = [
+    '### Failure Prediction',
+    '- RM-DRIVE-01 has a critical failure risk at 76% with 18 days estimated RUL and a 67-84% probability interval.',
+    '### Model Confidence',
+    '- Maintenance Wizard RUL Risk Model 2.0.0 backtested at 74% precision and 69% recall.',
+    '### Trend Evidence',
+    '- Drive-end vibration remains above threshold and supports accelerated inspection.',
+  ].join('\n')
+  const events: AssetReliabilityPredictionStreamEvent[] = [
+    { type: 'meta', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: answer },
+    { type: 'done', answer, prediction: assetDetail.prediction!, provider: 'openai', used_live_provider: true },
   ]
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
 }
@@ -708,6 +773,14 @@ export async function installMaintenanceApi(page: Page, initialUser: AuthUser = 
     }
     if (path === '/api/assets') {
       await route.fulfill(json(assets))
+      return
+    }
+    if (path.endsWith('/reliability/stream')) {
+      await route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: reliabilityPredictionStreamBody(),
+      })
       return
     }
     if (path.startsWith('/api/assets/') && !path.endsWith('/reliability/stream')) {

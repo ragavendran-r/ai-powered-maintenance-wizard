@@ -2939,6 +2939,95 @@ h3 {
   font-size: 1.2rem;
 }
 
+.predictionModelAudit {
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-soft);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 12px;
+}
+
+.predictionAuditGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.predictionAuditGrid > div {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.predictionAuditGrid span,
+.predictionModelAudit h3 {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.predictionAuditGrid strong {
+  color: var(--color-text-strong);
+  font-size: 0.9rem;
+  line-height: 1.25;
+}
+
+.predictionAuditGrid small,
+.predictionAuditNote,
+.predictionEvidenceList span,
+.degradationTrendList small {
+  color: var(--color-text-subtle);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.predictionAuditNote {
+  margin: 0;
+}
+
+.predictionEvidenceList {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.predictionEvidenceList li,
+.degradationTrendList div {
+  border-top: 1px solid var(--color-border-subtle);
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.predictionEvidenceList strong,
+.degradationTrendList strong {
+  color: var(--color-text-strong);
+}
+
+.degradationTrendList {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 8px;
+}
+
+.degradationTrendList span {
+  color: var(--color-text-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
 .providerLine {
   align-items: center;
   color: var(--color-text-muted);
@@ -3907,6 +3996,11 @@ h3 {
 
   .statusTimeline {
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  .predictionAuditGrid,
+  .degradationTrendList {
+    grid-template-columns: 1fr;
   }
 
   .barChart {

@@ -297,6 +297,7 @@ export function AssetDetailRoute({
                     <strong>{Math.round(assetReliabilityPrediction.failure_probability * 100)}% failure probability</strong>
                     <small>{assetReliabilityPrediction.remaining_useful_life_days} days estimated RUL</small>
                   </div>
+                  <PredictionModelAudit prediction={assetReliabilityPrediction} />
                   <ul className="actionList">
                     {assetReliabilityPrediction.drivers.slice(0, 6).map((driver) => <li key={driver}>{driver}</li>)}
                   </ul>
@@ -358,6 +359,70 @@ export function AssetDetailRoute({
         </>
       )}
     </section>
+  )
+}
+
+function PredictionModelAudit({ prediction }: { prediction: PredictionResponse }) {
+  const interval = prediction.confidence_interval
+  const model = prediction.model_version
+  const evaluation = prediction.model_evaluation
+  const evidence = prediction.prediction_evidence ?? []
+  const trend = prediction.degradation_trend ?? []
+
+  return (
+    <div className="predictionModelAudit" aria-label="Prediction model evidence">
+      <div className="predictionAuditGrid">
+        <div>
+          <span>Model version</span>
+          <strong>{model ? `${model.name} ${model.version}` : 'Unavailable'}</strong>
+          {model && <small>{model.algorithm}</small>}
+        </div>
+        <div>
+          <span>Backtest</span>
+          <strong>{evaluation ? `${Math.round(evaluation.precision * 100)}% precision / ${Math.round(evaluation.recall * 100)}% recall` : 'Unavailable'}</strong>
+          {evaluation && <small>{evaluation.sample_count} samples · {evaluation.mean_absolute_rul_error_days} day RUL MAE</small>}
+        </div>
+        <div>
+          <span>Confidence interval</span>
+          <strong>
+            {interval
+              ? `${Math.round(interval.lower_probability * 100)}-${Math.round(interval.upper_probability * 100)}% probability`
+              : 'Unavailable'}
+          </strong>
+          {interval && <small>{interval.lower_rul_days}-{interval.upper_rul_days} RUL days</small>}
+        </div>
+      </div>
+      {interval && <p className="predictionAuditNote">{interval.rationale}</p>}
+      {evidence.length > 0 && (
+        <div>
+          <h3>Prediction Evidence</h3>
+          <ul className="predictionEvidenceList">
+            {evidence.slice(0, 5).map((item) => (
+              <li key={`${item.source_type}-${item.source_id}-${item.title}`}>
+                <strong>{item.title}</strong>
+                <span>{item.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {trend.length > 0 && (
+        <div>
+          <h3>Degradation Trend History</h3>
+          <div className="degradationTrendList">
+            {trend.slice(-6).map((point) => (
+              <div key={`${point.signal}-${point.timestamp}`}>
+                <span>{formatDate(point.timestamp)}</span>
+                <strong>{point.signal.replace(/_/g, ' ')}</strong>
+                <small>
+                  {point.value}{point.unit} vs {point.threshold}{point.unit} · {Math.round(point.normalized_severity * 100)}% severity · {point.estimated_rul_days}d trend RUL
+                </small>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
