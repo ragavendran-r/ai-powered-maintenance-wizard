@@ -17,7 +17,7 @@ import {
   supervisorAssistantName,
   technicianAssistantName,
 } from '../appModel'
-import { workOrderStatusDetail } from '../workOrderStatus'
+import { effectiveWorkOrderStatus, workOrderStatusDetail } from '../workOrderStatus'
 import {
   StatusBadge,
   StatusTimeline,
@@ -86,6 +86,9 @@ export function WorkOrdersRoute({
   workOrderMessage: string
   workOrders: WorkOrder[]
 }) {
+  const selectedEffectiveStatus = selectedWorkOrder ? effectiveWorkOrderStatus(selectedWorkOrder) : undefined
+  const selectedEffectiveStatusDetail = selectedEffectiveStatus ? workOrderStatusDetail(selectedEffectiveStatus) : undefined
+
   return (
     <section className="workOrderLayout">
       <section className="workOrderCenterColumn" aria-label="Work order center pane">
@@ -239,13 +242,13 @@ export function WorkOrdersRoute({
                 <FileText size={18} />
                 <h2>Work Order {selectedWorkOrder.id.replace('WO-', '')}</h2>
               </div>
-              <StatusTimeline status={selectedWorkOrder.status} />
+              <StatusTimeline status={selectedEffectiveStatus ?? selectedWorkOrder.status} />
               <div className="workOrderSummary">
                 <div className="workOrderBadges">
                   <span className="statusPill connected priorityPill">Priority {selectedWorkOrder.priority}</span>
-                  <StatusBadge status={selectedWorkOrder.status} />
+                  <StatusBadge status={selectedEffectiveStatus ?? selectedWorkOrder.status} />
                 </div>
-                <p className="statusDescription">{workOrderStatusDetail(selectedWorkOrder.status).description}</p>
+                <p className="statusDescription">{selectedEffectiveStatusDetail?.description}</p>
                 <p>{selectedWorkOrder.description}</p>
                 <dl>
                   <dt>Assigned to</dt>

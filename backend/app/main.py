@@ -127,6 +127,8 @@ from app.services.work_order_assistant import (
 
 LEARNING_REVIEW_ROLES = ("admin", "maintenance_engineer", "reliability_engineer")
 LEARNING_ARTIFACT_CLEANUP_ROLES = {"admin", "reliability_engineer"}
+MATERIAL_BLOCKER_STATUSES = {"blocked", "waiting_procurement", "reorder_requested"}
+MATERIAL_UNREADY_STATUSES = {"blocked", "pending"}
 
 
 @asynccontextmanager
@@ -459,6 +461,10 @@ def update_work_order(
     requested_status = payload.get("status")
     if requested_status == "APPR" and existing_work_order["status"] != "WAPPR":
         raise HTTPException(status_code=400, detail="Only WAPPR work orders can be approved")
+    if requested_status == "INPRG" and _work_order_has_material_blocker(existing_work_order):
+        raise HTTPException(status_code=400, detail=_material_start_block_reason(existing_work_order))
+    if requested_status == "COMP" and _work_order_has_material_blocker(existing_work_order):
+        raise HTTPException(status_code=400, detail="Resolve material blocker before completing work order")
     if payload.get("planning_status") == "dispatched":
         planned_start = payload.get("planned_start") or existing_work_order.get("planned_start")
         material_readiness = payload.get("material_readiness") or existing_work_order.get("material_readiness")
@@ -470,13 +476,14 @@ def update_work_order(
             raise HTTPException(status_code=400, detail="Planned start is required before dispatch")
         if material_readiness == "blocked":
             raise HTTPException(status_code=400, detail="Resolve blocked materials before dispatch")
-        if material_blocker_status in {"blocked", "waiting_procurement", "reorder_requested"}:
+        if material_blocker_status in MATERIAL_BLOCKER_STATUSES:
             raise HTTPException(status_code=400, detail="Resolve material blocker before dispatch")
         if any(
-            item.get("blocker_status") in {"blocked", "waiting_procurement", "reorder_requested"}
+            item.get("blocker_status") in MATERIAL_BLOCKER_STATUSES
             for item in spare_reservations
         ):
             raise HTTPException(status_code=400, detail="Resolve material blocker before dispatch")
+    _normalize_material_blocked_work_order_status(payload, existing_work_order)
     if current_user.role == "maintenance_technician":
         if existing_work_order["assigned_to"] != current_user.display_name:
             raise HTTPException(status_code=403, detail="Technician can update only assigned work orders")
@@ -504,6 +511,67 @@ def update_work_order(
             raise HTTPException(status_code=403, detail="Technician status update is not permitted")
     work_order = repository.update_work_order(work_order_id, payload)
     return work_order
+
+
+def _work_order_has_material_blocker(work_order: dict[str, Any]) -> bool:
+    if work_order.get("material_readiness") in MATERIAL_UNREADY_STATUSES:
+        return True
+    if work_order.get("material_blocker_status") in MATERIAL_BLOCKER_STATUSES:
+        return True
+    for reservation in work_order.get("spare_reservations", []):
+        if reservation.get("blocker_status") in MATERIAL_BLOCKER_STATUSES:
+            return True
+        required_qty = int(reservation.get("required_qty") or 0)
+        reserved_qty = int(reservation.get("reserved_qty") or 0)
+        available_qty = int(reservation.get("available_qty") or reservation.get("on_hand_qty") or 0)
+        if required_qty and reserved_qty < required_qty and available_qty < required_qty:
+            return True
+    return False
+
+
+def _material_start_block_reason(work_order: dict[str, Any]) -> str:
+    for reservation in work_order.get("spare_reservations", []):
+        blocker_status = reservation.get("blocker_status")
+        required_qty = int(reservation.get("required_qty") or 0)
+        reserved_qty = int(reservation.get("reserved_qty") or 0)
+        available_qty = int(reservation.get("available_qty") or reservation.get("on_hand_qty") or 0)
+        if blocker_status in MATERIAL_BLOCKER_STATUSES or (
+            required_qty and reserved_qty < required_qty and available_qty < required_qty
+        ):
+            spare_name = reservation.get("spare_name") or reservation.get("spare_id") or "required spare"
+            expected_date = reservation.get("expected_available_date") or "not recorded"
+            return (
+                f"Resolve material blocker before starting work: {spare_name} is not ready; "
+                f"expected availability is {expected_date}"
+            )
+    note = work_order.get("material_blocker_note") or "Material readiness is blocked or pending."
+    return f"Resolve material blocker before starting work: {note}"
+
+
+def _normalize_material_blocked_work_order_status(
+    payload: dict[str, Any],
+    existing_work_order: dict[str, Any],
+) -> None:
+    material_fields = {"material_readiness", "material_blocker_status", "spare_reservations"}
+    if not material_fields.intersection(payload):
+        return
+    merged_work_order = {
+        **existing_work_order,
+        "material_readiness": payload.get("material_readiness", existing_work_order.get("material_readiness")),
+        "material_blocker_status": payload.get(
+            "material_blocker_status",
+            existing_work_order.get("material_blocker_status"),
+        ),
+        "spare_reservations": payload.get("spare_reservations", existing_work_order.get("spare_reservations", [])),
+    }
+    next_status = payload.get("status") or existing_work_order["status"]
+    if next_status in {"WAPPR", "COMP", "CLOSE"}:
+        return
+    if _work_order_has_material_blocker(merged_work_order):
+        payload["status"] = "WMATL"
+        return
+    if existing_work_order["status"] == "WMATL" and next_status == "WMATL":
+        payload["status"] = "APPR"
 
 
 @app.post(

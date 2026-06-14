@@ -644,7 +644,7 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "equipment_id": "RM-DRIVE-01",
             "title": "Inspect main drive bearing vibration",
             "description": "Inspect drive-end bearing housing, coupling alignment, lubrication condition, and foundation bolts after critical vibration alert.",
-            "status": "APPR",
+            "status": "WMATL",
             "priority": 1,
             "work_type": "CM",
             "failure_class": "MECH",

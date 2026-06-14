@@ -54,7 +54,7 @@ export const fallbackWorkOrders: WorkOrder[] = [
     equipment_id: 'RM-DRIVE-01',
     title: 'Inspect main drive bearing vibration',
     description: 'Inspect bearing housing, coupling alignment, lubrication condition, and foundation bolts.',
-    status: 'APPR',
+    status: 'WMATL',
     priority: 1,
     work_type: 'CM',
     failure_class: 'MECH',

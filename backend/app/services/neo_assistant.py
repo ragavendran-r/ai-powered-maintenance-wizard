@@ -1194,7 +1194,7 @@ def _work_order_has_material_blocker(work_order: dict) -> bool:
     for reservation in work_order.get("spare_reservations", []):
         required = int(reservation.get("required_qty") or 0)
         reserved = int(reservation.get("reserved_qty") or 0)
-        on_hand = int(reservation.get("on_hand_qty") or 0)
+        on_hand = int(reservation.get("available_qty") or reservation.get("on_hand_qty") or 0)
         if required and reserved < required and on_hand < required:
             return True
     return False
@@ -1260,9 +1260,12 @@ def _can_update_work_order_status(work_order: dict, target_status: str, current_
 
 def _next_steps_for_work_order(work_order: dict, current_user: UserPublic) -> str:
     status = work_order["status"]
+    status_label = _work_order_status_label(status)
     action = work_order["recommended_action"]
     if status == "WAPPR":
         step = "Wait for supervisor approval before field execution; review scope, materials, and safety permits now."
+    elif _work_order_has_material_blocker(work_order) and status in {"APPR", "WMATL", "INPRG"}:
+        step = _material_start_block_reason(work_order)
     elif status == "APPR":
         step = "Start the job when safe: confirm lockout/tagout, inspect the asset, and move the work order to INPRG before recording findings."
     elif status == "WMATL":
@@ -1280,7 +1283,7 @@ def _next_steps_for_work_order(work_order: dict, current_user: UserPublic) -> st
     )
     material_note = _material_attention_sentence(work_order)
     return (
-        f"{work_order['id']} is {status}. {ownership} {step}\n\n"
+        f"{work_order['id']} is {status_label}. {ownership} {step}\n\n"
         f"{material_note + chr(10) + chr(10) if material_note else ''}"
         f"Recommended action: {action}\n\n"
         f"Problem code: {work_order['problem_code']}. Failure class: {work_order['failure_class']}."
@@ -1291,6 +1294,8 @@ def _technician_completion_guide(work_order: dict) -> str:
     status = work_order["status"]
     if status == "WAPPR":
         status_step = "This work order is waiting for approval. Review the scope now, but do not start field work until it is approved."
+    elif _work_order_has_material_blocker(work_order) and status in {"APPR", "WMATL", "INPRG"}:
+        status_step = _material_start_block_reason(work_order)
     elif status == "APPR":
         status_step = "This work order is approved. Confirm lockout/tagout, then ask me to start it or use Start work before field execution."
     elif status == "WMATL":

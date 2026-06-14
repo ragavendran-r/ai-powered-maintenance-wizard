@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PredictionResponse, type Recommendation, type UserRole } from './services/api'
-import { StatusTimeline } from './sharedComponents'
+import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PredictionResponse, type Recommendation, type UserRole, type WorkOrder } from './services/api'
+import { StatusTimeline, TechnicianExecutionCard } from './sharedComponents'
 
 const sampleFiles = [
   {
@@ -419,6 +419,42 @@ const workOrders = [
     ],
   },
 ]
+
+it('shows material-blocked approved work orders as waiting for material and locks start', () => {
+  const blockedWorkOrder: WorkOrder = {
+    ...(workOrders[0] as WorkOrder),
+    status: 'APPR',
+    material_readiness: 'blocked',
+    material_blocker_status: 'blocked',
+    material_blocker_note: 'Drive end bearing is out of stock.',
+    spare_reservations: [
+      {
+        ...(workOrders[0].spare_reservations[0]),
+        reserved_qty: 0,
+        available_qty: 0,
+        procurement_status: 'requested',
+        expected_available_date: '2026-07-03',
+        blocker_status: 'blocked',
+      },
+    ],
+  }
+
+  render(
+    <TechnicianExecutionCard
+      assistant={null}
+      isLoading={false}
+      onComplete={vi.fn()}
+      onStart={vi.fn()}
+      workOrder={blockedWorkOrder}
+    />,
+  )
+
+  const workflow = screen.getByLabelText('Technician execution workflow')
+  expect(within(workflow).getByText('Waiting for material')).toBeInTheDocument()
+  expect(within(workflow).getByText('Execution is blocked until required parts or consumables are available.')).toBeInTheDocument()
+  expect(within(workflow).getByText(/Drive end spherical roller bearing is not ready/)).toBeInTheDocument()
+  expect(within(workflow).getByRole('button', { name: 'Start work' })).toBeDisabled()
+})
 
 const assets = [
   {
