@@ -75,6 +75,48 @@ import { IngestionRoute } from './routes/Ingestion'
 import { LearningReviewRoute } from './routes/LearningReview'
 import { UsersRoute } from './routes/Users'
 
+function technicianInitialContextPrompt(workOrder: WorkOrder) {
+  const statusLabel = workOrderStatusLabel(workOrder.status)
+  const materialBlockReason = workOrderStartBlockReason(workOrder)
+  if (materialBlockReason) {
+    return [
+      `Open selected work order ${workOrder.id} for technician context.`,
+      `Current status is ${statusLabel}, and field execution is blocked by material availability.`,
+      `Material blocker: ${materialBlockReason}.`,
+      'Explain the blocker, expected availability or substitute limitations if supplied, and the next permissible technician action without starting field execution.',
+    ].join(' ')
+  }
+  return [
+    `Open selected work order ${workOrder.id} for technician context.`,
+    `Current status is ${statusLabel}.`,
+    'Summarize the immediate technician context from the work order, material plan, asset evidence, and approved learning notes.',
+    'Ask for the next observation only if field execution is allowed.',
+  ].join(' ')
+}
+
+function technicianContextKey(workOrder: WorkOrder, userId?: string) {
+  const spareState = workOrder.spare_reservations
+    .map((spare) => [
+      spare.spare_id,
+      spare.reserved_qty,
+      spare.available_qty,
+      spare.blocker_status,
+      spare.expected_available_date,
+      spare.substitute_name,
+    ].join(':'))
+    .join('|')
+  return [
+    userId ?? 'anonymous',
+    workOrder.id,
+    workOrder.status,
+    workOrder.updated_at,
+    workOrder.material_readiness,
+    workOrder.material_blocker_status,
+    workOrder.material_blocker_note,
+    spareState,
+  ].join('::')
+}
+
 export function App() {
   const [session, setSession] = useState<AuthSession | null>(() => api.restoreSession())
   const [authReady, setAuthReady] = useState(false)
@@ -112,13 +154,7 @@ export function App() {
   const [technicianAssistant, setTechnicianAssistant] = useState<TechnicianAssistantResponse | null>(null)
   const [technicianLoading, setTechnicianLoading] = useState(false)
   const [technicianStreaming, setTechnicianStreaming] = useState(false)
-  const [technicianChat, setTechnicianChat] = useState<AssistantTurn[]>([
-    {
-      id: 'technician-welcome',
-      role: 'assistant',
-      content: `I’m ${technicianAssistantName}. Let’s start the work order. Do you observe any problems?`,
-    },
-  ])
+  const [technicianChat, setTechnicianChat] = useState<AssistantTurn[]>([])
   const [supervisorQuestion, setSupervisorQuestion] = useState('Summarize follow-up actions for completed work orders.')
   const [supervisorAssistant, setSupervisorAssistant] = useState<SupervisorAssistantResponse | null>(null)
   const [supervisorLoading, setSupervisorLoading] = useState(false)
@@ -188,6 +224,7 @@ export function App() {
   const neoTranscriptRef = useRef<HTMLDivElement | null>(null)
   const morpheusProgressRef = useRef<HTMLDivElement | null>(null)
   const reliabilityStreamRef = useRef<HTMLDivElement | null>(null)
+  const technicianInitialContextRef = useRef('')
 
   const currentUser = session?.user
   const {
@@ -228,6 +265,11 @@ export function App() {
     setDiagnosisProvider('')
     setDiagnosisUsedLive(false)
     setDiagnosisMessage('')
+    setTechnicianAssistant(null)
+    setTechnicianChat([])
+    setTechnicianLoading(false)
+    setTechnicianStreaming(false)
+    technicianInitialContextRef.current = ''
     setNeoTable(null)
     setLearningSummary(null)
     setLearningExamples([])
@@ -858,6 +900,10 @@ export function App() {
     () => workOrders.find((item) => item.id === selectedWorkOrderId) ?? workOrders[0],
     [selectedWorkOrderId, workOrders],
   )
+  const selectedTechnicianContextKey = useMemo(
+    () => selectedWorkOrder ? technicianContextKey(selectedWorkOrder, currentUser?.id) : '',
+    [currentUser?.id, selectedWorkOrder],
+  )
   const assetWorkOrders = useMemo(
     () => assetDetail?.work_orders ?? workOrders.filter((item) => item.equipment_id === selectedEquipment),
     [assetDetail, selectedEquipment, workOrders],
@@ -872,6 +918,20 @@ export function App() {
       followUps: workOrders.filter((item) => item.follow_up_required).length,
     }
   }, [dashboard, workOrders])
+
+  useEffect(() => {
+    if (!authReady || !session || activeView !== 'workOrders' || !canTechnicianAssistant || !selectedWorkOrder) return
+    if (!selectedTechnicianContextKey || technicianInitialContextRef.current === selectedTechnicianContextKey) return
+    technicianInitialContextRef.current = selectedTechnicianContextKey
+    void loadTechnicianInitialContext(selectedWorkOrder, selectedTechnicianContextKey)
+  }, [
+    activeView,
+    authReady,
+    canTechnicianAssistant,
+    selectedTechnicianContextKey,
+    selectedWorkOrder,
+    session,
+  ])
 
   function openAsset(equipmentId: string) {
     setSelectedEquipment(equipmentId)
@@ -1151,14 +1211,31 @@ export function App() {
     }
   }
 
-  async function runTechnicianAssistant() {
-    if (technicianLoading) return
-    if (!selectedWorkOrder) return
-    const prompt = technicianObservation.trim() || 'Give me live directions for this work order.'
-    setTechnicianChat((turns) => [
-      ...turns,
-      { id: assistantTurnId('technician-user'), role: 'user', content: prompt },
-    ])
+  async function streamTechnicianAssistantTurn({
+    workOrder,
+    prompt,
+    requestedStep,
+    userPrompt,
+    replaceTranscript = false,
+    contextKey,
+  }: {
+    workOrder: WorkOrder
+    prompt: string
+    requestedStep?: string
+    userPrompt?: string
+    replaceTranscript?: boolean
+    contextKey?: string
+  }) {
+    const isCurrentContext = () => !contextKey || technicianInitialContextRef.current === contextKey
+    if (replaceTranscript) {
+      setTechnicianChat([])
+      setTechnicianAssistant(null)
+    } else if (userPrompt) {
+      setTechnicianChat((turns) => [
+        ...turns,
+        { id: assistantTurnId('technician-user'), role: 'user', content: userPrompt },
+      ])
+    }
     setTechnicianLoading(true)
     setTechnicianStreaming(false)
     try {
@@ -1168,6 +1245,7 @@ export function App() {
       let streamUsedLiveProvider = true
 
       const ensureAssistantMessage = () => {
+        if (!isCurrentContext()) return null
         if (assistantMessageId) return assistantMessageId
         assistantMessageId = assistantTurnId('technician-assistant')
         setTechnicianStreaming(true)
@@ -1185,11 +1263,12 @@ export function App() {
       }
 
       const updateAssistantMessage = (updates: Partial<AssistantTurn>) => {
-        if (!assistantMessageId) return
+        if (!assistantMessageId || !isCurrentContext()) return
         setTechnicianChat((turns) => turns.map((turn) => (turn.id === assistantMessageId ? { ...turn, ...updates } : turn)))
       }
 
-      await api.technicianAssistStream(selectedWorkOrder.id, prompt, (event) => {
+      await api.technicianAssistStream(workOrder.id, prompt, requestedStep, (event) => {
+        if (!isCurrentContext()) return
         if (event.type === 'meta') {
           streamProvider = event.provider
           streamUsedLiveProvider = event.used_live_provider
@@ -1228,36 +1307,43 @@ export function App() {
           }
         }
       })
+      return true
+    } catch {
+      if (isCurrentContext()) {
+        setWorkOrderMessage(`${technicianAssistantName} could not reach the LLM service for ${workOrder.id}`)
+      }
+      return false
+    } finally {
+      if (isCurrentContext()) {
+        setTechnicianLoading(false)
+        setTechnicianStreaming(false)
+      }
+    }
+  }
+
+  async function loadTechnicianInitialContext(workOrder: WorkOrder, contextKey: string) {
+    await streamTechnicianAssistantTurn({
+      workOrder,
+      prompt: technicianInitialContextPrompt(workOrder),
+      requestedStep: 'initial_context',
+      replaceTranscript: true,
+      contextKey,
+    })
+  }
+
+  async function runTechnicianAssistant() {
+    if (technicianLoading) return
+    if (!selectedWorkOrder) return
+    const prompt = technicianObservation.trim() || 'Give me live directions for this work order.'
+    const completed = await streamTechnicianAssistantTurn({
+      workOrder: selectedWorkOrder,
+      prompt,
+      requestedStep: 'technician_observation',
+      userPrompt: prompt,
+    })
+    if (completed) {
       setTechnicianObservation('')
       setWorkOrderMessage(`${technicianAssistantName} updated the recommended problem code and summary`)
-    } catch {
-      const fallbackResponse: TechnicianAssistantResponse = {
-        work_order_id: selectedWorkOrder.id,
-        next_prompt: 'What abnormal condition do you observe?',
-        live_directions: [selectedWorkOrder.recommended_action],
-        recommendations: ['Record the observed condition and before/after readings.'],
-        safety_reminders: ['Apply lockout/tagout before intrusive inspection.'],
-        suggested_problem_code: selectedWorkOrder.problem_code,
-        suggested_failure_class: selectedWorkOrder.failure_class,
-        completion_summary: prompt,
-        evidence: [],
-        used_live_provider: false,
-        provider: 'fallback',
-      }
-      setTechnicianAssistant(fallbackResponse)
-      setTechnicianChat((turns) => [
-        ...turns,
-        {
-          id: assistantTurnId('technician-fallback'),
-          role: 'assistant',
-          content: fallbackResponse.next_prompt,
-          provider: fallbackResponse.provider,
-          usedLiveProvider: fallbackResponse.used_live_provider,
-        },
-      ])
-    } finally {
-      setTechnicianLoading(false)
-      setTechnicianStreaming(false)
     }
   }
 

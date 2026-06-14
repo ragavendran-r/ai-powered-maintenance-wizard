@@ -420,6 +420,8 @@ const workOrders = [
   },
 ]
 
+let apiWorkOrders: WorkOrder[] = workOrders as WorkOrder[]
+
 it('shows material-blocked approved work orders as waiting for material and locks start', () => {
   const blockedWorkOrder: WorkOrder = {
     ...(workOrders[0] as WorkOrder),
@@ -1022,6 +1024,7 @@ async function signIn(email = 'admin@plant.local') {
 beforeEach(() => {
   neoResponseDelayMs = 0
   assistantResponseDelayMs = 0
+  apiWorkOrders = workOrders as WorkOrder[]
   learningDeploymentResponses = [learningDeployment]
   learningArtifactCleanupRequests = []
   window.sessionStorage.clear()
@@ -1397,6 +1400,33 @@ beforeEach(() => {
         return Promise.resolve(response)
       }
       if (url.includes('/api/work-orders/technician-assist/stream')) {
+        const body = JSON.parse((init?.body as string) ?? '{}')
+        const initialContext = body.requested_step === 'initial_context'
+        const selectedOrder = apiWorkOrders.find((item) => item.id === body.work_order_id) ?? apiWorkOrders[0]
+        if (initialContext) {
+          const blocked = selectedOrder.material_readiness === 'blocked' || selectedOrder.material_blocker_status === 'blocked'
+          const initialAnswer = blocked
+            ? `WO-8304 is waiting for material. Drive end spherical roller bearing is not ready; expected availability is 2026-07-03. Do not start field execution until the blocker is resolved.`
+            : `WO-8304 is approved and ready for technician execution. Review the current work order context before recording observations.`
+          return Promise.resolve(
+            assistantStreamResponse(
+              {
+                work_order_id: selectedOrder.id,
+                next_prompt: initialAnswer,
+                live_directions: [initialAnswer],
+                recommendations: ['Use Neo to record the next relevant observation.'],
+                safety_reminders: ['Apply lockout/tagout.'],
+                suggested_problem_code: selectedOrder.problem_code,
+                suggested_failure_class: selectedOrder.failure_class,
+                completion_summary: `${selectedOrder.id} initial context reviewed.`,
+                evidence: recommendation.evidence,
+                used_live_provider: false,
+                provider: 'mock',
+              },
+              [initialAnswer],
+            ),
+          )
+        }
         const response = assistantStreamResponse(
           {
             work_order_id: 'WO-8304',
@@ -1504,7 +1534,7 @@ beforeEach(() => {
         if (init?.method === 'PATCH') {
           const body = JSON.parse((init.body as string) ?? '{}')
           const workOrderId = url.match(/\/api\/work-orders\/([^/?]+)/)?.[1]
-          const original = workOrders.find((item) => item.id === workOrderId) ?? workOrders[0]
+          const original = apiWorkOrders.find((item) => item.id === workOrderId) ?? apiWorkOrders[0]
           return Promise.resolve(
             new Response(
               JSON.stringify({
@@ -1518,8 +1548,8 @@ beforeEach(() => {
         }
         const requestUser = userFromRequest(init)
         const rows = requestUser.role === 'maintenance_technician'
-          ? workOrders.filter((order) => order.assigned_to === requestUser.display_name)
-          : workOrders
+          ? apiWorkOrders.filter((order) => order.assigned_to === requestUser.display_name)
+          : apiWorkOrders
         return Promise.resolve(new Response(JSON.stringify(rows), { status: 200 }))
       }
       if (url.endsWith('/api/streaming/status')) {
@@ -1711,6 +1741,54 @@ describe('Maintenance Wizard dashboard', () => {
     expect(within(welcomeTable).getByText('RM-DRIVE-01')).toBeInTheDocument()
     expect(within(welcomeTable).getByText('Approved')).toBeInTheDocument()
     expect(within(welcomeTable).queryByText('APPR')).not.toBeInTheDocument()
+  })
+
+  it('loads selected material-blocked technician context from Neo instead of a static start message', async () => {
+    apiWorkOrders = [
+      {
+        ...(workOrders[0] as WorkOrder),
+        status: 'WMATL',
+        material_readiness: 'blocked',
+        material_blocker_status: 'blocked',
+        material_blocker_note: 'Drive end bearing is out of stock.',
+        spare_reservations: [
+          {
+            ...(workOrders[0].spare_reservations[0]),
+            reserved_qty: 0,
+            available_qty: 0,
+            procurement_status: 'requested',
+            expected_available_date: '2026-07-03',
+            blocker_status: 'blocked',
+            blocker_note: 'No bearing is available for replacement.',
+          },
+        ],
+      },
+    ]
+
+    render(<App />)
+    await signIn('technician@plant.local')
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Orders' }))[0])
+
+    const transcript = screen.getByLabelText('Neo technician chat')
+    expect(await within(transcript).findByText(/WO-8304 is waiting for material/)).toBeInTheDocument()
+    expect(transcript.textContent).toContain('expected availability is 2026-07-03')
+    expect(transcript.textContent).not.toContain('Let’s start the work order')
+    expect(within(screen.getByLabelText('Technician execution workflow')).getByText('Waiting for material')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start work' })).toBeDisabled()
+
+    const initialContextCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => {
+        if (!url.toString().includes('/api/work-orders/technician-assist/stream')) return false
+        return JSON.parse((init?.body as string) ?? '{}').requested_step === 'initial_context'
+      })
+    expect(JSON.parse((initialContextCall?.[1] as RequestInit).body as string)).toEqual(
+      expect.objectContaining({
+        work_order_id: 'WO-8304',
+        requested_step: 'initial_context',
+      }),
+    )
   })
 
   it('formats Markdown-like Neo responses into readable sections', async () => {
@@ -1920,6 +1998,7 @@ describe('Maintenance Wizard dashboard', () => {
     expect(within(executionWorkflow).getByText('Submit completion')).toBeInTheDocument()
     expect(within(centerPane).getByRole('button', { name: 'WO-8304' })).toBeInTheDocument()
     expect(within(centerPane).queryByRole('button', { name: 'WO-8297' })).not.toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Neo technician chat')).findByText(/approved and ready for technician execution/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Start WO-8304' }))
     await screen.findByText('WO-8304 started')
     expect(await within(screen.getByLabelText('Technician execution workflow')).findByText('In progress')).toBeInTheDocument()
@@ -1940,7 +2019,7 @@ describe('Maintenance Wizard dashboard', () => {
     expect(within(updatedWorkflow).getByText(/Connections were tightened to spec./)).toBeInTheDocument()
     expect(screen.getByLabelText('Neo technician chat').textContent).not.toContain('Verify torque on bolted connections.')
     expect(screen.getByLabelText('Neo technician chat').textContent).not.toContain('Problem code: LWTQCONNECT')
-    expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
+    expect(screen.getAllByText('LLM fallback · mock').length).toBeGreaterThanOrEqual(1)
     const submitCompleted = within(updatedWorkflow).getByRole('button', { name: 'Submit completed work' })
     expect(submitCompleted).toBeEnabled()
   })
