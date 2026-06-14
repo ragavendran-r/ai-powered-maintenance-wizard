@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 RiskLevel = Literal["low", "medium", "high", "critical"]
-WorkOrderStatus = Literal["WAPPR", "WMATL", "APPR", "INPRG", "COMP", "CLOSE"]
+WorkOrderStatus = Literal["WAPPR", "APPR", "WMATL", "INPRG", "COMP", "CLOSE"]
 WorkOrderPlanningStatus = Literal["unscheduled", "planned", "dispatched"]
 MaterialReadiness = Literal["unknown", "pending", "ready", "blocked"]
 MaterialBlockerStatus = Literal[

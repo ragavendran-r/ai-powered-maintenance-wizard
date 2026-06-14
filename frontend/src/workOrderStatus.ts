@@ -27,7 +27,7 @@ export const workOrderStatusDetails: Record<WorkOrderStatus, { label: string; de
   },
 }
 
-export const workOrderStatusFlow: WorkOrderStatus[] = ['WAPPR', 'APPR', 'INPRG', 'WMATL', 'COMP', 'CLOSE']
+export const workOrderStatusFlow: WorkOrderStatus[] = ['WAPPR', 'APPR', 'WMATL', 'INPRG', 'COMP', 'CLOSE']
 
 export function workOrderStatusDetail(status: WorkOrderStatus) {
   return workOrderStatusDetails[status]

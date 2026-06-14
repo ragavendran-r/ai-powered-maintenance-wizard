@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PredictionResponse, type Recommendation, type UserRole } from './services/api'
+import { StatusTimeline } from './sharedComponents'
 
 const sampleFiles = [
   {
@@ -57,6 +58,20 @@ const sampleFiles = [
 
 let neoResponseDelayMs = 0
 let assistantResponseDelayMs = 0
+
+it('shows waiting for material before in progress in the work order workflow', () => {
+  render(<StatusTimeline status="WMATL" />)
+
+  const timeline = screen.getByLabelText('Work order status')
+  const approved = within(timeline).getByText('Approved')
+  const material = within(timeline).getByText('Material')
+  const inProgress = within(timeline).getByText('Progress')
+  const completed = within(timeline).getByText('Complete')
+
+  expect(Boolean(approved.compareDocumentPosition(material) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+  expect(Boolean(material.compareDocumentPosition(inProgress) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+  expect(Boolean(inProgress.compareDocumentPosition(completed) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+})
 
 function neoStreamResponse(response: NeoChatResponse, tokenChunks: string[] = []) {
   const events: NeoStreamEvent[] = tokenChunks.length
