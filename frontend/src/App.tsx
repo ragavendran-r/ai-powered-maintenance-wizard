@@ -102,6 +102,8 @@ function navigationIcon(icon: NavigationIcon) {
     case 'planning':
       return <CalendarClock size={17} />
     case 'reliability':
+      return <Gauge size={17} />
+    case 'learning':
       return <Sparkles size={17} />
     case 'admin':
       return <Users size={17} />
@@ -863,9 +865,14 @@ export function App() {
   }, [activeView, canAdminUsers])
 
   useEffect(() => {
-    if (activeView === 'reliability' && canReviewLearning) {
-      void loadLearning()
+    if (activeView === 'reliability') {
       void loadRcaCases()
+    }
+  }, [activeView])
+
+  useEffect(() => {
+    if (activeView === 'learningReview' && canReviewLearning) {
+      void loadLearning()
     }
   }, [activeView, canReviewLearning])
 
@@ -2030,7 +2037,7 @@ export function App() {
         workOrders={workOrders}
       />
     ) : activeView === 'reliability' ? (
-      <>
+      <section className="reliabilityRouteStack" aria-label="Reliability workspace">
         <RcaWorkspace
           closeRcaCase={closeRcaCase}
           createRcaCase={createRcaCaseFromSelectedWorkOrder}
@@ -2044,58 +2051,59 @@ export function App() {
           setSelectedWorkOrderId={setSelectedWorkOrderId}
           workOrders={workOrders}
         />
-        <LearningReviewRoute
-          activateSelectedEmbeddingProfile={activateSelectedEmbeddingProfile}
-          adapterBaseModel={adapterBaseModel}
-          adapterModelName={adapterModelName}
-          adapterNotes={adapterNotes}
-          adapterPath={adapterPath}
-          adapterProvider={adapterProvider}
-          artifactCleanupResult={artifactCleanupResult}
-          createLearningSnapshot={createLearningSnapshot}
-          deployLearningAdapter={deployLearningAdapter}
-          deploymentBaseUrl={deploymentBaseUrl}
-          deploymentRuntimeProvider={deploymentRuntimeProvider}
-          downloadLearningSnapshot={downloadLearningSnapshot}
-          judgeLearningExample={judgeLearningExample}
-          learningDatasetDescription={learningDatasetDescription}
-          learningDatasetName={learningDatasetName}
-          learningDatasets={learningDatasets}
-          learningDeployments={learningDeployments}
-          learningEmbeddingProfiles={learningEmbeddingProfiles}
-          learningExamples={learningExamples}
-          learningLoading={learningLoading}
-          learningMessage={learningMessage}
-          learningSummary={learningSummary}
-          peftAdapterName={peftAdapterName}
-          previewLearningArtifactCleanup={previewLearningArtifactCleanup}
-          previewLearningRagMigration={previewLearningRagMigration}
-          promoteLearningAdapter={promoteLearningAdapter}
-          queuePeftTuningJob={queuePeftTuningJob}
-          ragMigrationPreview={ragMigrationPreview}
-          ragTargetCollection={ragTargetCollection}
-          refreshLearningExamples={refreshLearningExamples}
-          registerLearningAdapter={registerLearningAdapter}
-          reindexLearningRag={reindexLearningRag}
-          rollbackLearningAdapter={rollbackLearningAdapter}
-          runLearningEvaluation={runLearningEvaluation}
-          runLearningRagMigration={runLearningRagMigration}
-          selectedEmbeddingProfileId={selectedEmbeddingProfileId}
-          setAdapterBaseModel={setAdapterBaseModel}
-          setAdapterModelName={setAdapterModelName}
-          setAdapterNotes={setAdapterNotes}
-          setAdapterPath={setAdapterPath}
-          setAdapterProvider={setAdapterProvider}
-          setDeploymentBaseUrl={setDeploymentBaseUrl}
-          setDeploymentRuntimeProvider={setDeploymentRuntimeProvider}
-          setLearningDatasetDescription={setLearningDatasetDescription}
-          setLearningDatasetName={setLearningDatasetName}
-          setPeftAdapterName={setPeftAdapterName}
-          setRagTargetCollection={setRagTargetCollection}
-          setSelectedEmbeddingProfileId={setSelectedEmbeddingProfileId}
-          toggleLearningApproval={toggleLearningApproval}
-        />
-      </>
+      </section>
+    ) : activeView === 'learningReview' && canReviewLearning ? (
+      <LearningReviewRoute
+        activateSelectedEmbeddingProfile={activateSelectedEmbeddingProfile}
+        adapterBaseModel={adapterBaseModel}
+        adapterModelName={adapterModelName}
+        adapterNotes={adapterNotes}
+        adapterPath={adapterPath}
+        adapterProvider={adapterProvider}
+        artifactCleanupResult={artifactCleanupResult}
+        createLearningSnapshot={createLearningSnapshot}
+        deployLearningAdapter={deployLearningAdapter}
+        deploymentBaseUrl={deploymentBaseUrl}
+        deploymentRuntimeProvider={deploymentRuntimeProvider}
+        downloadLearningSnapshot={downloadLearningSnapshot}
+        judgeLearningExample={judgeLearningExample}
+        learningDatasetDescription={learningDatasetDescription}
+        learningDatasetName={learningDatasetName}
+        learningDatasets={learningDatasets}
+        learningDeployments={learningDeployments}
+        learningEmbeddingProfiles={learningEmbeddingProfiles}
+        learningExamples={learningExamples}
+        learningLoading={learningLoading}
+        learningMessage={learningMessage}
+        learningSummary={learningSummary}
+        peftAdapterName={peftAdapterName}
+        previewLearningArtifactCleanup={previewLearningArtifactCleanup}
+        previewLearningRagMigration={previewLearningRagMigration}
+        promoteLearningAdapter={promoteLearningAdapter}
+        queuePeftTuningJob={queuePeftTuningJob}
+        ragMigrationPreview={ragMigrationPreview}
+        ragTargetCollection={ragTargetCollection}
+        refreshLearningExamples={refreshLearningExamples}
+        registerLearningAdapter={registerLearningAdapter}
+        reindexLearningRag={reindexLearningRag}
+        rollbackLearningAdapter={rollbackLearningAdapter}
+        runLearningEvaluation={runLearningEvaluation}
+        runLearningRagMigration={runLearningRagMigration}
+        selectedEmbeddingProfileId={selectedEmbeddingProfileId}
+        setAdapterBaseModel={setAdapterBaseModel}
+        setAdapterModelName={setAdapterModelName}
+        setAdapterNotes={setAdapterNotes}
+        setAdapterPath={setAdapterPath}
+        setAdapterProvider={setAdapterProvider}
+        setDeploymentBaseUrl={setDeploymentBaseUrl}
+        setDeploymentRuntimeProvider={setDeploymentRuntimeProvider}
+        setLearningDatasetDescription={setLearningDatasetDescription}
+        setLearningDatasetName={setLearningDatasetName}
+        setPeftAdapterName={setPeftAdapterName}
+        setRagTargetCollection={setRagTargetCollection}
+        setSelectedEmbeddingProfileId={setSelectedEmbeddingProfileId}
+        toggleLearningApproval={toggleLearningApproval}
+      />
     ) : activeView === 'admin' && canAdminUsers ? (
       <section className="adminRouteStack" aria-label="Admin workspace">
         <section className="detailPanel pageIntroPanel">

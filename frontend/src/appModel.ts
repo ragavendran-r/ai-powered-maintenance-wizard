@@ -11,7 +11,15 @@ export const riskRank = { low: 1, medium: 2, high: 3, critical: 4 }
 
 export const applicationTitle = 'Intelligent Maintenance Wizard'
 
-export type AppView = 'commandCenter' | 'assets' | 'asset' | 'workExecution' | 'planning' | 'reliability' | 'admin'
+export type AppView =
+  | 'commandCenter'
+  | 'assets'
+  | 'asset'
+  | 'workExecution'
+  | 'planning'
+  | 'reliability'
+  | 'learningReview'
+  | 'admin'
 export type AssetTab = 'summary' | 'maintenance' | 'performance' | 'reliability' | 'documents' | 'workOrders'
 
 export const assetSectionsByTab: Record<AssetTab, AssetDetailSection[]> = {

@@ -1021,6 +1021,16 @@ h3 {
   align-content: start;
   display: grid;
   gap: 14px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.reliabilityRouteStack {
+  align-content: start;
+  display: grid;
+  gap: 16px;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .rcaWorkspace {
@@ -1030,18 +1040,37 @@ h3 {
   border-radius: var(--panel-radius);
   display: grid;
   gap: 14px;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   padding: var(--panel-padding);
 }
 
 .rcaToolbar {
   align-items: end;
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  grid-template-columns: minmax(220px, 1.2fr) minmax(220px, 1.1fr) auto auto auto;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .compactField select {
   min-height: 38px;
+}
+
+.rcaToolbar button,
+.rcaToolbar .field {
+  min-width: 0;
+}
+
+.rcaToolbar .field {
+  flex: 1 1 210px;
+}
+
+.rcaToolbar button {
+  flex: 0 1 148px;
+  white-space: normal;
 }
 
 .dataPanel {
@@ -1057,7 +1086,8 @@ h3 {
 .rcaCaseGrid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
 }
 
 .rcaCaseSummary,
@@ -1075,6 +1105,7 @@ h3 {
 
 .rcaCaseTitle {
   justify-content: space-between;
+  min-width: 0;
 }
 
 .rcaCaseTitle > div:first-child {
@@ -1094,6 +1125,7 @@ h3 {
 .actionItem small,
 .timelineItem small {
   color: var(--color-text-muted);
+  overflow-wrap: anywhere;
 }
 
 .rcaBadges {
@@ -1147,7 +1179,7 @@ h3 {
 
 .rcaFacts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .rcaFacts span,
@@ -1156,7 +1188,20 @@ h3 {
   border-radius: 6px;
   display: grid;
   gap: 3px;
+  min-width: 0;
   padding: 9px;
+}
+
+.rcaFacts strong,
+.rcaLinkedWorkOrder strong,
+.hypothesisItem strong,
+.actionItem strong,
+.timelineItem strong,
+.fishboneCategory strong,
+.fishboneCategory span,
+.rcaSummary,
+.rcaCaseSummary p {
+  overflow-wrap: anywhere;
 }
 
 .rcaFacts small {
@@ -1188,7 +1233,7 @@ h3 {
 .twoColumnList {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .twoColumnList ul,
@@ -1222,7 +1267,7 @@ h3 {
 .fishboneGrid {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .fishboneCategory strong {
@@ -1237,13 +1282,23 @@ h3 {
   align-items: end;
   display: grid;
   gap: 10px;
-  grid-template-columns: auto minmax(180px, 0.9fr) minmax(260px, 1.4fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  min-width: 0;
+}
+
+.learningToolbar .field,
+.learningToolbar button {
+  min-width: 0;
+}
+
+.learningToolbar button {
+  width: 100%;
 }
 
 .learningStats {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .learningStat {
@@ -1319,7 +1374,7 @@ h3 {
 .migrationPreview {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
 .vectorStoreFacts span,
@@ -1344,7 +1399,17 @@ h3 {
   align-items: end;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(180px, 1.4fr) minmax(180px, 1fr) repeat(4, auto);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  min-width: 0;
+}
+
+.ragControls .field,
+.ragControls button {
+  min-width: 0;
+}
+
+.ragControls button {
+  width: 100%;
 }
 
 .migrationNotice,
@@ -1428,7 +1493,8 @@ h3 {
 .learningGrid {
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  min-width: 0;
 }
 
 .learningPanel {
@@ -1436,6 +1502,7 @@ h3 {
   border-radius: 8px;
   display: grid;
   gap: 12px;
+  min-width: 0;
   padding: 14px;
 }
 
@@ -3706,6 +3773,8 @@ h3 {
   .workOrderTable,
   .assetDetailGrid,
   .assetsView,
+  .reliabilityRouteStack,
+  .rcaWorkspace,
   .learningView,
   .ingestionView
 ) :where(p, li, dd, dt, span, small, button, input, select, textarea, strong),

@@ -9,6 +9,7 @@ export type NavigationIcon =
   | 'execution'
   | 'planning'
   | 'reliability'
+  | 'learning'
   | 'admin'
 
 export interface JobNavigationItem {
@@ -98,12 +99,24 @@ export const jobNavigationItems: JobNavigationItem[] = [
     id: 'reliability',
     label: 'Reliability',
     icon: 'reliability',
-    purpose: 'Prediction, anomalies, learning, RAG health, and PEFT tuning.',
+    purpose: 'RCA cases, prediction, anomalies, and reliability evidence.',
     roles: ['admin', 'maintenance_engineer', 'reliability_engineer'],
     rolePriority: {
       reliability_engineer: 1,
       maintenance_engineer: 2,
       admin: 6,
+    },
+  },
+  {
+    id: 'learningReview',
+    label: 'Learning and Tuning',
+    icon: 'learning',
+    purpose: 'RAG health, approved examples, PEFT tuning, evaluation, and model promotion.',
+    roles: ['admin', 'maintenance_engineer', 'reliability_engineer'],
+    rolePriority: {
+      reliability_engineer: 2,
+      maintenance_engineer: 3,
+      admin: 7,
     },
   },
   {
@@ -141,7 +154,7 @@ export const roleUiProfiles: Record<UserRole, RoleUiProfile> = {
   },
   reliability_engineer: {
     homeView: 'reliability',
-    mission: 'Improve prediction, anomaly review, learning quality, and RAG health.',
+    mission: 'Improve prediction, anomaly review, RCA quality, and reliability evidence.',
     focus: 'Reliability intelligence',
   },
   planner: {
