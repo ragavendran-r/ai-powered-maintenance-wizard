@@ -15,7 +15,7 @@ import type {
   WorkOrderSpareReservation,
 } from '../services/api'
 import type { AssistantTurn } from '../assistantContent'
-import { AssistantMessageContent, FormattedAssistantContent, usePinnedStreamScroll } from '../assistantContent'
+import { AssistantMessageContent, FormattedAssistantContent, assistantProviderLabel, usePinnedStreamScroll } from '../assistantContent'
 import {
   supervisorAssistantName,
   technicianAssistantName,
@@ -194,7 +194,7 @@ export function WorkOrdersRoute({
                         {technicianChat.map((turn) => (
                           <div className={`chatBubble ${turn.role}`} key={turn.id}>
                             <span>{turn.role === 'assistant' ? technicianAssistantName : 'You'}</span>
-                            {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
+                            {turn.provider && <small>{assistantProviderLabel(turn)}</small>}
                             <AssistantMessageContent turn={turn} />
                           </div>
                         ))}
@@ -240,7 +240,7 @@ export function WorkOrdersRoute({
                         {supervisorChat.map((turn) => (
                           <div className={`chatBubble ${turn.role}`} key={turn.id}>
                             <span>{turn.role === 'assistant' ? supervisorAssistantName : 'You'}</span>
-                            {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
+                            {turn.provider && <small>{assistantProviderLabel(turn)}</small>}
                             <AssistantMessageContent turn={turn} />
                           </div>
                         ))}

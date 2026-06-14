@@ -18,6 +18,7 @@ export function assistantTurnId(prefix: string) {
 export function assistantProviderLabel(turn: AssistantTurn) {
   if (!turn.provider) return ''
   if (turn.provider === 'deterministic') return 'Dashboard data'
+  if (turn.provider === 'work_order_tool') return 'Neo action'
   return `${turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · ${turn.provider}`
 }
 
