@@ -693,6 +693,26 @@ def test_technician_assistant_streams_sse_response():
     assert forbidden_response.status_code == 403
 
 
+def test_technician_assistant_answers_material_availability_question_directly():
+    headers = auth_headers("technician@plant.local")
+
+    with client.stream(
+        "POST",
+        "/api/work-orders/technician-assist/stream",
+        json={"work_order_id": "WO-8304", "observation": "when is Drive end bearing expected to be available"},
+        headers=headers,
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert "Material Availability" in body
+    assert "Drive end spherical roller bearing" in body
+    assert "2026-07-03" in body
+    assert "21 day lead time" in body
+    assert "High-temperature coupling grease" in body
+    assert "Safety:" not in body
+
+
 def test_supervisor_assistant_reviews_follow_up_queue_and_drafts_order():
     headers = auth_headers("supervisor@plant.local")
 

@@ -14,7 +14,7 @@ from app.models.schemas import (
     WorkOrderCreateRequest,
 )
 from app.services.ai_client import configured_llm_client
-from app.services.learning import record_assistant_interaction
+from app.services.learning import learning_context_for_asset, record_assistant_interaction
 from app.services.llm import LLMTextResponse
 from app.services.retrieval import retrieve_evidence
 from app.services.risk import health_summary
@@ -23,6 +23,21 @@ from app.services.risk import health_summary
 TECHNICIAN_ASSISTANT_NAME = "Neo"
 SUPERVISOR_ASSISTANT_NAME = "Neo"
 WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS = 600
+MATERIAL_INQUIRY_TERMS = (
+    "available",
+    "availability",
+    "blocked spare",
+    "blocker",
+    "eta",
+    "expected",
+    "lead time",
+    "material",
+    "procurement",
+    "reorder",
+    "spare",
+    "substitute",
+    "when",
+)
 
 
 class TechnicianAssistantLLMOutput(BaseModel):
@@ -60,6 +75,7 @@ def technician_assistance(
         raise HTTPException(status_code=404, detail="Equipment not found")
     summary = health_summary(work_order["equipment_id"])
     material_lines = _material_context_lines(work_order)
+    learning_notes = learning_context_for_asset(work_order["equipment_id"], limit=3)
     evidence = retrieve_evidence(
         " ".join(
             [
@@ -83,6 +99,8 @@ def technician_assistance(
             f"Current risk: {summary.risk_level}, health score: {summary.health_score}",
             "Material plan:",
             *material_lines,
+            "Approved learning context:",
+            *(learning_notes or ["- No approved learning notes available for this asset."]),
             "Active alerts:",
             *[f"- {alert.message}" for alert in summary.active_alerts[:4]],
             "Evidence:",
@@ -137,6 +155,7 @@ def stream_technician_assistance(
         raise HTTPException(status_code=404, detail="Equipment not found")
     summary = health_summary(work_order["equipment_id"])
     material_lines = _material_context_lines(work_order)
+    learning_notes = learning_context_for_asset(work_order["equipment_id"], limit=3)
     evidence = retrieve_evidence(
         " ".join(
             [
@@ -149,7 +168,7 @@ def stream_technician_assistance(
         work_order["equipment_id"],
     )
     fallback = _technician_fallback(request, work_order, summary, evidence)
-    prompt = _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback)
+    prompt = _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes)
     content_parts: list[str] = []
     provider = "mock"
     used_live_provider = False
@@ -333,7 +352,11 @@ def _technician_system_prompt() -> str:
         f"You are {TECHNICIAN_ASSISTANT_NAME}, a steel-plant maintenance technician assistant. Return only valid JSON "
         "matching TechnicianAssistantLLMOutput. Give safe live directions, practical "
         "recommendations, problem code, failure class, and a concise completion summary. "
-        "Ground every suggestion in the supplied work order, asset state, alerts, and evidence."
+        "Ground every suggestion in the supplied work order, asset state, alerts, evidence, "
+        "material plan, and approved learning context. If the technician asks about blocked "
+        "spares, material availability, procurement, lead time, reorder, or substitutes, answer "
+        "that material question directly in next_prompt before any execution guidance. Do not "
+        "override deterministic inventory or work-order facts with learned context."
     )
 
 
@@ -341,10 +364,16 @@ def _technician_text_system_prompt() -> str:
     return (
         f"You are {TECHNICIAN_ASSISTANT_NAME}, a steel-plant maintenance technician assistant. "
         "Stream a concise Markdown chat response for the assigned technician. Do not return JSON. "
-        "Use short headings and bullets. Include live directions, safety reminders, recommended actions, "
-        "a suggested problem code, and a completion summary. Ground every suggestion in the supplied work "
-        "order, asset state, alerts, and evidence. Do not include table names, column names, row counts, "
-        "or table-update metadata."
+        "Use short headings and bullets. When the technician asks about blocked spares, material "
+        "readiness, availability, expected date, procurement, reorder, lead time, or substitutes, "
+        "answer that question directly first from the Material plan. Include expected date or say "
+        "not recorded, lead time, current reserved/on-hand quantity, blocker note, and substitute "
+        "limitations when supplied. Do not lead a material question with generic safety or inspection "
+        "steps. For execution questions, include live directions, safety reminders, recommended "
+        "actions, a suggested problem code, and a completion summary. Ground every suggestion in the "
+        "supplied work order, asset state, alerts, evidence, material plan, and approved learning "
+        "context. Do not override deterministic inventory or work-order facts with learned context. "
+        "Do not include table names, column names, row counts, or table-update metadata."
     )
 
 
@@ -366,7 +395,8 @@ def _supervisor_text_system_prompt() -> str:
     )
 
 
-def _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback) -> str:
+def _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes) -> str:
+    material_inquiry = _is_material_inquiry(request.observation or "")
     return "\n".join(
         [
             f"Work order: {work_order['id']} {work_order['title']}",
@@ -375,11 +405,20 @@ def _technician_text_prompt(request, work_order, equipment, summary, evidence, f
             f"Description: {work_order['description']}",
             f"Recommended action: {work_order['recommended_action']}",
             f"Technician observation: {request.observation or 'No observation yet'}",
+            f"Technician intent: {'material availability question' if material_inquiry else 'execution guidance'}",
+            (
+                "Response objective: answer the blocked spare or material availability question directly "
+                "before any execution checklist."
+                if material_inquiry
+                else "Response objective: guide safe technician execution."
+            ),
             f"Current risk: {summary.risk_level}, health score: {summary.health_score}",
             f"Suggested problem code from app rules: {fallback.suggested_problem_code}",
             f"Suggested failure class from app rules: {fallback.suggested_failure_class}",
             "Material plan:",
             *_material_context_lines(work_order),
+            "Approved learning context:",
+            *(learning_notes or ["- No approved learning notes available for this asset."]),
             "Active alerts:",
             *[f"- {alert.message}" for alert in summary.active_alerts[:4]],
             "Evidence:",
@@ -408,6 +447,20 @@ def _supervisor_text_prompt(request, work_orders, selected, fallback) -> str:
 
 
 def _technician_stream_fallback_text(response: TechnicianAssistantResponse, reason: str) -> str:
+    if response.next_prompt.startswith("Material answer:"):
+        lines = [
+            "### Material Availability",
+            response.next_prompt.removeprefix("Material answer:").strip(),
+            "",
+            "### Technician Constraints",
+            *[f"- {item}" for item in response.live_directions],
+            *[f"- {item}" for item in response.recommendations],
+            f"- Problem code: {response.suggested_problem_code}",
+            f"- Summary: {response.completion_summary}",
+        ]
+        if reason:
+            lines.append(f"- LLM fallback reason: {reason}")
+        return "\n".join(lines)
     lines = [
         f"### {TECHNICIAN_ASSISTANT_NAME} Guidance",
         response.next_prompt,
@@ -513,9 +566,15 @@ def _technician_fallback(request, work_order, summary, evidence) -> TechnicianAs
         if request.observation
         else f"{work_order['title']} is ready for technician execution; final findings are pending."
     )
+    next_prompt = "Do you observe abnormal temperature, vibration, looseness, leakage, or damaged insulation?"
+    if _is_material_inquiry(request.observation or ""):
+        next_prompt = f"Material answer: {_material_availability_answer(work_order)}"
+        directions = _material_constraint_lines(work_order)
+        recommendations = _material_recommendation_lines(work_order)
+        completion_summary = f"{work_order['id']} material availability reviewed for technician execution."
     return TechnicianAssistantResponse(
         work_order_id=work_order["id"],
-        next_prompt="Do you observe abnormal temperature, vibration, looseness, leakage, or damaged insulation?",
+        next_prompt=next_prompt,
         live_directions=directions,
         recommendations=recommendations,
         safety_reminders=[
@@ -611,6 +670,95 @@ def _material_context_lines(work_order) -> list[str]:
             f"row blocker {reservation.get('blocker_status', 'not_required')}{substitute}"
         )
     return lines
+
+
+def _is_material_inquiry(message: str) -> bool:
+    lowered = message.lower()
+    if not lowered.strip():
+        return False
+    return any(term in lowered for term in MATERIAL_INQUIRY_TERMS)
+
+
+def _readable_status(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "Not recorded"
+    return text.replace("_", " ").capitalize()
+
+
+def _material_availability_answer(work_order) -> str:
+    reservations = work_order.get("spare_reservations", [])
+    if not reservations:
+        note = work_order.get("material_blocker_note") or "No spare reservation is recorded for this work order."
+        return f"{work_order['id']} material readiness is {_readable_status(work_order.get('material_readiness'))}. {note}"
+
+    reservation = _primary_material_reservation(reservations)
+    expected = reservation.get("expected_available_date") or "not recorded"
+    lead_time = int(reservation.get("procurement_lead_time_days") or 0)
+    lead_time_text = f"{lead_time} day lead time" if lead_time else "lead time not recorded"
+    reserved = reservation.get("reserved_qty", 0)
+    required = reservation.get("required_qty", 0)
+    available = reservation.get("available_qty", 0)
+    procurement = _readable_status(reservation.get("procurement_status"))
+    blocker = work_order.get("material_blocker_note") or reservation.get("blocker_note")
+    substitute = reservation.get("substitute_name")
+    parts = [
+        (
+            f"The blocked spare for {work_order['id']} is {reservation['spare_name']}. "
+            f"Expected availability is {expected}; procurement is {procurement} with {lead_time_text}."
+        ),
+        f"Current quantity: {reserved}/{required} reserved and {available} on hand.",
+    ]
+    if blocker:
+        parts.append(f"Blocker: {blocker}")
+    if substitute:
+        parts.append(f"Substitute option: {substitute}; use it only within the approved task scope.")
+    parts.append("Do not start intrusive replacement work until the spare is reserved or an approved substitute is confirmed.")
+    return " ".join(parts)
+
+
+def _primary_material_reservation(reservations: list[dict]) -> dict:
+    return next(
+        (
+            item
+            for item in reservations
+            if item.get("blocker_status") in {"blocked", "waiting_procurement", "reorder_requested"}
+        ),
+        reservations[0],
+    )
+
+
+def _material_constraint_lines(work_order) -> list[str]:
+    lines = []
+    blocker = _material_blocker_sentence(work_order)
+    if blocker:
+        lines.append(blocker)
+    reservations = work_order.get("spare_reservations", [])
+    if reservations:
+        reservation = _primary_material_reservation(reservations)
+        expected = reservation.get("expected_available_date") or "not recorded"
+        lines.append(
+            f"{reservation['spare_name']} has {reservation.get('available_qty', 0)} on hand, "
+            f"{reservation.get('reserved_qty', 0)}/{reservation.get('required_qty', 0)} reserved, "
+            f"and expected availability {expected}."
+        )
+    return lines or ["No material blocker is recorded for this work order."]
+
+
+def _material_recommendation_lines(work_order) -> list[str]:
+    reservations = work_order.get("spare_reservations", [])
+    recommendations = [
+        "Confirm planner or stores has updated the procurement ETA before staging intrusive work.",
+    ]
+    if reservations:
+        reservation = _primary_material_reservation(reservations)
+        if reservation.get("substitute_name"):
+            recommendations.append(
+                f"Use substitute {reservation['substitute_name']} only if the supervisor approves the limited scope."
+            )
+        if reservation.get("reorder_requested"):
+            recommendations.append("Track the reorder request and keep the work order in material-waiting status until availability is confirmed.")
+    return recommendations
 
 
 def _material_summary_line(work_order) -> str:
