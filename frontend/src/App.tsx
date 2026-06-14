@@ -109,6 +109,105 @@ const emptyMaintenanceInsightLoading: MaintenanceInsightLoading = {
   logEntries: false,
 }
 
+function markdownBullets(items: string[]) {
+  return items.length > 0 ? items.map((item) => `- ${item}`) : ['- None recorded.']
+}
+
+function buildMaintenanceInsightsMarkdown({
+  abnormalAlertReports,
+  decisionSummaries,
+  logEntries,
+  structuredReports,
+  summary,
+}: {
+  abnormalAlertReports: AbnormalAlertReport[]
+  decisionSummaries: MaintenanceDecisionSummary[]
+  logEntries: DigitalMaintenanceLogEntry[]
+  structuredReports: StructuredMaintenanceReport[]
+  summary: MaintenanceInsightReportSummary | null
+}) {
+  const generatedAt = summary?.generated_at ?? new Date().toISOString()
+  const lines = [
+    '# Structured Maintenance Insights',
+    '',
+    `Generated: ${generatedAt}`,
+    `Assets reviewed: ${summary?.assets_reviewed ?? structuredReports.length}`,
+    '',
+    '## Maintenance Reports',
+  ]
+
+  for (const report of structuredReports) {
+    lines.push(
+      '',
+      `### ${report.equipment_name} (${report.equipment_id})`,
+      `- Risk: ${report.risk_level}`,
+      `- Health: ${report.health_score}%`,
+      `- Failure probability: ${Math.round(report.failure_probability * 100)}%`,
+      `- Estimated RUL: ${report.remaining_useful_life_days} days`,
+      `- Summary: ${report.report_summary}`,
+      '',
+      'Probable causes:',
+      ...markdownBullets(report.probable_causes),
+      'Immediate actions:',
+      ...markdownBullets(report.immediate_actions),
+      'Planned actions:',
+      ...markdownBullets(report.planned_actions),
+      'Evidence:',
+      ...markdownBullets(report.evidence),
+    )
+  }
+
+  lines.push('', '## Abnormal Alert Reports')
+  for (const report of abnormalAlertReports) {
+    lines.push(
+      '',
+      `### ${report.alert_id}: ${report.equipment_name}`,
+      `- Signal: ${report.signal}`,
+      `- Severity: ${report.severity}`,
+      `- Value: ${report.value}${report.unit}; threshold ${report.threshold}${report.unit}`,
+      `- Threshold delta: ${report.threshold_delta}${report.unit}`,
+      `- Decision: ${report.decision}`,
+      'Recommended actions:',
+      ...markdownBullets(report.recommended_actions),
+    )
+  }
+
+  lines.push('', '## Decision Summaries')
+  for (const decisionSummary of decisionSummaries) {
+    lines.push(
+      '',
+      `### ${decisionSummary.title}`,
+      `Audience: ${decisionSummary.audience}`,
+      '',
+      decisionSummary.summary,
+      '',
+      'Decisions:',
+      ...markdownBullets(decisionSummary.decisions),
+      'Risks:',
+      ...markdownBullets(decisionSummary.risks),
+      'Next actions:',
+      ...markdownBullets(decisionSummary.next_actions),
+    )
+  }
+
+  lines.push('', '## Equipment Digital Maintenance Log Entries')
+  for (const entry of logEntries) {
+    lines.push(
+      '',
+      `### ${entry.equipment_name} (${entry.equipment_id})`,
+      `- Entry type: ${entry.entry_type}`,
+      `- Timestamp: ${entry.timestamp}`,
+      '',
+      entry.content,
+      '',
+      'Source IDs:',
+      ...markdownBullets(entry.source_ids),
+    )
+  }
+
+  return `${lines.join('\n')}\n`
+}
+
 function isAbortError(error: unknown) {
   return Boolean(error && typeof error === 'object' && 'name' in error && error.name === 'AbortError')
 }
@@ -337,6 +436,7 @@ export function App() {
   const [maintenanceLogEntries, setMaintenanceLogEntries] = useState<DigitalMaintenanceLogEntry[]>([])
   const [maintenanceInsightsLoading, setMaintenanceInsightsLoading] = useState<MaintenanceInsightLoading>(emptyMaintenanceInsightLoading)
   const [maintenanceInsightsMessage, setMaintenanceInsightsMessage] = useState('')
+  const [maintenanceInsightsExporting, setMaintenanceInsightsExporting] = useState(false)
   const [users, setUsers] = useState<AuthUser[]>([])
   const [technicians, setTechnicians] = useState<AuthUser[]>([])
   const [userMessage, setUserMessage] = useState('')
@@ -663,15 +763,27 @@ export function App() {
         })
     }
 
-    const requests = [
+    const priorityRequests = [
       loadSection('summary', () => api.maintenanceInsightReportSummary(equipmentId), setMaintenanceInsightSummary),
-      loadSection('structuredReports', () => api.structuredMaintenanceReports(equipmentId), setStructuredReports),
       loadSection('abnormalAlerts', () => api.abnormalAlertReports(equipmentId), setAbnormalAlertReports),
-      loadSection('decisionSummaries', () => api.maintenanceDecisionSummaries(equipmentId), setDecisionSummaries),
-      loadSection('logEntries', () => api.digitalMaintenanceLogEntries(equipmentId), setMaintenanceLogEntries),
     ]
+    const priorityResultsPromise = Promise.all(priorityRequests)
 
-    return Promise.all(requests).then((results) => {
+    const detailSequence = priorityResultsPromise
+      .then(() => loadSection('structuredReports', () => api.structuredMaintenanceReports(equipmentId), setStructuredReports))
+      .then((structuredResult) =>
+        loadSection('decisionSummaries', () => api.maintenanceDecisionSummaries(equipmentId), setDecisionSummaries).then(
+          (decisionResult) => [structuredResult, decisionResult],
+        ),
+      )
+      .then((previousResults) =>
+        loadSection('logEntries', () => api.digitalMaintenanceLogEntries(equipmentId), setMaintenanceLogEntries).then(
+          (logResult) => [...previousResults, logResult],
+        ),
+      )
+
+    return Promise.all([priorityResultsPromise, detailSequence]).then(([priorityResults, detailResults]) => {
+      const results = [...priorityResults, ...detailResults]
       if (results.every(Boolean)) {
         setApiState('connected')
       }
@@ -1529,18 +1641,30 @@ export function App() {
   }
 
   async function downloadMaintenanceInsights(equipmentId?: string) {
+    setMaintenanceInsightsExporting(true)
+    setMaintenanceInsightsMessage('')
     try {
-      const markdown = await api.maintenanceInsightReportsMarkdown(equipmentId)
+      const markdown = buildMaintenanceInsightsMarkdown({
+        abnormalAlertReports,
+        decisionSummaries,
+        logEntries: maintenanceLogEntries,
+        structuredReports,
+        summary: maintenanceInsightSummary,
+      })
       const blob = new Blob([markdown], { type: 'text/markdown' })
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
       link.download = `${equipmentId || 'plant'}-maintenance-insights.md`
+      document.body.appendChild(link)
       link.click()
+      link.remove()
       window.URL.revokeObjectURL(url)
       setMaintenanceInsightsMessage('Structured maintenance insights downloaded')
     } catch {
       setMaintenanceInsightsMessage('Structured maintenance insights could not be downloaded')
+    } finally {
+      setMaintenanceInsightsExporting(false)
     }
   }
 
@@ -2700,6 +2824,7 @@ export function App() {
         abnormalAlertReports={abnormalAlertReports}
         decisionSummaries={decisionSummaries}
         downloadMaintenanceInsights={downloadMaintenanceInsights}
+        exportLoading={maintenanceInsightsExporting}
         logEntries={maintenanceLogEntries}
         loading={maintenanceInsightsLoading}
         message={maintenanceInsightsMessage}

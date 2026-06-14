@@ -38,6 +38,7 @@ export function ReportsRoute({
   abnormalAlertReports,
   decisionSummaries,
   downloadMaintenanceInsights,
+  exportLoading,
   loading,
   logEntries,
   message,
@@ -49,6 +50,7 @@ export function ReportsRoute({
   abnormalAlertReports: AbnormalAlertReport[]
   decisionSummaries: MaintenanceDecisionSummary[]
   downloadMaintenanceInsights: (equipmentId?: string) => void
+  exportLoading: boolean
   loading: ReportSectionLoading
   logEntries: DigitalMaintenanceLogEntry[]
   message: string
@@ -82,9 +84,14 @@ export function ReportsRoute({
             <RefreshCw size={16} />
             Refresh selected asset
           </button>
-          <button className="textButton" type="button" disabled={!hasAnyContent} onClick={() => downloadMaintenanceInsights(exportScope)}>
+          <button
+            className="textButton"
+            type="button"
+            disabled={!hasAnyContent || anyLoading || exportLoading}
+            onClick={() => downloadMaintenanceInsights(exportScope)}
+          >
             <Download size={16} />
-            Export Markdown
+            {exportLoading ? 'Exporting...' : 'Export Markdown'}
           </button>
         </div>
         {message && <p className="inlineStatus">{message}</p>}

@@ -2219,6 +2219,11 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
   it('opens structured maintenance insights and scopes reports to the selected asset', async () => {
     maintenanceInsightsDelayMs = 50
+    const createObjectUrl = vi.fn(() => 'blob:maintenance-insights')
+    const revokeObjectUrl = vi.fn()
+    Object.defineProperty(window.URL, 'createObjectURL', { configurable: true, value: createObjectUrl })
+    Object.defineProperty(window.URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl })
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
     render(<App />)
     await signIn()
 
@@ -2239,8 +2244,8 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(await screen.findByRole('heading', { name: 'Structured Maintenance Insights and Reports' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Structured Maintenance Reports' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Abnormal Alert Reports' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Engineer Maintenance Decision Summary' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Supervisor Maintenance Decision Summary' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Engineer Maintenance Decision Summary' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Supervisor Maintenance Decision Summary' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Equipment Digital Maintenance Log Entries' })).toBeInTheDocument()
     expect(screen.getByText('Hot Strip Mill Main Drive Motor is at critical risk with 10% health.')).toBeInTheDocument()
     expect(screen.getByText('Blast Furnace Combustion Air Blower has pressure variance risk.')).toBeInTheDocument()
@@ -2252,6 +2257,21 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       expect(screen.queryByText('Blast Furnace Combustion Air Blower has pressure variance risk.')).not.toBeInTheDocument()
     })
     expect(await screen.findByText('Hot Strip Mill Main Drive Motor is at critical risk with 10% health.')).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Export Markdown' })).not.toBeDisabled()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Export Markdown' }))
+
+    await waitFor(() => {
+      expect(anchorClick).toHaveBeenCalled()
+    })
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob))
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:maintenance-insights')
+    expect(screen.getByText('Structured maintenance insights downloaded')).toBeInTheDocument()
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) => url.toString().includes('/api/reports/maintenance-insights/markdown')),
+    ).toBe(false)
   })
 
   it('lets Neo update the dashboard center table for read-only users', async () => {
@@ -2798,7 +2818,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()
     })
     expect(fetch).toHaveBeenCalledWith(
-      'http://localhost:8000/api/ingest/document-file',
+      'http://127.0.0.1:8000/api/ingest/document-file',
       expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
     )
   })
@@ -2854,7 +2874,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()
     })
     expect(fetch).toHaveBeenCalledWith(
-      'http://localhost:8000/api/ingest/documents',
+      'http://127.0.0.1:8000/api/ingest/documents',
       expect.objectContaining({ method: 'POST' }),
     )
   })
