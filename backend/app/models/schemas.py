@@ -18,6 +18,8 @@ MaterialBlockerStatus = Literal[
 ]
 ProcurementStatus = Literal["not_required", "not_requested", "requested", "ordered", "received"]
 WorkOrderAssistantAudience = Literal["technician", "supervisor"]
+RcaCaseStatus = Literal["open", "investigating", "actions_defined", "closed"]
+RcaCorrectiveActionStatus = Literal["proposed", "approved", "in_progress", "complete", "rejected"]
 AnomalyContextClass = Literal[
     "requires_investigation",
     "startup_transient",
@@ -365,6 +367,111 @@ class SupervisorAssistantResponse(BaseModel):
     referenced_work_orders: list[str] = []
     used_live_provider: bool = False
     provider: str = "mock"
+
+
+class RcaHypothesis(BaseModel):
+    id: str
+    cause: str
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    evidence: list[str] = Field(default_factory=list)
+    missing_checks: list[str] = Field(default_factory=list)
+    status: Literal["candidate", "validated", "rejected"] = "candidate"
+
+
+class RcaEvidenceItem(BaseModel):
+    id: str
+    timestamp: str
+    source_type: str
+    source_id: str
+    title: str
+    summary: str
+    relevance: str
+
+
+class RcaCorrectiveAction(BaseModel):
+    id: str
+    action: str
+    owner: str = "Maintenance Engineer"
+    due_date: Optional[str] = None
+    status: RcaCorrectiveActionStatus = "proposed"
+    verification: Optional[str] = None
+
+
+class RcaClosureReview(BaseModel):
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    accepted_for_learning: bool = False
+    final_root_cause: Optional[str] = None
+    recurrence_prevention: Optional[str] = None
+    lessons_learned: Optional[str] = None
+
+
+class RcaCase(BaseModel):
+    id: str
+    equipment_id: str
+    work_order_id: Optional[str] = None
+    title: str
+    status: RcaCaseStatus = "open"
+    severity: RiskLevel = "medium"
+    problem_statement: str
+    symptoms: list[str] = Field(default_factory=list)
+    hypotheses: list[RcaHypothesis] = Field(default_factory=list)
+    why_chain: list[str] = Field(default_factory=list)
+    fishbone: dict[str, list[str]] = Field(default_factory=dict)
+    evidence_timeline: list[RcaEvidenceItem] = Field(default_factory=list)
+    corrective_actions: list[RcaCorrectiveAction] = Field(default_factory=list)
+    closure_review: Optional[RcaClosureReview] = None
+    probable_cause: Optional[str] = None
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    missing_checks: list[str] = Field(default_factory=list)
+    morpheus_summary: Optional[str] = None
+    used_live_provider: bool = False
+    provider: str = "mock"
+    created_at: str
+    updated_at: str
+    closed_at: Optional[str] = None
+
+
+class RcaCaseCreateRequest(BaseModel):
+    equipment_id: str
+    work_order_id: Optional[str] = None
+    title: Optional[str] = None
+    problem_statement: Optional[str] = None
+    symptoms: list[str] = Field(default_factory=list)
+
+
+class RcaCaseUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    status: Optional[RcaCaseStatus] = None
+    severity: Optional[RiskLevel] = None
+    problem_statement: Optional[str] = None
+    symptoms: Optional[list[str]] = None
+    hypotheses: Optional[list[RcaHypothesis]] = None
+    why_chain: Optional[list[str]] = None
+    fishbone: Optional[dict[str, list[str]]] = None
+    evidence_timeline: Optional[list[RcaEvidenceItem]] = None
+    corrective_actions: Optional[list[RcaCorrectiveAction]] = None
+    closure_review: Optional[RcaClosureReview] = None
+    probable_cause: Optional[str] = None
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    missing_checks: Optional[list[str]] = None
+    morpheus_summary: Optional[str] = None
+    used_live_provider: Optional[bool] = None
+    provider: Optional[str] = None
+
+
+class RcaMorpheusDraftRequest(BaseModel):
+    case_id: Optional[str] = None
+    equipment_id: Optional[str] = None
+    work_order_id: Optional[str] = None
+    symptoms: list[str] = Field(default_factory=list)
+    question: Optional[str] = None
+
+
+class RcaMorpheusDraftResponse(BaseModel):
+    case: RcaCase
+    evidence: list[Evidence] = Field(default_factory=list)
+    message: str
 
 
 class SensorReading(BaseModel):

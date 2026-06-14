@@ -218,6 +218,35 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS rca_cases (
+        id TEXT PRIMARY KEY,
+        equipment_id TEXT NOT NULL,
+        work_order_id TEXT,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        severity TEXT NOT NULL DEFAULT 'medium',
+        problem_statement TEXT NOT NULL,
+        symptoms TEXT NOT NULL DEFAULT '[]',
+        hypotheses TEXT NOT NULL DEFAULT '[]',
+        why_chain TEXT NOT NULL DEFAULT '[]',
+        fishbone TEXT NOT NULL DEFAULT '{}',
+        evidence_timeline TEXT NOT NULL DEFAULT '[]',
+        corrective_actions TEXT NOT NULL DEFAULT '[]',
+        closure_review TEXT,
+        probable_cause TEXT,
+        confidence REAL NOT NULL DEFAULT 0,
+        missing_checks TEXT NOT NULL DEFAULT '[]',
+        morpheus_summary TEXT,
+        used_live_provider INTEGER NOT NULL DEFAULT 0,
+        provider TEXT NOT NULL DEFAULT 'mock',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        closed_at TEXT,
+        FOREIGN KEY (equipment_id) REFERENCES equipment(id),
+        FOREIGN KEY (work_order_id) REFERENCES work_orders(id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS documents (
         id TEXT PRIMARY KEY,
         source_type TEXT NOT NULL,
@@ -508,7 +537,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "16"
+SCHEMA_VERSION = "17"
 _INITIALIZING = False
 
 
@@ -631,6 +660,7 @@ def seed_from_sample_data(connection: sqlite3.Connection) -> None:
         data["documents"],
     )
     seed_demo_work_orders(connection)
+    seed_demo_rca_cases(connection)
     _execute_seed_sql(connection, "asset_detail_seed.sql")
     from app.data.repository import rebuild_document_chunks
 
@@ -890,6 +920,132 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
     )
 
 
+def seed_demo_rca_cases(connection: sqlite3.Connection) -> None:
+    cases = [
+        {
+            "id": "RCA-9001",
+            "equipment_id": "RM-DRIVE-01",
+            "work_order_id": "WO-8304",
+            "title": "Drive-end vibration root cause review",
+            "status": "investigating",
+            "severity": "critical",
+            "problem_statement": (
+                "Critical drive-end vibration continues on the hot strip mill main drive while "
+                "the bearing spare is unavailable."
+            ),
+            "symptoms": [
+                "Drive-end vibration exceeded the critical threshold during finishing stand load.",
+                "Technician observation reported hotspots and looseness around checked connections.",
+                "Bearing replacement is blocked until the drive-end bearing is procured.",
+            ],
+            "hypotheses": [
+                {
+                    "id": "HYP-1",
+                    "cause": "Drive-end bearing wear or lubrication degradation",
+                    "confidence": 0.68,
+                    "evidence": ["WO-8304 material blocker", "Prior vibration alert", "Bearing spare shortage"],
+                    "missing_checks": ["Confirm bearing temperature trend", "Inspect lubricant condition"],
+                    "status": "candidate",
+                },
+                {
+                    "id": "HYP-2",
+                    "cause": "Coupling misalignment or foundation bolt looseness under load",
+                    "confidence": 0.52,
+                    "evidence": ["Reported looseness", "Reduced-load vibration recurrence"],
+                    "missing_checks": ["Torque foundation bolts", "Check coupling alignment readings"],
+                    "status": "candidate",
+                },
+            ],
+            "why_chain": [
+                "Why did vibration exceed threshold? Drive-end rotating assembly is unstable under rolling load.",
+                "Why is the assembly unstable? Bearing condition or alignment looseness has not been isolated.",
+                "Why has intrusive confirmation not started? The required bearing spare is unavailable.",
+            ],
+            "fishbone": {
+                "Machine": ["Drive-end bearing", "Coupling alignment", "Foundation bolts"],
+                "Method": ["Reduced-load inspection only until spare is available"],
+                "Material": ["Drive end spherical roller bearing out of stock"],
+                "Measurement": ["Vibration trend", "Bearing temperature", "Alignment readings"],
+                "Environment": ["Finishing stand high-load campaign"],
+            },
+            "evidence_timeline": [
+                {
+                    "id": "EV-1",
+                    "timestamp": "2026-06-12T14:00:00+05:30",
+                    "source_type": "work_order",
+                    "source_id": "WO-8304",
+                    "title": "Work order blocked by material",
+                    "summary": "Drive end bearing is out of stock; intrusive replacement cannot proceed.",
+                    "relevance": "Explains why the RCA must separate safe inspection from corrective repair.",
+                },
+                {
+                    "id": "EV-2",
+                    "timestamp": "2026-06-12T15:00:00+05:30",
+                    "source_type": "log",
+                    "source_id": "WO-8304",
+                    "title": "Technician observation",
+                    "summary": "Hotspots and looseness were observed around checked connections.",
+                    "relevance": "Supports alignment or looseness hypothesis.",
+                },
+            ],
+            "corrective_actions": [
+                {
+                    "id": "CA-1",
+                    "action": "Procure drive-end bearing and reserve installation window.",
+                    "owner": "Planner",
+                    "due_date": "2026-07-03",
+                    "status": "approved",
+                    "verification": "Bearing received and reserved against WO-8304.",
+                },
+                {
+                    "id": "CA-2",
+                    "action": "Complete non-intrusive temperature, alignment, and bolt torque checks.",
+                    "owner": "Maintenance Engineer",
+                    "due_date": "2026-06-14",
+                    "status": "in_progress",
+                    "verification": "Attach readings and photos to the RCA evidence timeline.",
+                },
+            ],
+            "closure_review": None,
+            "probable_cause": "Drive-end bearing wear or coupling looseness remains probable pending missing checks.",
+            "confidence": 0.62,
+            "missing_checks": ["Bearing temperature trend", "Lubricant condition", "Coupling alignment", "Foundation bolt torque"],
+            "morpheus_summary": "Morpheus should prioritize safe evidence capture until the blocked bearing spare is available.",
+            "used_live_provider": 0,
+            "provider": "seed",
+            "closed_at": None,
+        }
+    ]
+    _insert_many(
+        connection,
+        "rca_cases",
+        [
+            "id",
+            "equipment_id",
+            "work_order_id",
+            "title",
+            "status",
+            "severity",
+            "problem_statement",
+            "symptoms",
+            "hypotheses",
+            "why_chain",
+            "fishbone",
+            "evidence_timeline",
+            "corrective_actions",
+            "closure_review",
+            "probable_cause",
+            "confidence",
+            "missing_checks",
+            "morpheus_summary",
+            "used_live_provider",
+            "provider",
+            "closed_at",
+        ],
+        cases,
+    )
+
+
 def reset_database() -> None:
     db_path = get_database_path()
     if db_path.exists():
@@ -913,6 +1069,7 @@ def database_status() -> dict[str, Any]:
         "work_orders",
         "work_order_spares",
         "work_order_logs",
+        "rca_cases",
         "documents",
         "document_chunks",
         "rag_embedding_profiles",

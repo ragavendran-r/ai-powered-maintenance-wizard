@@ -66,6 +66,11 @@ from app.models.schemas import (
     RagMigrationPlan,
     RagMigrationRequest,
     RagReindexRequest,
+    RcaCase,
+    RcaCaseCreateRequest,
+    RcaCaseUpdateRequest,
+    RcaMorpheusDraftRequest,
+    RcaMorpheusDraftResponse,
     Recommendation,
     StreamingStatus,
     SupervisorAssistantRequest,
@@ -112,6 +117,11 @@ from app.services.vector_store import vector_store_status
 from app.services.maintenance_labeling import label_feedback, label_maintenance_event, label_maintenance_history, stored_labels
 from app.services.neo_assistant import neo_assistance, neo_welcome, stream_neo_assistance
 from app.services.recommendations import generate_recommendation, stream_recommendation
+from app.services.rca import create_case as create_rca_case_record
+from app.services.rca import draft_case as draft_rca_case_record
+from app.services.rca import get_case as get_rca_case_record
+from app.services.rca import list_cases as list_rca_case_records
+from app.services.rca import update_case as update_rca_case_record
 from app.services.document_parser import parse_upload_to_document
 from app.services.reports import recommendation_to_markdown
 from app.services.retrieval import retrieve_evidence
@@ -127,6 +137,7 @@ from app.services.work_order_assistant import (
 
 LEARNING_REVIEW_ROLES = ("admin", "maintenance_engineer", "reliability_engineer")
 LEARNING_ARTIFACT_CLEANUP_ROLES = {"admin", "reliability_engineer"}
+RCA_WORKSPACE_ROLES = ("admin", "maintenance_engineer", "reliability_engineer", "maintenance_supervisor")
 MATERIAL_BLOCKER_STATUSES = {"blocked", "waiting_procurement", "reorder_requested"}
 MATERIAL_UNREADY_STATUSES = {"blocked", "pending"}
 
@@ -763,6 +774,57 @@ def store_feedback(recommendation_id: str, feedback: FeedbackRequest):
         stored=True,
         message="Feedback stored for future recommendation context.",
     )
+
+
+@app.get(
+    "/api/rca-cases",
+    response_model=list[RcaCase],
+    dependencies=[Depends(require_roles(*RCA_WORKSPACE_ROLES))],
+)
+def list_rca_cases(equipment_id: Optional[str] = None, status: Optional[str] = None):
+    return list_rca_case_records(equipment_id=equipment_id, status=status)
+
+
+@app.post(
+    "/api/rca-cases",
+    response_model=RcaCase,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles(*RCA_WORKSPACE_ROLES))],
+)
+def create_rca_case(request: RcaCaseCreateRequest):
+    return create_rca_case_record(request)
+
+
+@app.get(
+    "/api/rca-cases/{case_id}",
+    response_model=RcaCase,
+    dependencies=[Depends(require_roles(*RCA_WORKSPACE_ROLES))],
+)
+def get_rca_case(case_id: str):
+    return get_rca_case_record(case_id)
+
+
+@app.patch(
+    "/api/rca-cases/{case_id}",
+    response_model=RcaCase,
+)
+def update_rca_case(
+    case_id: str,
+    request: RcaCaseUpdateRequest,
+    current_user: UserPublic = Depends(require_roles(*RCA_WORKSPACE_ROLES)),
+):
+    return update_rca_case_record(case_id, request, current_user)
+
+
+@app.post(
+    "/api/rca-cases/morpheus-draft",
+    response_model=RcaMorpheusDraftResponse,
+)
+def draft_rca_case(
+    request: RcaMorpheusDraftRequest,
+    current_user: UserPublic = Depends(require_roles(*RCA_WORKSPACE_ROLES)),
+):
+    return draft_rca_case_record(request, current_user)
 
 
 @app.get(

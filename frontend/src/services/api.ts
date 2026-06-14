@@ -899,6 +899,78 @@ export interface SupervisorAssistantResponse {
   provider: string
 }
 
+export type RcaCaseStatus = 'open' | 'investigating' | 'actions_defined' | 'closed'
+export type RcaCorrectiveActionStatus = 'proposed' | 'approved' | 'in_progress' | 'complete' | 'rejected'
+
+export interface RcaHypothesis {
+  id: string
+  cause: string
+  confidence: number
+  evidence: string[]
+  missing_checks: string[]
+  status: 'candidate' | 'validated' | 'rejected'
+}
+
+export interface RcaEvidenceItem {
+  id: string
+  timestamp: string
+  source_type: string
+  source_id: string
+  title: string
+  summary: string
+  relevance: string
+}
+
+export interface RcaCorrectiveAction {
+  id: string
+  action: string
+  owner: string
+  due_date?: string | null
+  status: RcaCorrectiveActionStatus
+  verification?: string | null
+}
+
+export interface RcaClosureReview {
+  reviewed_by?: string | null
+  reviewed_at?: string | null
+  accepted_for_learning: boolean
+  final_root_cause?: string | null
+  recurrence_prevention?: string | null
+  lessons_learned?: string | null
+}
+
+export interface RcaCase {
+  id: string
+  equipment_id: string
+  work_order_id?: string | null
+  title: string
+  status: RcaCaseStatus
+  severity: RiskLevel
+  problem_statement: string
+  symptoms: string[]
+  hypotheses: RcaHypothesis[]
+  why_chain: string[]
+  fishbone: Record<string, string[]>
+  evidence_timeline: RcaEvidenceItem[]
+  corrective_actions: RcaCorrectiveAction[]
+  closure_review?: RcaClosureReview | null
+  probable_cause?: string | null
+  confidence: number
+  missing_checks: string[]
+  morpheus_summary?: string | null
+  used_live_provider: boolean
+  provider: string
+  created_at: string
+  updated_at: string
+  closed_at?: string | null
+}
+
+export interface RcaMorpheusDraftResponse {
+  case: RcaCase
+  evidence: Evidence[]
+  message: string
+}
+
 export interface UserCreateRequest {
   email: string
   display_name: string
@@ -1025,6 +1097,39 @@ export const api = {
   generateMaintenanceLabels: (equipmentId: string) =>
     request<MaintenanceLabelsResponse>(`/api/equipment/${equipmentId}/maintenance-labels`, {
       method: 'POST',
+    }),
+  rcaCases: (equipmentId?: string) => {
+    const params = new URLSearchParams()
+    if (equipmentId) params.set('equipment_id', equipmentId)
+    const query = params.toString()
+    return request<RcaCase[]>(`/api/rca-cases${query ? `?${query}` : ''}`)
+  },
+  createRcaCase: (payload: {
+    equipment_id: string
+    work_order_id?: string | null
+    title?: string
+    problem_statement?: string
+    symptoms?: string[]
+  }) =>
+    request<RcaCase>('/api/rca-cases', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateRcaCase: (caseId: string, payload: Partial<RcaCase>) =>
+    request<RcaCase>(`/api/rca-cases/${caseId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  draftRcaWithMorpheus: (payload: {
+    case_id?: string
+    equipment_id?: string
+    work_order_id?: string
+    symptoms?: string[]
+    question?: string
+  }) =>
+    request<RcaMorpheusDraftResponse>('/api/rca-cases/morpheus-draft', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
   learningSummary: () => request<LearningSummary>('/api/learning/summary'),
   refreshLearningExamples: () =>

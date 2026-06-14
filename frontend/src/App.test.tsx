@@ -422,6 +422,66 @@ const workOrders = [
 
 let apiWorkOrders: WorkOrder[] = workOrders as WorkOrder[]
 
+const rcaCase = {
+  id: 'RCA-9001',
+  equipment_id: 'RM-DRIVE-01',
+  work_order_id: 'WO-8304',
+  title: 'Drive-end vibration root cause review',
+  status: 'investigating',
+  severity: 'critical',
+  problem_statement: 'Critical drive-end vibration continues while the bearing spare is unavailable.',
+  symptoms: ['Drive-end vibration exceeded threshold.', 'Hotspots and looseness were observed.'],
+  hypotheses: [
+    {
+      id: 'HYP-1',
+      cause: 'Drive-end bearing wear or coupling looseness under load',
+      confidence: 0.68,
+      evidence: ['WO-8304', 'Prior vibration alert'],
+      missing_checks: ['Bearing temperature trend', 'Coupling alignment readings'],
+      status: 'candidate',
+    },
+  ],
+  why_chain: [
+    'Why did vibration exceed threshold? The drive-end rotating assembly is unstable under load.',
+    'Why is the assembly unstable? Bearing condition or coupling alignment has not been isolated.',
+  ],
+  fishbone: {
+    Machine: ['Drive-end bearing', 'Coupling alignment'],
+    Material: ['Drive end spherical roller bearing availability'],
+  },
+  evidence_timeline: [
+    {
+      id: 'EV-1',
+      timestamp: '2026-06-12T14:00:00+05:30',
+      source_type: 'work_order',
+      source_id: 'WO-8304',
+      title: 'Work order blocked by material',
+      summary: 'Bearing spare availability must be confirmed before intrusive work.',
+      relevance: 'Primary work order under RCA review.',
+    },
+  ],
+  corrective_actions: [
+    {
+      id: 'CA-1',
+      action: 'Procure drive-end bearing and reserve installation window.',
+      owner: 'Planner',
+      due_date: '2026-07-03',
+      status: 'approved',
+      verification: 'Bearing received and reserved against WO-8304.',
+    },
+  ],
+  closure_review: null,
+  probable_cause: 'Drive-end bearing wear or coupling looseness under load',
+  confidence: 0.68,
+  missing_checks: ['Bearing temperature trend', 'Coupling alignment readings'],
+  morpheus_summary: 'Morpheus links the vibration event to bearing and coupling hypotheses pending missing checks.',
+  used_live_provider: true,
+  provider: 'openai',
+  created_at: '2026-06-12T14:00:00+05:30',
+  updated_at: '2026-06-12T15:00:00+05:30',
+  closed_at: null,
+}
+
 it('shows material-blocked approved work orders as waiting for material and locks start', () => {
   const blockedWorkOrder: WorkOrder = {
     ...(workOrders[0] as WorkOrder),
@@ -1080,6 +1140,55 @@ beforeEach(() => {
       }
       if (url.includes('/api/users/')) {
         return Promise.resolve(new Response(JSON.stringify({ ...userFor('operator@plant.local'), is_active: false }), { status: 200 }))
+      }
+      if (url.endsWith('/api/rca-cases')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse((init.body as string) ?? '{}')
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                ...rcaCase,
+                id: 'RCA-9002',
+                equipment_id: body.equipment_id,
+                work_order_id: body.work_order_id,
+                title: body.title,
+                symptoms: body.symptoms ?? [],
+                status: 'open',
+              }),
+              { status: 201 },
+            ),
+          )
+        }
+        return Promise.resolve(new Response(JSON.stringify([rcaCase]), { status: 200 }))
+      }
+      if (url.endsWith('/api/rca-cases/morpheus-draft')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              case: {
+                ...rcaCase,
+                confidence: 0.74,
+                morpheus_summary: 'Morpheus drafted RCA hypotheses, missing checks, and corrective actions from RAG evidence.',
+              },
+              evidence: recommendation.evidence,
+              message: 'Morpheus drafted RCA hypotheses, evidence, missing checks, and corrective actions.',
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.includes('/api/rca-cases/') && init?.method === 'PATCH') {
+        const body = JSON.parse((init.body as string) ?? '{}')
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...rcaCase,
+              ...body,
+              closed_at: body.status === 'closed' ? '2026-06-14T09:00:00+05:30' : rcaCase.closed_at,
+            }),
+            { status: 200 },
+          ),
+        )
       }
       if (url.endsWith('/api/learning/summary')) {
         return Promise.resolve(new Response(JSON.stringify(learningSummaryPayload()), { status: 200 }))
@@ -2182,6 +2291,19 @@ describe('Maintenance Wizard dashboard', () => {
     await signIn('reliability@plant.local')
 
     fireEvent.click(await screen.findByRole('button', { name: 'Reliability' }))
+
+    expect(await screen.findByRole('heading', { name: 'RCA Workspace' })).toBeInTheDocument()
+    expect(screen.getByText('Drive-end vibration root cause review')).toBeInTheDocument()
+    expect(screen.getAllByText('Drive-end bearing wear or coupling looseness under load').length).toBeGreaterThan(0)
+    expect(screen.getByText('5-Why')).toBeInTheDocument()
+    expect(screen.getByText('Fishbone')).toBeInTheDocument()
+    expect(screen.getByText('Evidence Timeline')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Morpheus draft' }))
+    expect(
+      await screen.findByText('Morpheus drafted RCA hypotheses, evidence, missing checks, and corrective actions. Provider: live openai.'),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close and learn' }))
+    expect(await screen.findByText('RCA-9001 closed and accepted for learning')).toBeInTheDocument()
 
     expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
     expect(screen.getByText(/Review approved human feedback/)).toBeInTheDocument()

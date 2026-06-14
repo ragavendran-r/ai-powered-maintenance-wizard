@@ -104,6 +104,7 @@ def refresh_learning_examples(*, include_documents: bool = True, include_interac
     examples.extend(_examples_from_feedback())
     examples.extend(_examples_from_labels())
     examples.extend(_examples_from_work_orders())
+    examples.extend(_examples_from_rca_cases())
     if include_documents:
         examples.extend(_examples_from_documents())
     if include_interactions:
@@ -1235,6 +1236,54 @@ def _examples_from_work_orders() -> list[dict[str, Any]]:
                         "priority": work_order["priority"],
                     },
                     "approved": _approval_for("work_order_completion", work_order["id"], True),
+                }
+            )
+        )
+    return examples
+
+
+def _examples_from_rca_cases() -> list[dict[str, Any]]:
+    examples: list[dict[str, Any]] = []
+    for case in repository.list_rca_cases(status="closed", limit=1000):
+        closure = case.get("closure_review") or {}
+        if not closure.get("accepted_for_learning"):
+            continue
+        input_text = "\n".join(
+            [
+                f"RCA case: {case['id']}",
+                f"Equipment: {case['equipment_id']}",
+                f"Work order: {case.get('work_order_id') or 'none'}",
+                f"Problem: {case['problem_statement']}",
+                f"Symptoms: {'; '.join(case.get('symptoms') or []) or 'not recorded'}",
+                f"Probable cause: {case.get('probable_cause') or 'not recorded'}",
+                f"Missing checks: {'; '.join(case.get('missing_checks') or []) or 'none'}",
+            ]
+        )
+        expected = "\n".join(
+            part
+            for part in [
+                closure.get("final_root_cause") and f"Root cause: {closure['final_root_cause']}",
+                closure.get("recurrence_prevention") and f"Prevention: {closure['recurrence_prevention']}",
+                closure.get("lessons_learned") and f"Lessons: {closure['lessons_learned']}",
+            ]
+            if part
+        ) or case.get("morpheus_summary") or case.get("probable_cause") or "RCA closure accepted."
+        examples.append(
+            _upsert_judged_example(
+                {
+                    "source_type": "rca_case",
+                    "source_id": case["id"],
+                    "equipment_id": case["equipment_id"],
+                    "work_order_id": case.get("work_order_id"),
+                    "instruction": "Use accepted RCA closure to improve root-cause hypotheses and corrective actions.",
+                    "input_text": _clip(input_text),
+                    "expected_output": _clip(expected),
+                    "metadata": {
+                        "status": case["status"],
+                        "confidence": case.get("confidence"),
+                        "accepted_for_learning": True,
+                    },
+                    "approved": _approval_for("rca_case", case["id"], True),
                 }
             )
         )

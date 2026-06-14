@@ -1023,6 +1023,216 @@ h3 {
   gap: 14px;
 }
 
+.rcaWorkspace {
+  align-content: start;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius);
+  display: grid;
+  gap: 14px;
+  padding: var(--panel-padding);
+}
+
+.rcaToolbar {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(220px, 1.1fr) auto auto auto;
+}
+
+.compactField select {
+  min-height: 38px;
+}
+
+.dataPanel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-section);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.rcaCaseGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rcaCaseSummary,
+.rcaEvidencePanel {
+  grid-column: 1 / -1;
+}
+
+.rcaCaseTitle,
+.rcaFacts,
+.rcaBadges {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+}
+
+.rcaCaseTitle {
+  justify-content: space-between;
+}
+
+.rcaCaseTitle > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.rcaCaseTitle strong {
+  color: var(--color-text-heading);
+  font-size: var(--font-size-section);
+}
+
+.rcaCaseTitle span,
+.rcaLinkedWorkOrder small,
+.hypothesisItem small,
+.actionItem small,
+.timelineItem small {
+  color: var(--color-text-muted);
+}
+
+.rcaBadges {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.statusPill.success {
+  background: var(--state-success-bg);
+  color: var(--state-success-text);
+}
+
+.statusPill.warning {
+  background: var(--state-warning-bg);
+  color: var(--state-warning-text);
+}
+
+.statusPill.neutral {
+  background: var(--color-surface-muted);
+  color: var(--color-text-status);
+}
+
+.riskPill {
+  border-radius: 6px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 6px 9px;
+  text-transform: uppercase;
+}
+
+.riskPill.low {
+  background: var(--risk-low-bg);
+  color: var(--risk-low-text);
+}
+
+.riskPill.medium {
+  background: var(--risk-medium-bg);
+  color: var(--risk-medium-text);
+}
+
+.riskPill.high {
+  background: var(--risk-high-bg);
+  color: var(--risk-high-text);
+}
+
+.riskPill.critical {
+  background: var(--risk-critical-bg);
+  color: var(--risk-critical-text);
+}
+
+.rcaFacts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.rcaFacts span,
+.rcaLinkedWorkOrder {
+  background: var(--color-surface-muted);
+  border-radius: 6px;
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+}
+
+.rcaFacts small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.rcaSummary {
+  background: var(--state-info-bg-soft);
+  border-left: 4px solid var(--state-info-border);
+  border-radius: 6px;
+  color: var(--color-text-note);
+  margin: 0;
+  padding: 10px;
+}
+
+.miniHeader {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.miniHeader h3 {
+  margin: 0;
+}
+
+.twoColumnList {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.twoColumnList ul,
+.whyChain {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.hypothesisList,
+.actionList,
+.timelineList {
+  display: grid;
+  gap: 8px;
+}
+
+.hypothesisItem,
+.actionItem,
+.timelineItem,
+.fishboneCategory {
+  border-top: 1px solid var(--color-border-row);
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.hypothesisItem > span {
+  color: var(--color-brand-text);
+  font-weight: 800;
+}
+
+.fishboneGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fishboneCategory strong {
+  color: var(--color-text-heading);
+}
+
+.fishboneCategory span {
+  color: var(--color-text-supporting);
+}
+
 .learningToolbar {
   align-items: end;
   display: grid;
