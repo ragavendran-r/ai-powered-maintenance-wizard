@@ -17,6 +17,7 @@ export type AppView =
   | 'asset'
   | 'workExecution'
   | 'planning'
+  | 'reports'
   | 'reliability'
   | 'learningReview'
   | 'admin'

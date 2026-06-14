@@ -59,6 +59,7 @@ const sampleFiles = [
 let neoResponseDelayMs = 0
 let assistantResponseDelayMs = 0
 let logoutResponseDelayMs = 0
+let maintenanceInsightsDelayMs = 0
 let supervisorAssistantRequests: Array<{ work_order_id?: string; queue_name?: string; question?: string }> = []
 
 it('shows waiting for material before in progress in the work order workflow', () => {
@@ -335,6 +336,106 @@ const recommendation = {
   used_live_provider: false,
   provider: 'mock',
   report_summary: 'Critical risk with estimated RUL of 23 days.',
+}
+
+const maintenanceInsights = {
+  generated_at: '2026-06-14T12:00:00+00:00',
+  scope_equipment_id: null,
+  assets_reviewed: 2,
+  structured_reports: [
+    {
+      id: 'MR-RM-DRIVE-01',
+      equipment_id: 'RM-DRIVE-01',
+      equipment_name: 'Hot Strip Mill Main Drive Motor',
+      area: 'Hot Rolling Mill',
+      risk_level: 'critical',
+      health_score: 10,
+      failure_probability: 0.77,
+      remaining_useful_life_days: 23,
+      confidence_band: '12-34 days',
+      active_alert_count: 1,
+      open_work_order_count: 1,
+      report_summary: 'Hot Strip Mill Main Drive Motor is at critical risk with 10% health.',
+      probable_causes: ['Drive end vibration abnormality linked to bearing wear.'],
+      immediate_actions: ['Resolve material blocker before intrusive execution.', 'Confirm current readings against thresholds.'],
+      planned_actions: ['Plan corrective work within the RUL confidence window.'],
+      spares_strategy: ['Check Drive end spherical roller bearing availability.'],
+      evidence: ['ALT-1001: Drive end vibration exceeds trip advisory threshold', 'WO-8304: Inspect main drive bearing vibration (APPR)'],
+      recommended_owner: 'Maintenance Supervisor',
+    },
+    {
+      id: 'MR-BF-BLOWER-02',
+      equipment_id: 'BF-BLOWER-02',
+      equipment_name: 'Blast Furnace Combustion Air Blower',
+      area: 'Blast Furnace',
+      risk_level: 'high',
+      health_score: 35,
+      failure_probability: 0.61,
+      remaining_useful_life_days: 38,
+      confidence_band: '20-55 days',
+      active_alert_count: 1,
+      open_work_order_count: 1,
+      report_summary: 'Blast Furnace Combustion Air Blower has pressure variance risk.',
+      probable_causes: ['Inlet guide vane actuator response drift.'],
+      immediate_actions: ['Stroke-test the inlet guide vane actuator.'],
+      planned_actions: ['Schedule actuator follow-up if response remains slow.'],
+      spares_strategy: ['Check inlet guide vane actuator availability.'],
+      evidence: ['ALT-2001: outlet pressure variance breached baseline'],
+      recommended_owner: 'Maintenance Supervisor',
+    },
+  ],
+  abnormal_alert_reports: [
+    {
+      alert_id: 'ALT-1001',
+      equipment_id: 'RM-DRIVE-01',
+      equipment_name: 'Hot Strip Mill Main Drive Motor',
+      timestamp: '2026-06-06T08:15:00+05:30',
+      signal: 'drive_end_vibration',
+      severity: 'critical',
+      value: 9.8,
+      unit: 'mm/s',
+      threshold: 7.1,
+      threshold_delta: 2.7,
+      abnormality: 'drive_end_vibration is 2.7mm/s above threshold.',
+      decision: 'Escalate for same-shift maintenance review.',
+      recommended_actions: ['Verify the live reading.', 'Inspect the related component.'],
+      evidence: ['Drive end vibration exceeds trip advisory threshold'],
+    },
+  ],
+  decision_summaries: [
+    {
+      audience: 'engineer',
+      title: 'Engineer Maintenance Decision Summary',
+      summary: '2 asset(s) need engineering review.',
+      decisions: ['Prioritize Hot Strip Mill Main Drive Motor.'],
+      risks: ['RM-DRIVE-01: RUL 23 days.'],
+      next_actions: ['Validate top probable causes against field readings.'],
+      referenced_equipment: ['RM-DRIVE-01'],
+      referenced_alerts: ['ALT-1001'],
+      referenced_work_orders: [],
+    },
+    {
+      audience: 'supervisor',
+      title: 'Supervisor Maintenance Decision Summary',
+      summary: '1 high-risk asset has open work.',
+      decisions: ['Confirm owner and execution window for Hot Strip Mill Main Drive Motor.'],
+      risks: ['RM-DRIVE-01 has active abnormal alerts.'],
+      next_actions: ['Approve or unblock waiting work orders.'],
+      referenced_equipment: ['RM-DRIVE-01'],
+      referenced_alerts: ['ALT-1001'],
+      referenced_work_orders: ['WO-8304'],
+    },
+  ],
+  maintenance_log_entries: [
+    {
+      equipment_id: 'RM-DRIVE-01',
+      equipment_name: 'Hot Strip Mill Main Drive Motor',
+      timestamp: '2026-06-14T12:00:00+00:00',
+      entry_type: 'generated_insight',
+      content: 'Generated maintenance insight for Hot Strip Mill Main Drive Motor.',
+      source_ids: ['MR-RM-DRIVE-01', 'ALT-1001'],
+    },
+  ],
 }
 
 const workOrders = [
@@ -1245,6 +1346,7 @@ beforeEach(() => {
   neoResponseDelayMs = 0
   assistantResponseDelayMs = 0
   logoutResponseDelayMs = 0
+  maintenanceInsightsDelayMs = 0
   apiWorkOrders = workOrders as WorkOrder[]
   apiPmPlans = []
   learningDeploymentResponses = [learningDeployment]
@@ -1946,6 +2048,57 @@ beforeEach(() => {
       if (url.endsWith('/feedback')) {
         return Promise.resolve(new Response(JSON.stringify({ stored: true }), { status: 200 }))
       }
+      if (url.includes('/api/reports/maintenance-insights/markdown')) {
+        return Promise.resolve(new Response('# Structured Maintenance Insights', { status: 200 }))
+      }
+      if (url.includes('/api/reports/maintenance-insights')) {
+        const reportUrl = new URL(url, 'http://localhost')
+        const scopedEquipmentId = reportUrl.searchParams.get('equipment_id')
+        const scopedStructuredReports = scopedEquipmentId
+          ? maintenanceInsights.structured_reports.filter((report) => report.equipment_id === scopedEquipmentId)
+          : maintenanceInsights.structured_reports
+        const scopedAbnormalReports = scopedEquipmentId
+          ? maintenanceInsights.abnormal_alert_reports.filter((report) => report.equipment_id === scopedEquipmentId)
+          : maintenanceInsights.abnormal_alert_reports
+        const scopedLogEntries = scopedEquipmentId
+          ? maintenanceInsights.maintenance_log_entries.filter((entry) => entry.equipment_id === scopedEquipmentId)
+          : maintenanceInsights.maintenance_log_entries
+        const scopedBundle = {
+          ...maintenanceInsights,
+          scope_equipment_id: scopedEquipmentId,
+          assets_reviewed: scopedEquipmentId ? 1 : maintenanceInsights.assets_reviewed,
+          structured_reports: scopedStructuredReports,
+          abnormal_alert_reports: scopedAbnormalReports,
+          maintenance_log_entries: scopedLogEntries,
+        }
+        let body: unknown = scopedBundle
+        if (reportUrl.pathname.endsWith('/summary')) {
+          body = {
+            generated_at: scopedBundle.generated_at,
+            scope_equipment_id: scopedBundle.scope_equipment_id,
+            assets_reviewed: scopedBundle.assets_reviewed,
+            structured_report_count: scopedStructuredReports.length,
+            abnormal_alert_report_count: scopedAbnormalReports.length,
+            decision_summary_count: maintenanceInsights.decision_summaries.length,
+            maintenance_log_entry_count: scopedLogEntries.length,
+          }
+        } else if (reportUrl.pathname.endsWith('/structured-reports')) {
+          body = scopedStructuredReports
+        } else if (reportUrl.pathname.endsWith('/abnormal-alerts')) {
+          body = scopedAbnormalReports
+        } else if (reportUrl.pathname.endsWith('/decision-summaries')) {
+          body = maintenanceInsights.decision_summaries
+        } else if (reportUrl.pathname.endsWith('/maintenance-log-entries')) {
+          body = scopedLogEntries
+        }
+        const response = new Response(JSON.stringify(body), { status: 200 })
+        if (maintenanceInsightsDelayMs > 0) {
+          return new Promise((resolve) => {
+            window.setTimeout(() => resolve(response), maintenanceInsightsDelayMs)
+          })
+        }
+        return Promise.resolve(response)
+      }
       if (url.endsWith('/api/reports/RM-DRIVE-01/markdown')) {
         return Promise.resolve(new Response('# Maintenance Decision Report: RM-DRIVE-01', { status: 200 }))
       }
@@ -2062,6 +2215,43 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) => url.toString().includes('/api/assets/RM-DRIVE-01?sections=documents')),
     ).toBe(true)
+  })
+
+  it('opens structured maintenance insights and scopes reports to the selected asset', async () => {
+    maintenanceInsightsDelayMs = 50
+    render(<App />)
+    await signIn()
+
+    fireEvent.click(within(screen.getByLabelText('Maintenance navigation')).getByRole('button', { name: 'Reports' }))
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('status').length).toBeGreaterThanOrEqual(5)
+    })
+    expect(screen.getAllByRole('status').map((item) => item.textContent)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Loading report summary'),
+        expect.stringContaining('Loading structured maintenance reports'),
+        expect.stringContaining('Loading abnormal alert reports'),
+        expect.stringContaining('Loading maintenance decision summaries'),
+        expect.stringContaining('Loading digital maintenance log entries'),
+      ]),
+    )
+    expect(await screen.findByRole('heading', { name: 'Structured Maintenance Insights and Reports' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Structured Maintenance Reports' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Abnormal Alert Reports' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Engineer Maintenance Decision Summary' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Supervisor Maintenance Decision Summary' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Equipment Digital Maintenance Log Entries' })).toBeInTheDocument()
+    expect(screen.getByText('Hot Strip Mill Main Drive Motor is at critical risk with 10% health.')).toBeInTheDocument()
+    expect(screen.getByText('Blast Furnace Combustion Air Blower has pressure variance risk.')).toBeInTheDocument()
+    expect(screen.getByText('Escalate for same-shift maintenance review.')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh selected asset' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('Blast Furnace Combustion Air Blower has pressure variance risk.')).not.toBeInTheDocument()
+    })
+    expect(await screen.findByText('Hot Strip Mill Main Drive Motor is at critical risk with 10% health.')).toBeInTheDocument()
   })
 
   it('lets Neo update the dashboard center table for read-only users', async () => {

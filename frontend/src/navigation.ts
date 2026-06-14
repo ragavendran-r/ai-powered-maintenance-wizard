@@ -8,6 +8,7 @@ export type NavigationIcon =
   | 'assets'
   | 'execution'
   | 'planning'
+  | 'reports'
   | 'reliability'
   | 'learning'
   | 'admin'
@@ -93,6 +94,20 @@ export const jobNavigationItems: JobNavigationItem[] = [
       planner: 1,
       maintenance_supervisor: 3,
       admin: 5,
+    },
+  },
+  {
+    id: 'reports',
+    label: 'Reports',
+    icon: 'reports',
+    purpose: 'Structured insights, abnormal alerts, decisions, and log entries.',
+    roles: ['admin', 'maintenance_engineer', 'maintenance_supervisor', 'reliability_engineer', 'planner'],
+    rolePriority: {
+      maintenance_engineer: 2,
+      maintenance_supervisor: 3,
+      reliability_engineer: 3,
+      planner: 3,
+      admin: 6,
     },
   },
   {

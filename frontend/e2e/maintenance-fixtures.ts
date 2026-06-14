@@ -6,6 +6,7 @@ import type {
   AuthUser,
   DashboardSummary,
   LearningEmbeddingProfile,
+  MaintenanceInsightReportBundle,
   LearningSummary,
   PmPlan,
   PmPlanDraftResponse,
@@ -725,6 +726,86 @@ const streamingStatus: StreamingStatus = {
   last_message_timestamp: '2026-06-13T09:00:00+05:30',
 }
 
+const maintenanceInsights: MaintenanceInsightReportBundle = {
+  generated_at: '2026-06-14T12:00:00+00:00',
+  scope_equipment_id: null,
+  assets_reviewed: 1,
+  structured_reports: [
+    {
+      id: 'MR-RM-DRIVE-01',
+      equipment_id: 'RM-DRIVE-01',
+      equipment_name: 'Hot Strip Mill Main Drive Motor',
+      area: 'Hot Rolling Mill',
+      risk_level: 'critical',
+      health_score: 18,
+      failure_probability: 0.76,
+      remaining_useful_life_days: 18,
+      confidence_band: '14-22 days',
+      active_alert_count: 1,
+      open_work_order_count: 2,
+      report_summary: 'Hot Strip Mill Main Drive Motor is at critical risk with 18% health and active vibration alerts.',
+      probable_causes: ['Drive-end vibration abnormality linked to bearing looseness.'],
+      immediate_actions: ['Confirm current readings against thresholds.', 'Resolve any material blocker before intrusive work.'],
+      planned_actions: ['Plan corrective work inside the RUL confidence window.'],
+      spares_strategy: ['Check Drive-end spherical roller bearing availability.'],
+      evidence: ['ALT-1001: Drive end vibration exceeds advisory threshold', 'WO-8304: Inspect main drive bearing vibration (APPR)'],
+      recommended_owner: 'Maintenance Supervisor',
+    },
+  ],
+  abnormal_alert_reports: [
+    {
+      alert_id: 'ALT-1001',
+      equipment_id: 'RM-DRIVE-01',
+      equipment_name: 'Hot Strip Mill Main Drive Motor',
+      timestamp: '2026-06-06T08:15:00+05:30',
+      signal: 'drive_end_vibration',
+      severity: 'critical',
+      value: 9.8,
+      unit: 'mm/s',
+      threshold: 7.1,
+      threshold_delta: 2.7,
+      abnormality: 'drive_end_vibration is 2.7mm/s above threshold.',
+      decision: 'Escalate for same-shift maintenance review.',
+      recommended_actions: ['Verify the live reading.', 'Inspect the related component.'],
+      evidence: ['Drive end vibration exceeds advisory threshold'],
+    },
+  ],
+  decision_summaries: [
+    {
+      audience: 'engineer',
+      title: 'Engineer Maintenance Decision Summary',
+      summary: 'One asset needs engineering review.',
+      decisions: ['Prioritize Hot Strip Mill Main Drive Motor.'],
+      risks: ['RM-DRIVE-01 has active vibration risk.'],
+      next_actions: ['Validate probable causes against field readings.'],
+      referenced_equipment: ['RM-DRIVE-01'],
+      referenced_alerts: ['ALT-1001'],
+      referenced_work_orders: [],
+    },
+    {
+      audience: 'supervisor',
+      title: 'Supervisor Maintenance Decision Summary',
+      summary: 'One high-risk asset has open execution work.',
+      decisions: ['Confirm owner and execution window for WO-8304.'],
+      risks: ['Open vibration work remains high priority.'],
+      next_actions: ['Approve or unblock waiting work orders.'],
+      referenced_equipment: ['RM-DRIVE-01'],
+      referenced_alerts: ['ALT-1001'],
+      referenced_work_orders: ['WO-8304'],
+    },
+  ],
+  maintenance_log_entries: [
+    {
+      equipment_id: 'RM-DRIVE-01',
+      equipment_name: 'Hot Strip Mill Main Drive Motor',
+      timestamp: '2026-06-14T12:00:00+00:00',
+      entry_type: 'generated_insight',
+      content: 'Generated maintenance insight for Hot Strip Mill Main Drive Motor.',
+      source_ids: ['MR-RM-DRIVE-01', 'ALT-1001'],
+    },
+  ],
+}
+
 function json(data: unknown, status = 200) {
   return {
     status,
@@ -924,6 +1005,68 @@ export async function installMaintenanceApi(page: Page, initialUser: AuthUser = 
     }
     if (path === '/api/streaming/status') {
       await route.fulfill(json(streamingStatus))
+      return
+    }
+    if (path.startsWith('/api/reports/maintenance-insights')) {
+      const scopedEquipmentId = url.searchParams.get('equipment_id')
+      const scopedStructuredReports = scopedEquipmentId
+        ? maintenanceInsights.structured_reports.filter((report) => report.equipment_id === scopedEquipmentId)
+        : maintenanceInsights.structured_reports
+      const scopedAbnormalReports = scopedEquipmentId
+        ? maintenanceInsights.abnormal_alert_reports.filter((report) => report.equipment_id === scopedEquipmentId)
+        : maintenanceInsights.abnormal_alert_reports
+      const scopedLogEntries = scopedEquipmentId
+        ? maintenanceInsights.maintenance_log_entries.filter((entry) => entry.equipment_id === scopedEquipmentId)
+        : maintenanceInsights.maintenance_log_entries
+
+      if (path === '/api/reports/maintenance-insights/markdown') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/markdown',
+          body: '# Structured Maintenance Insights',
+        })
+        return
+      }
+      if (path === '/api/reports/maintenance-insights/summary') {
+        await route.fulfill(
+          json({
+            generated_at: maintenanceInsights.generated_at,
+            scope_equipment_id: scopedEquipmentId,
+            assets_reviewed: scopedEquipmentId ? 1 : maintenanceInsights.assets_reviewed,
+            structured_report_count: scopedStructuredReports.length,
+            abnormal_alert_report_count: scopedAbnormalReports.length,
+            decision_summary_count: maintenanceInsights.decision_summaries.length,
+            maintenance_log_entry_count: scopedLogEntries.length,
+          }),
+        )
+        return
+      }
+      if (path === '/api/reports/maintenance-insights/structured-reports') {
+        await route.fulfill(json(scopedStructuredReports))
+        return
+      }
+      if (path === '/api/reports/maintenance-insights/abnormal-alerts') {
+        await route.fulfill(json(scopedAbnormalReports))
+        return
+      }
+      if (path === '/api/reports/maintenance-insights/decision-summaries') {
+        await route.fulfill(json(maintenanceInsights.decision_summaries))
+        return
+      }
+      if (path === '/api/reports/maintenance-insights/maintenance-log-entries') {
+        await route.fulfill(json(scopedLogEntries))
+        return
+      }
+      await route.fulfill(
+        json({
+          ...maintenanceInsights,
+          scope_equipment_id: scopedEquipmentId,
+          assets_reviewed: scopedEquipmentId ? 1 : maintenanceInsights.assets_reviewed,
+          structured_reports: scopedStructuredReports,
+          abnormal_alert_reports: scopedAbnormalReports,
+          maintenance_log_entries: scopedLogEntries,
+        }),
+      )
       return
     }
     if (path === '/api/learning/summary') {

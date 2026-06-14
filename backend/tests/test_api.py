@@ -2980,6 +2980,65 @@ def test_markdown_report_export_contains_actions_and_evidence():
     assert "Hot Strip Mill Main Drive Vibration SOP" in response.text
 
 
+def test_structured_maintenance_insights_include_alerts_decisions_and_logs():
+    response = client.get("/api/reports/maintenance-insights", headers=auth_headers("maintenance@plant.local"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assets_reviewed"] == 5
+    assert payload["structured_reports"]
+    assert payload["abnormal_alert_reports"]
+    assert payload["maintenance_log_entries"]
+    assert {summary["audience"] for summary in payload["decision_summaries"]} == {"engineer", "supervisor"}
+    drive_report = next(item for item in payload["structured_reports"] if item["equipment_id"] == "RM-DRIVE-01")
+    assert drive_report["probable_causes"]
+    assert drive_report["immediate_actions"]
+    assert drive_report["spares_strategy"]
+
+
+def test_structured_maintenance_insights_can_scope_asset_and_allow_supervisor():
+    response = client.get(
+        "/api/reports/maintenance-insights?equipment_id=BF-BLOWER-02",
+        headers=auth_headers("supervisor@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["scope_equipment_id"] == "BF-BLOWER-02"
+    assert payload["assets_reviewed"] == 1
+    assert [item["equipment_id"] for item in payload["structured_reports"]] == ["BF-BLOWER-02"]
+
+
+def test_structured_maintenance_insight_sections_load_independently():
+    headers = auth_headers("planner@plant.local")
+    routes = {
+        "summary": "/api/reports/maintenance-insights/summary?equipment_id=RM-DRIVE-01",
+        "structured": "/api/reports/maintenance-insights/structured-reports?equipment_id=RM-DRIVE-01",
+        "alerts": "/api/reports/maintenance-insights/abnormal-alerts?equipment_id=RM-DRIVE-01",
+        "decisions": "/api/reports/maintenance-insights/decision-summaries?equipment_id=RM-DRIVE-01",
+        "logs": "/api/reports/maintenance-insights/maintenance-log-entries?equipment_id=RM-DRIVE-01",
+    }
+
+    responses = {name: client.get(route, headers=headers) for name, route in routes.items()}
+
+    assert all(response.status_code == 200 for response in responses.values())
+    assert responses["summary"].json()["structured_report_count"] == 1
+    assert [item["equipment_id"] for item in responses["structured"].json()] == ["RM-DRIVE-01"]
+    assert all(item["equipment_id"] == "RM-DRIVE-01" for item in responses["alerts"].json())
+    assert {item["audience"] for item in responses["decisions"].json()} == {"engineer", "supervisor"}
+    assert [item["equipment_id"] for item in responses["logs"].json()] == ["RM-DRIVE-01"]
+
+
+def test_structured_maintenance_insights_markdown_export():
+    response = client.get("/api/reports/maintenance-insights/markdown", headers=auth_headers("planner@plant.local"))
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/markdown")
+    assert "# Structured Maintenance Insights" in response.text
+    assert "## Abnormal Alert Reports" in response.text
+    assert "## Decision Summaries" in response.text
+
+
 def test_seeded_documents_are_chunked_for_local_retrieval():
     chunks = repository.list_document_chunks("RM-DRIVE-01")
     assert chunks

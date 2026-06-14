@@ -654,6 +654,85 @@ class Recommendation(BaseModel):
     report_summary: str
 
 
+class StructuredMaintenanceReport(BaseModel):
+    id: str
+    equipment_id: str
+    equipment_name: str
+    area: str
+    risk_level: RiskLevel
+    health_score: int = Field(ge=0, le=100)
+    failure_probability: float = Field(ge=0, le=1)
+    remaining_useful_life_days: int = Field(ge=0)
+    confidence_band: str
+    active_alert_count: int = Field(ge=0)
+    open_work_order_count: int = Field(ge=0)
+    report_summary: str
+    probable_causes: list[str] = Field(default_factory=list)
+    immediate_actions: list[str] = Field(default_factory=list)
+    planned_actions: list[str] = Field(default_factory=list)
+    spares_strategy: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    recommended_owner: str
+
+
+class AbnormalAlertReport(BaseModel):
+    alert_id: str
+    equipment_id: str
+    equipment_name: str
+    timestamp: str
+    signal: str
+    severity: RiskLevel
+    value: float
+    unit: str
+    threshold: float
+    threshold_delta: float
+    abnormality: str
+    decision: str
+    recommended_actions: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+
+
+class MaintenanceDecisionSummary(BaseModel):
+    audience: Literal["engineer", "supervisor"]
+    title: str
+    summary: str
+    decisions: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    referenced_equipment: list[str] = Field(default_factory=list)
+    referenced_alerts: list[str] = Field(default_factory=list)
+    referenced_work_orders: list[str] = Field(default_factory=list)
+
+
+class DigitalMaintenanceLogEntry(BaseModel):
+    equipment_id: str
+    equipment_name: str
+    timestamp: str
+    entry_type: str
+    content: str
+    source_ids: list[str] = Field(default_factory=list)
+
+
+class MaintenanceInsightReportSummary(BaseModel):
+    generated_at: str
+    scope_equipment_id: Optional[str] = None
+    assets_reviewed: int
+    structured_report_count: int = Field(ge=0)
+    abnormal_alert_report_count: int = Field(ge=0)
+    decision_summary_count: int = Field(ge=0)
+    maintenance_log_entry_count: int = Field(ge=0)
+
+
+class MaintenanceInsightReportBundle(BaseModel):
+    generated_at: str
+    scope_equipment_id: Optional[str] = None
+    assets_reviewed: int
+    structured_reports: list[StructuredMaintenanceReport] = Field(default_factory=list)
+    abnormal_alert_reports: list[AbnormalAlertReport] = Field(default_factory=list)
+    decision_summaries: list[MaintenanceDecisionSummary] = Field(default_factory=list)
+    maintenance_log_entries: list[DigitalMaintenanceLogEntry] = Field(default_factory=list)
+
+
 class ChatResponse(BaseModel):
     answer: str
     recommendation: Recommendation

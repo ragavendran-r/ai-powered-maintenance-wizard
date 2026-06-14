@@ -219,6 +219,85 @@ export interface Recommendation {
   report_summary: string
 }
 
+export interface StructuredMaintenanceReport {
+  id: string
+  equipment_id: string
+  equipment_name: string
+  area: string
+  risk_level: RiskLevel
+  health_score: number
+  failure_probability: number
+  remaining_useful_life_days: number
+  confidence_band: string
+  active_alert_count: number
+  open_work_order_count: number
+  report_summary: string
+  probable_causes: string[]
+  immediate_actions: string[]
+  planned_actions: string[]
+  spares_strategy: string[]
+  evidence: string[]
+  recommended_owner: string
+}
+
+export interface AbnormalAlertReport {
+  alert_id: string
+  equipment_id: string
+  equipment_name: string
+  timestamp: string
+  signal: string
+  severity: RiskLevel
+  value: number
+  unit: string
+  threshold: number
+  threshold_delta: number
+  abnormality: string
+  decision: string
+  recommended_actions: string[]
+  evidence: string[]
+}
+
+export interface MaintenanceDecisionSummary {
+  audience: 'engineer' | 'supervisor'
+  title: string
+  summary: string
+  decisions: string[]
+  risks: string[]
+  next_actions: string[]
+  referenced_equipment: string[]
+  referenced_alerts: string[]
+  referenced_work_orders: string[]
+}
+
+export interface DigitalMaintenanceLogEntry {
+  equipment_id: string
+  equipment_name: string
+  timestamp: string
+  entry_type: string
+  content: string
+  source_ids: string[]
+}
+
+export interface MaintenanceInsightReportSummary {
+  generated_at: string
+  scope_equipment_id?: string | null
+  assets_reviewed: number
+  structured_report_count: number
+  abnormal_alert_report_count: number
+  decision_summary_count: number
+  maintenance_log_entry_count: number
+}
+
+export interface MaintenanceInsightReportBundle {
+  generated_at: string
+  scope_equipment_id?: string | null
+  assets_reviewed: number
+  structured_reports: StructuredMaintenanceReport[]
+  abnormal_alert_reports: AbnormalAlertReport[]
+  decision_summaries: MaintenanceDecisionSummary[]
+  maintenance_log_entries: DigitalMaintenanceLogEntry[]
+}
+
 export interface PredictionResponse {
   equipment_id: string
   risk_level: RiskLevel
@@ -1537,6 +1616,34 @@ export const api = {
         notes: details?.notes,
       }),
     }),
+  maintenanceInsightReports: (equipmentId?: string) => {
+    const query = equipmentId ? `?equipment_id=${encodeURIComponent(equipmentId)}` : ''
+    return request<MaintenanceInsightReportBundle>(`/api/reports/maintenance-insights${query}`)
+  },
+  maintenanceInsightReportSummary: (equipmentId?: string) => {
+    const query = equipmentId ? `?equipment_id=${encodeURIComponent(equipmentId)}` : ''
+    return request<MaintenanceInsightReportSummary>(`/api/reports/maintenance-insights/summary${query}`)
+  },
+  structuredMaintenanceReports: (equipmentId?: string) => {
+    const query = equipmentId ? `?equipment_id=${encodeURIComponent(equipmentId)}` : ''
+    return request<StructuredMaintenanceReport[]>(`/api/reports/maintenance-insights/structured-reports${query}`)
+  },
+  abnormalAlertReports: (equipmentId?: string) => {
+    const query = equipmentId ? `?equipment_id=${encodeURIComponent(equipmentId)}` : ''
+    return request<AbnormalAlertReport[]>(`/api/reports/maintenance-insights/abnormal-alerts${query}`)
+  },
+  maintenanceDecisionSummaries: (equipmentId?: string) => {
+    const query = equipmentId ? `?equipment_id=${encodeURIComponent(equipmentId)}` : ''
+    return request<MaintenanceDecisionSummary[]>(`/api/reports/maintenance-insights/decision-summaries${query}`)
+  },
+  digitalMaintenanceLogEntries: (equipmentId?: string) => {
+    const query = equipmentId ? `?equipment_id=${encodeURIComponent(equipmentId)}` : ''
+    return request<DigitalMaintenanceLogEntry[]>(`/api/reports/maintenance-insights/maintenance-log-entries${query}`)
+  },
+  maintenanceInsightReportsMarkdown: (equipmentId?: string) => {
+    const query = equipmentId ? `?equipment_id=${encodeURIComponent(equipmentId)}` : ''
+    return textRequest(`/api/reports/maintenance-insights/markdown${query}`)
+  },
   reportMarkdown: (equipmentId: string) => textRequest(`/api/reports/${equipmentId}/markdown`),
 }
 

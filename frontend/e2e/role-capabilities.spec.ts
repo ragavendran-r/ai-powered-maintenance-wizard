@@ -20,7 +20,7 @@ test.describe('role capability rendering', () => {
   test('operator keeps read-only navigation and hides action surfaces', async ({ page }) => {
     await signInAs(page, 'operator')
 
-    await expectPrimaryNav(page, ['Command Center', 'Assets'], ['Work Execution', 'Planning', 'Reliability', 'Learning and Tuning', 'Admin'])
+    await expectPrimaryNav(page, ['Command Center', 'Assets'], ['Work Execution', 'Planning', 'Reports', 'Reliability', 'Learning and Tuning', 'Admin'])
     await expect(page.getByRole('button', { name: 'Create work order' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Review follow-ups' })).toHaveCount(0)
     await expect(page.getByLabel('Technician execution workflow')).toHaveCount(0)
@@ -30,7 +30,7 @@ test.describe('role capability rendering', () => {
   test('technician sees assigned execution workflow and technician assistant only', async ({ page }) => {
     await signInAs(page, 'technician')
 
-    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Work Execution'], ['Planning', 'Reliability', 'Learning and Tuning', 'Admin'])
+    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Work Execution'], ['Planning', 'Reports', 'Reliability', 'Learning and Tuning', 'Admin'])
     await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Review follow-ups' })).toHaveCount(0)
 
@@ -46,7 +46,7 @@ test.describe('role capability rendering', () => {
   test('supervisor sees review, assignment, and approval controls', async ({ page }) => {
     await signInAs(page, 'supervisor')
 
-    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Work Execution', 'Planning'], ['Reliability', 'Learning and Tuning', 'Admin'])
+    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Work Execution', 'Planning', 'Reports'], ['Reliability', 'Learning and Tuning', 'Admin'])
     await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Review follow-ups' })).toBeVisible()
 
@@ -63,7 +63,7 @@ test.describe('role capability rendering', () => {
   test('engineer sees decision support and learning review without ingestion or users', async ({ page }) => {
     await signInAs(page, 'engineer')
 
-    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Reliability', 'Learning and Tuning'], ['Work Execution', 'Planning', 'Admin'])
+    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Reports', 'Reliability', 'Learning and Tuning'], ['Work Execution', 'Planning', 'Admin'])
     await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
 
     await openAssetDetail(page)
@@ -74,7 +74,7 @@ test.describe('role capability rendering', () => {
   test('reliability engineer sees reliability decision support and learning review', async ({ page }) => {
     await signInAs(page, 'reliability')
 
-    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Reliability', 'Learning and Tuning'], ['Work Execution', 'Planning', 'Admin'])
+    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Reports', 'Reliability', 'Learning and Tuning'], ['Work Execution', 'Planning', 'Admin'])
     await openAssetDetail(page)
     await expect(page.getByRole('button', { name: 'Run Morpheus' })).toBeVisible()
     await page.getByRole('button', { name: 'Reliability' }).last().click()
@@ -93,7 +93,7 @@ test.describe('role capability rendering', () => {
   test('planner sees scheduling and dispatch controls without assistant panels', async ({ page }) => {
     await signInAs(page, 'planner')
 
-    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Work Execution', 'Planning'], ['Reliability', 'Learning and Tuning', 'Admin'])
+    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Work Execution', 'Planning', 'Reports'], ['Reliability', 'Learning and Tuning', 'Admin'])
     await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Review follow-ups' })).toHaveCount(0)
 
@@ -117,10 +117,25 @@ test.describe('role capability rendering', () => {
     await expect(page.getByLabel('Supervisor question')).toHaveCount(0)
   })
 
+  test('planner opens structured maintenance reports', async ({ page }) => {
+    await signInAs(page, 'planner')
+
+    await primaryNavButton(page, 'Reports').click()
+
+    await expect(page.getByRole('heading', { name: 'Structured Maintenance Insights and Reports' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Structured Maintenance Reports' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Abnormal Alert Reports' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Engineer Maintenance Decision Summary' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Supervisor Maintenance Decision Summary' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Equipment Digital Maintenance Log Entries' })).toBeVisible()
+    await expect(page.getByText('Hot Strip Mill Main Drive Motor is at critical risk with 18% health')).toBeVisible()
+    await expect(page.getByText('Escalate for same-shift maintenance review.')).toBeVisible()
+  })
+
   test('admin sees administration surfaces and global review routes', async ({ page }) => {
     await signInAs(page, 'admin')
 
-    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Work Execution', 'Planning', 'Reliability', 'Learning and Tuning', 'Admin'], [])
+    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Work Execution', 'Planning', 'Reports', 'Reliability', 'Learning and Tuning', 'Admin'], [])
     await primaryNavButton(page, 'Admin').click()
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible()
     await expect(page.getByLabel('Application users')).toContainText(roleUsers.operator.display_name)

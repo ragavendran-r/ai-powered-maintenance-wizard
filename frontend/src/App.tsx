@@ -7,6 +7,7 @@ import {
   Briefcase,
   CalendarClock,
   ClipboardList,
+  FileText,
   Gauge,
   LogOut,
   ShieldAlert,
@@ -29,8 +30,12 @@ import {
   type LearningEmbeddingProfile,
   type LearningRagMigrationPlan,
   type LearningModelDeployment,
+  type AbnormalAlertReport,
+  type DigitalMaintenanceLogEntry,
   type LearningModelVersion,
   type LearningSummary,
+  type MaintenanceDecisionSummary,
+  type MaintenanceInsightReportSummary,
   type NeoAction,
   type NeoChatResponse,
   type NeoTable,
@@ -42,6 +47,7 @@ import {
   type SupervisorAssistantResponse,
   type TechnicianAssistantResponse,
   type StreamingStatus,
+  type StructuredMaintenanceReport,
   type UserRole,
   type WorkOrder,
   type WorkOrderCreateRequest,
@@ -87,8 +93,21 @@ import { IngestionRoute } from './routes/Ingestion'
 import { LearningReviewRoute } from './routes/LearningReview'
 import { RcaWorkspace } from './routes/RcaWorkspace'
 import { UsersRoute } from './routes/Users'
+import { ReportsRoute } from './routes/Reports'
 
 const WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS = 60_000
+
+type MaintenanceInsightSectionKey = 'summary' | 'structuredReports' | 'abnormalAlerts' | 'decisionSummaries' | 'logEntries'
+
+type MaintenanceInsightLoading = Record<MaintenanceInsightSectionKey, boolean>
+
+const emptyMaintenanceInsightLoading: MaintenanceInsightLoading = {
+  summary: false,
+  structuredReports: false,
+  abnormalAlerts: false,
+  decisionSummaries: false,
+  logEntries: false,
+}
 
 function isAbortError(error: unknown) {
   return Boolean(error && typeof error === 'object' && 'name' in error && error.name === 'AbortError')
@@ -102,6 +121,8 @@ function navigationIcon(icon: NavigationIcon) {
       return <Briefcase size={17} />
     case 'planning':
       return <CalendarClock size={17} />
+    case 'reports':
+      return <FileText size={17} />
     case 'reliability':
       return <Gauge size={17} />
     case 'learning':
@@ -309,6 +330,13 @@ export function App() {
   const [feedbackOutcome, setFeedbackOutcome] = useState('')
   const [feedbackNotes, setFeedbackNotes] = useState('')
   const [reportMessage, setReportMessage] = useState('')
+  const [maintenanceInsightSummary, setMaintenanceInsightSummary] = useState<MaintenanceInsightReportSummary | null>(null)
+  const [structuredReports, setStructuredReports] = useState<StructuredMaintenanceReport[]>([])
+  const [abnormalAlertReports, setAbnormalAlertReports] = useState<AbnormalAlertReport[]>([])
+  const [decisionSummaries, setDecisionSummaries] = useState<MaintenanceDecisionSummary[]>([])
+  const [maintenanceLogEntries, setMaintenanceLogEntries] = useState<DigitalMaintenanceLogEntry[]>([])
+  const [maintenanceInsightsLoading, setMaintenanceInsightsLoading] = useState<MaintenanceInsightLoading>(emptyMaintenanceInsightLoading)
+  const [maintenanceInsightsMessage, setMaintenanceInsightsMessage] = useState('')
   const [users, setUsers] = useState<AuthUser[]>([])
   const [technicians, setTechnicians] = useState<AuthUser[]>([])
   const [userMessage, setUserMessage] = useState('')
@@ -401,6 +429,13 @@ export function App() {
     setDiagnosisProvider('')
     setDiagnosisUsedLive(false)
     setDiagnosisMessage('')
+    setMaintenanceInsightSummary(null)
+    setStructuredReports([])
+    setAbnormalAlertReports([])
+    setDecisionSummaries([])
+    setMaintenanceLogEntries([])
+    setMaintenanceInsightsLoading({ ...emptyMaintenanceInsightLoading })
+    setMaintenanceInsightsMessage('')
     setTechnicianAssistant(null)
     setTechnicianChat([])
     setTechnicianLoading(false)
@@ -590,6 +625,58 @@ export function App() {
         setApiState('fallback')
       })
       .finally(() => setRcaLoading(false))
+  }
+
+  function loadMaintenanceInsights(equipmentId?: string) {
+    setMaintenanceInsightsMessage('')
+    setMaintenanceInsightSummary(null)
+    setStructuredReports([])
+    setAbnormalAlertReports([])
+    setDecisionSummaries([])
+    setMaintenanceLogEntries([])
+    setMaintenanceInsightsLoading({
+      summary: true,
+      structuredReports: true,
+      abnormalAlerts: true,
+      decisionSummaries: true,
+      logEntries: true,
+    })
+
+    function loadSection<T>(
+      section: MaintenanceInsightSectionKey,
+      request: () => Promise<T>,
+      update: (value: T) => void,
+    ) {
+      return request()
+        .then((value) => {
+          update(value)
+          setApiState('connected')
+          return true
+        })
+        .catch(() => {
+          setMaintenanceInsightsMessage('One or more structured report sections could not be loaded')
+          setApiState('fallback')
+          return false
+        })
+        .finally(() => {
+          setMaintenanceInsightsLoading((current) => ({ ...current, [section]: false }))
+        })
+    }
+
+    const requests = [
+      loadSection('summary', () => api.maintenanceInsightReportSummary(equipmentId), setMaintenanceInsightSummary),
+      loadSection('structuredReports', () => api.structuredMaintenanceReports(equipmentId), setStructuredReports),
+      loadSection('abnormalAlerts', () => api.abnormalAlertReports(equipmentId), setAbnormalAlertReports),
+      loadSection('decisionSummaries', () => api.maintenanceDecisionSummaries(equipmentId), setDecisionSummaries),
+      loadSection('logEntries', () => api.digitalMaintenanceLogEntries(equipmentId), setMaintenanceLogEntries),
+    ]
+
+    return Promise.all(requests).then((results) => {
+      if (results.every(Boolean)) {
+        setApiState('connected')
+      }
+      return results
+    })
   }
 
   async function refreshLearningExamples() {
@@ -1034,6 +1121,12 @@ export function App() {
   }, [activeView])
 
   useEffect(() => {
+    if (activeView === 'reports') {
+      void loadMaintenanceInsights()
+    }
+  }, [activeView])
+
+  useEffect(() => {
     if (activeView === 'learningReview' && canReviewLearning) {
       void loadLearning()
     }
@@ -1432,6 +1525,22 @@ export function App() {
       setReportMessage('Report downloaded')
     } catch {
       setReportMessage('Report could not be downloaded')
+    }
+  }
+
+  async function downloadMaintenanceInsights(equipmentId?: string) {
+    try {
+      const markdown = await api.maintenanceInsightReportsMarkdown(equipmentId)
+      const blob = new Blob([markdown], { type: 'text/markdown' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${equipmentId || 'plant'}-maintenance-insights.md`
+      link.click()
+      window.URL.revokeObjectURL(url)
+      setMaintenanceInsightsMessage('Structured maintenance insights downloaded')
+    } catch {
+      setMaintenanceInsightsMessage('Structured maintenance insights could not be downloaded')
     }
   }
 
@@ -2585,6 +2694,19 @@ export function App() {
         mode={activeView === 'planning' ? 'planning' : 'execution'}
         workOrderMessage={workOrderMessage}
         workOrders={workOrders}
+      />
+    ) : activeView === 'reports' ? (
+      <ReportsRoute
+        abnormalAlertReports={abnormalAlertReports}
+        decisionSummaries={decisionSummaries}
+        downloadMaintenanceInsights={downloadMaintenanceInsights}
+        logEntries={maintenanceLogEntries}
+        loading={maintenanceInsightsLoading}
+        message={maintenanceInsightsMessage}
+        refreshMaintenanceInsights={loadMaintenanceInsights}
+        selectedEquipment={selectedEquipment}
+        structuredReports={structuredReports}
+        summary={maintenanceInsightSummary}
       />
     ) : activeView === 'reliability' ? (
       <section className="reliabilityRouteStack" aria-label="Reliability workspace">
