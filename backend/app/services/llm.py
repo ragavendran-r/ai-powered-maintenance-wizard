@@ -54,6 +54,7 @@ class LLMClient(ABC):
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
         max_tokens: int = 600,
+        timeout_seconds: Optional[float] = None,
     ) -> Iterator[LLMTextResponse]:
         yield self.complete_text(prompt, system_prompt, fallback_factory, max_tokens=max_tokens)
 
@@ -166,11 +167,13 @@ class OpenAIClient(LLMClient):
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
         max_tokens: int = 600,
+        timeout_seconds: Optional[float] = None,
     ) -> Iterator[LLMTextResponse]:
         if not self.api_key:
             yield fallback_factory("openai", "OPENAI_API_KEY is not set")
             return
         token_budget = min(max_tokens, self.text_max_tokens)
+        read_timeout = timeout_seconds or self.stream_timeout_seconds
         try:
             with httpx.stream(
                 "POST",
@@ -186,7 +189,7 @@ class OpenAIClient(LLMClient):
                     "max_tokens": token_budget,
                     "stream": True,
                 },
-                timeout=self._stream_timeout(),
+                timeout=self._stream_timeout(read_timeout),
             ) as response:
                 response.raise_for_status()
                 yielded = False
@@ -206,9 +209,9 @@ class OpenAIClient(LLMClient):
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
             yield fallback_factory("openai", f"OpenAI stream failed: {exc}")
 
-    def _stream_timeout(self) -> httpx.Timeout:
+    def _stream_timeout(self, read_timeout: Optional[float] = None) -> httpx.Timeout:
         return httpx.Timeout(
-            self.stream_timeout_seconds,
+            read_timeout or self.stream_timeout_seconds,
             connect=self.timeout_seconds,
             write=self.timeout_seconds,
             pool=self.timeout_seconds,
@@ -308,8 +311,10 @@ class OllamaClient(LLMClient):
         system_prompt: str,
         fallback_factory: Callable[[str, str], LLMTextResponse],
         max_tokens: int = 600,
+        timeout_seconds: Optional[float] = None,
     ) -> Iterator[LLMTextResponse]:
         token_budget = min(max_tokens, self.text_max_tokens)
+        read_timeout = timeout_seconds or self.stream_timeout_seconds
         try:
             with httpx.stream(
                 "POST",
@@ -323,7 +328,7 @@ class OllamaClient(LLMClient):
                     "stream": True,
                     "options": {"num_predict": token_budget},
                 },
-                timeout=self._stream_timeout(),
+                timeout=self._stream_timeout(read_timeout),
             ) as response:
                 response.raise_for_status()
                 yielded = False
@@ -342,9 +347,9 @@ class OllamaClient(LLMClient):
         except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             yield fallback_factory("ollama", f"Ollama stream failed: {exc}")
 
-    def _stream_timeout(self) -> httpx.Timeout:
+    def _stream_timeout(self, read_timeout: Optional[float] = None) -> httpx.Timeout:
         return httpx.Timeout(
-            self.stream_timeout_seconds,
+            read_timeout or self.stream_timeout_seconds,
             connect=self.timeout_seconds,
             write=self.timeout_seconds,
             pool=self.timeout_seconds,

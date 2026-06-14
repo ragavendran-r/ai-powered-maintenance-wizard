@@ -874,6 +874,35 @@ def test_technician_assistant_streams_sse_response():
     assert forbidden_response.status_code == 403
 
 
+def test_technician_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
+    import app.services.work_order_assistant as assistant_module
+    from app.services.llm import LLMTextResponse
+
+    captured = {}
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["timeout_seconds"] = timeout_seconds
+            yield LLMTextResponse(content="Neo bounded guidance.", used_live_provider=True, provider="openai")
+
+    monkeypatch.setattr(assistant_module, "configured_llm_client", lambda: FakeClient())
+    with client.stream(
+        "POST",
+        "/api/work-orders/technician-assist/stream",
+        json={"work_order_id": "WO-8304", "observation": "Connections 3 and 5 were loose."},
+        headers=auth_headers("technician@plant.local"),
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert captured["timeout_seconds"] == 15.0
+    assert "Neo bounded guidance" in body
+
+
 def test_technician_assistant_answers_material_availability_question_directly():
     headers = auth_headers("technician@plant.local")
 
@@ -943,6 +972,35 @@ def test_supervisor_assistant_streams_sse_response():
         headers=auth_headers("technician@plant.local"),
     )
     assert forbidden_response.status_code == 403
+
+
+def test_supervisor_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
+    import app.services.work_order_assistant as assistant_module
+    from app.services.llm import LLMTextResponse
+
+    captured = {}
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["timeout_seconds"] = timeout_seconds
+            yield LLMTextResponse(content="Neo supervisor bounded review.", used_live_provider=True, provider="openai")
+
+    monkeypatch.setattr(assistant_module, "configured_llm_client", lambda: FakeClient())
+    with client.stream(
+        "POST",
+        "/api/work-orders/supervisor-assist/stream",
+        json={"work_order_id": "WO-8297", "queue_name": "follow_up", "question": "What needs follow-up?"},
+        headers=auth_headers("supervisor@plant.local"),
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert captured["timeout_seconds"] == 15.0
+    assert "Neo supervisor bounded review" in body
 
 
 def test_streaming_status_is_disabled_by_default():
@@ -1213,6 +1271,35 @@ def test_neo_chat_stream_returns_sse_done_event_for_table_query():
     assert '"type": "done"' in body
     assert '"title": "Work Orders"' in body
     assert '"provider": "mock"' in body
+
+
+def test_neo_chat_stream_uses_interactive_llm_timeout(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    captured = {}
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["timeout_seconds"] = timeout_seconds
+            yield LLMTextResponse(content="Neo dashboard bounded answer.", used_live_provider=True, provider="openai")
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    with client.stream(
+        "POST",
+        "/api/neo/chat/stream",
+        json={"message": "how to inspect Blast Furnace Combustion Air Blower"},
+        headers=auth_headers(),
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert captured["timeout_seconds"] == 15.0
+    assert "Neo dashboard bounded answer" in body
 
 
 def test_neo_chat_returns_asset_table_with_llm_answer():
