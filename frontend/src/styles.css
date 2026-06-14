@@ -1711,9 +1711,7 @@ h3 {
 }
 
 .dashboardEfficiency {
-  min-height: 420px;
-  position: sticky;
-  top: 16px;
+  min-height: 0;
 }
 
 .neoHeader {
@@ -1991,21 +1989,85 @@ h3 {
   color: var(--color-link);
 }
 
-.barChart {
+.chartFrame {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+}
+
+.barChartGrid {
+  align-items: stretch;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.chartYAxisLabel {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.chartXAxisLabel {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  justify-self: center;
+}
+
+.barChartScale {
+  color: var(--color-text-subtle);
+  display: grid;
+  font-size: 11px;
+  font-weight: 700;
+  grid-template-rows: repeat(3, 1fr);
+  height: 230px;
+  line-height: 1;
+  padding-bottom: 24px;
+  text-align: right;
+}
+
+.barChartScale span:nth-child(2) {
+  align-self: center;
+}
+
+.barChartScale span:last-child {
+  align-self: end;
+}
+
+.barChart,
+.miniBars {
   align-items: end;
   display: grid;
   gap: 18px;
   grid-template-columns: repeat(5, 1fr);
-  height: 260px;
-  padding: 20px 24px 0;
+  height: 230px;
+  min-width: 0;
+  padding: 14px 8px 0;
+  position: relative;
+}
+
+.barChart {
+  border-bottom: 2px solid var(--chart-axis);
+  border-left: 2px solid var(--chart-axis);
 }
 
 .barGroup {
   align-items: center;
   display: grid;
-  gap: 8px;
+  grid-template-rows: 20px minmax(0, 1fr) 18px;
   height: 100%;
   justify-items: center;
+  min-width: 0;
+}
+
+.barGroup em,
+.miniBarGroup em {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
 }
 
 .barGroup span {
@@ -2032,16 +2094,34 @@ h3 {
 }
 
 .miniBars {
-  align-items: end;
-  display: flex;
-  gap: 16px;
-  height: 160px;
-  padding-top: 20px;
+  border-bottom: 2px solid var(--chart-axis);
+  border-left: 2px solid var(--chart-axis);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.miniBars span {
+.compactChartFrame .barChartScale {
+  height: 180px;
+}
+
+.compactChartFrame .miniBars {
+  height: 180px;
+}
+
+.miniBarGroup {
+  align-items: center;
+  display: grid;
+  grid-template-rows: 20px minmax(0, 1fr) 18px;
+  height: 100%;
+  justify-items: center;
+  min-width: 0;
+}
+
+.miniBarGroup i {
+  align-self: end;
   background: var(--chart-status-success);
   border-radius: 3px 3px 0 0;
+  display: block;
+  font-style: normal;
   width: 34px;
 }
 
@@ -2180,6 +2260,24 @@ h3 {
   stroke: var(--risk-medium-fill);
   stroke-dasharray: 6 6;
   stroke-width: 2;
+}
+
+.chartAxisLabel {
+  fill: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.chartAxisLabelVertical {
+  transform: rotate(-90deg);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.chartTickLabel {
+  fill: var(--color-text-subtle);
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .assetVisual {
