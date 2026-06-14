@@ -1,6 +1,6 @@
 # Ingestion Sample Files
 
-Use these files from the frontend Ingestion view to test document-file upload.
+Use these files from the frontend Ingestion view to test document-file upload. Sign in as an `admin` or `reliability_engineer` demo user; those roles can upload documents through the UI.
 
 Select the matching Source value before uploading each file:
 
@@ -12,3 +12,5 @@ Select the matching Source value before uploading each file:
 - `history`: `RM-DRIVE-01_HISTORY_drive_bearing_maintenance.json`
 
 The files use upload-supported formats: Markdown, text, log, JSON, and CSV.
+
+Uploaded text is stored as a document, chunked for retrieval, indexed into Qdrant when the vector store is available, and processed into document intelligence for future assistant context.

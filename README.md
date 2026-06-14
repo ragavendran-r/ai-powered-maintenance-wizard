@@ -4,6 +4,27 @@ Working prototype for an AI-powered maintenance decision-support system for stee
 
 The app helps maintenance engineers review plant health, diagnose equipment issues, inspect evidence, prioritize actions, ingest new maintenance context, export structured reports, and capture feedback that improves future recommendations.
 
+## Tech Stack
+
+| Layer | Technology |
+| --- | --- |
+| Backend API | Python 3, FastAPI, Pydantic, Uvicorn |
+| Backend persistence | SQLite for local/demo operational data, auth state, work orders, learning records, and lightweight startup migrations |
+| Frontend | React, TypeScript, Vite, CSS modules via `frontend/src/styles.css`, lucide-react icons |
+| Auth | Local SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI role guards, React session storage |
+| AI provider adapters | Mock deterministic provider, OpenAI-compatible chat completions, Ollama-compatible chat completions |
+| Local LLM runtime | LM Studio OpenAI-compatible server with Qwen2.5 7B Instruct GGUF as the recommended local setup |
+| Assistants | Neo for dashboard/work execution, Morpheus for diagnosis/RCA/PM planning, Smith for reliability prediction and technician-ready planning |
+| RAG/vector search | Qdrant for production-like document and approved-learning retrieval, deterministic hashed embeddings, SQLite/local-vector fallback |
+| Streaming and async jobs | NATS JetStream for IoT ingestion and learning jobs, durable consumers, explicit acknowledgments, DLQ handling |
+| Learning and tuning | LLM-as-a-Judge scoring, reviewer approval gates, JSONL dataset snapshots, PEFT/LoRA and QLoRA worker hooks, artifact registry |
+| Optional PEFT trainer | Hugging Face Transformers, PEFT, TRL, bitsandbytes, Accelerate, Datasets, PyTorch, Safetensors |
+| Document parsing | Text/Markdown/CSV/log/JSON decoding and embedded-text PDF extraction with `pypdf` |
+| Reports | Typed maintenance insight reports and Markdown export |
+| Tests | Pytest for backend, Vitest and Testing Library for frontend, Playwright for E2E/browser validation |
+| Local orchestration | Bash stack scripts, Docker containers for NATS and Qdrant, disposable Kind Kubernetes runner |
+| Tooling and docs | `.env.example`, architecture/demo/hardening docs, progress and goal ledgers |
+
 ## AI Capabilities
 
 The AI layer is an audited maintenance copilot layered after deterministic backend controls. Raw IoT ingestion, anomaly scoring, risk calculation, role permissions, and persisted work-order updates stay in deterministic flows; AI explains, retrieves evidence, guides role-specific work, and helps turn reviewed outcomes into reusable learning material.
@@ -71,6 +92,7 @@ frontend/             React + Vite application
 assets/sample_data/   Bundled steel-plant demo fixtures
 backend/data/         Local SQLite database generated at runtime
 docs/                 Architecture, planning, goal tracking, and progress docs
+scripts/              Local stack, Kubernetes, notification, export, and PEFT helpers
 ```
 
 Important docs:
@@ -288,16 +310,18 @@ npm run build
 
 ## Demo Flow
 
-1. Start the FastAPI backend.
-2. Start the Vite frontend.
+1. Start the local stack with `scripts/run-local-stack.sh start`, or start the FastAPI backend and Vite frontend separately.
 3. Sign in as `admin@plant.local` with `DemoPass123!`.
 4. Open the dashboard and review high-risk assets.
 5. Select the hot strip mill main drive.
 6. Ask why the drive is vibrating or run diagnosis.
 7. Review sensor anomalies, cited evidence, root causes, immediate and planned actions, spares strategy, feedback controls, and Markdown report export.
 8. Open the Ingestion view from the left navigation and import an SOP/manual/log or paste JSON records/documents.
-9. Open the Users view as admin to review role-based access.
-10. Submit detailed feedback with actual root cause, action taken, and outcome; run diagnosis again to see learning notes included.
+9. Open Reports to review structured maintenance insights, abnormal alerts, decision summaries, digital log entries, and Markdown export.
+10. Open Work Execution and Planning to show role-aware work-order execution, PM planning, material blockers, and dispatch controls.
+11. Open Learning and Tuning to review judged examples, RAG status, PEFT jobs, artifacts, and model promotion gates.
+12. Open the Users view as admin to review role-based access.
+13. Submit detailed feedback with actual root cause, action taken, and outcome; run diagnosis again to see learning notes included.
 
 ## Progress Tracking
 

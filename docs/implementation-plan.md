@@ -4,16 +4,19 @@
 
 Build a working AI-powered maintenance decision-support prototype for industrial equipment in steel manufacturing environments.
 
-The system will use:
+The implemented system uses:
 
 - Backend: Python FastAPI
 - Frontend: React, TypeScript, and Vite
-- Storage: SQLite for structured records and feedback
-- Retrieval: local SQLite-backed chunk index for manuals, SOPs, logs, reports, and historical records
+- Storage: SQLite for local/demo operational records, auth state, work orders, learning records, and lightweight startup migrations
+- Retrieval: Qdrant-backed RAG for document chunks and approved learning examples, with deterministic SQLite/local-vector fallback
+- Streaming and jobs: NATS JetStream for IoT ingestion and async learning jobs
 - AI: provider-agnostic LLM adapter supporting OpenAI-compatible chat completions and Ollama-style local models
+- Learning: LLM-as-a-Judge scoring, reviewer approval gates, JSONL snapshots, PEFT worker hooks, and model promotion controls
+- Auth: local SQLite users, bcrypt password hashes, JWT bearer tokens, role guards, and role-aware React navigation
 - Demo data: sample steel-plant equipment, sensor alerts, maintenance history, spares, SOPs, and manual excerpts
 
-The prototype will support ingestion, retrieval-augmented maintenance chat, diagnosis, root-cause analysis, anomaly and risk scoring, prioritized recommendations, engineer feedback, dashboard views, and structured report generation.
+The prototype supports ingestion, retrieval-augmented maintenance chat, diagnosis, root-cause analysis, preventive-maintenance planning, work execution, anomaly and risk scoring, prioritized recommendations, engineer feedback, dashboard views, structured report generation, and reviewer-controlled continuous-learning workflows.
 
 ## Key Changes
 
@@ -22,37 +25,53 @@ The prototype will support ingestion, retrieval-augmented maintenance chat, diag
   - `frontend/` for the React dashboard, chat, equipment detail views, and report UI.
   - `assets/sample_data/` for steel-plant demo fixtures.
   - `docs/` for architecture, setup, data flow, demo script, assumptions, and progress tracking.
-  - Root `.env.example`, `README.md`, and optional `docker-compose.yml`.
+  - Root `.env.example`, `README.md`, and stack helper scripts.
 
 - Implement backend APIs:
+  - `POST /api/auth/login`
+  - `GET /api/auth/me`
   - `POST /api/ingest/documents`
+  - `POST /api/ingest/document-file`
   - `POST /api/ingest/records`
+  - `GET /api/streaming/status`
+  - `GET /api/assets`
+  - `GET /api/assets/{equipment_id}`
   - `GET /api/equipment`
   - `GET /api/equipment/{id}/health`
   - `GET /api/alerts`
+  - `GET /api/work-orders`
+  - `POST /api/work-orders`
+  - `GET /api/pm-templates`
+  - `GET /api/pm-plans`
+  - `POST /api/pm-plans/morpheus-draft`
   - `POST /api/chat`
   - `POST /api/diagnose`
   - `POST /api/predict`
+  - `GET /api/rca-cases`
   - `POST /api/recommendations/{id}/feedback`
+  - `GET /api/reports/maintenance-insights`
   - `GET /api/reports/{equipment_id}`
+  - `GET /api/learning/summary`
   - `GET /api/dashboard/summary`
 
 - Implement core backend capabilities:
-- Ingest equipment manuals, SOPs, logs, alerts, failure reports, spare parts, and maintenance records into SQLite-backed repositories.
+  - Ingest equipment manuals, SOPs, logs, alerts, failure reports, spare parts, and maintenance records into SQLite-backed repositories.
   - Normalize data into typed models for equipment, alerts, work orders, sensor summaries, spare parts, maintenance events, document chunks, recommendations, and feedback.
-- Chunk and embed knowledge documents into a local SQLite-backed retrieval index.
+  - Chunk and embed knowledge documents into Qdrant-backed retrieval, retaining SQLite-local fallback for disconnected tests.
   - Retrieve relevant evidence for each maintenance question or alert.
   - Generate structured outputs containing diagnosis, probable root causes, risk level, urgency, evidence, immediate actions, long-term actions, spares impact, confidence, and report summary.
   - Detect abnormalities using threshold rules and simple statistical methods such as rolling z-score, EWMA, or IsolationForest where sample data supports it.
   - Estimate failure likelihood and basic remaining useful life using historical events, alert severity, condition indicators, and confidence bands.
   - Capture engineer feedback and include it in future retrieval and recommendation context.
+  - Gate learning reuse through LLM-as-a-Judge scoring and explicit reviewer approval.
 
 - Implement frontend capabilities:
   - Dashboard with equipment health, active alerts, risk levels, bottlenecks, spares constraints, and trend charts.
   - Equipment detail page with timeline, anomaly history, predicted risk/RUL, linked evidence, and recommended actions.
-  - Maintenance chat page with multi-turn natural language interaction and cited answers.
+  - Role-aware Neo, Morpheus, and Smith assistant surfaces with streamed readable responses and cited context.
   - Recommendation panel with immediate actions, planned actions, spares strategy, and feedback controls.
-  - Report view for abnormal alert reports and structured maintenance summaries.
+  - Report view for abnormal alert reports, structured maintenance summaries, decision summaries, digital maintenance log entries, and Markdown export.
+  - Learning Review view for examples, datasets, RAG status, PEFT jobs, artifacts, evaluations, deployments, and model promotions.
 
 ## Data And Reasoning Flow
 
@@ -64,13 +83,14 @@ The prototype will support ingestion, retrieval-augmented maintenance chat, diag
 6. Anomaly and risk services compute numeric signals.
 7. LLM reasoner combines retrieved evidence, risk signals, and operational constraints.
 8. System returns structured diagnosis, root causes, risk, RUL estimate, prioritized actions, and citations.
-9. Engineer feedback is saved and reused in future recommendation context.
+9. Engineer feedback is saved, judged, approved when appropriate, and reused in future recommendation, RAG, reporting, prediction, and tuning context.
 
 ## LLM And Retrieval Design
 
 - Define a common `LLMClient` interface for chat completion and structured JSON output.
 - Implement `OpenAIClient` and `OllamaClient` with structured JSON validation and deterministic fallback.
 - Select provider through `.env` with `LLM_PROVIDER=openai` or `LLM_PROVIDER=ollama`.
+- Use the same OpenAI-compatible path for LM Studio, vLLM, hosted gateways, and compatible local runtimes.
 - Keep prompts provider-neutral and require structured JSON responses for diagnosis and recommendations.
 - Include citations for recommendations wherever possible.
 - When evidence is weak, return a lower confidence score and explicitly identify missing data.
@@ -105,10 +125,10 @@ The prototype will support ingestion, retrieval-augmented maintenance chat, diag
 
 ## Assumptions
 
-- This is a local hackathon prototype, not a production deployment.
+- This is a production-targeted local prototype, not a production deployment.
 - Synthetic/sample steel manufacturing data will be used unless real plant data is provided.
-- SQLite is sufficient for the prototype; production can migrate to PostgreSQL.
-- Local vector storage is sufficient for the prototype; production can migrate to Qdrant, Weaviate, or pgvector.
+- SQLite is sufficient for the local prototype; production should migrate to PostgreSQL or another managed database.
+- Qdrant is the default production-like vector database; local vector storage remains only a fallback.
 - Failure prediction and RUL are explainable heuristics unless richer historical time-series data is provided.
 - Provider-agnostic LLM support means OpenAI and Ollama-compatible clients share one internal interface.
-- Authentication and full role-based access are optional enhancements; role labels can be represented in sample data and UI without blocking the core prototype.
+- Authentication and role-based access are implemented locally; enterprise SSO remains a production hardening item.
