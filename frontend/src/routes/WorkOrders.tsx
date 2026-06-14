@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Bot, Briefcase, CalendarClock, FileText, Send, Truck } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Bot, Briefcase, CalendarClock, FileText, Send, Sparkles, Truck } from 'lucide-react'
 import type {
+  AssetListItem,
   AuthUser,
   MaterialBlockerStatus,
   MaterialReadiness,
+  PmPlan,
+  PmTemplate,
   ProcurementStatus,
   SupervisorAssistantResponse,
   TechnicianAssistantResponse,
@@ -12,7 +15,7 @@ import type {
   WorkOrderSpareReservation,
 } from '../services/api'
 import type { AssistantTurn } from '../assistantContent'
-import { AssistantMessageContent } from '../assistantContent'
+import { AssistantMessageContent, FormattedAssistantContent } from '../assistantContent'
 import {
   supervisorAssistantName,
   technicianAssistantName,
@@ -31,6 +34,7 @@ const TECHNICIAN_WAITING_MESSAGE_DELAY_MS = 7_000
 export function WorkOrdersRoute({
   approveWorkOrder,
   assignWorkOrder,
+  assets,
   canApproveWorkOrders,
   canAssignWorkOrders,
   canSupervisorAssistant,
@@ -38,6 +42,13 @@ export function WorkOrdersRoute({
   completeSelectedWorkOrder,
   dispatchWorkOrder,
   planWorkOrder,
+  pmPlanLoading,
+  pmPlanMessage,
+  pmPlanStreamText,
+  pmPlans,
+  pmTemplates,
+  convertPmPlanToWorkOrder,
+  draftPreventivePlan,
   runSupervisorAssistant,
   runTechnicianAssistant,
   selectedWorkOrder,
@@ -61,6 +72,7 @@ export function WorkOrdersRoute({
 }: {
   approveWorkOrder: (workOrderId: string) => void
   assignWorkOrder: (workOrderId: string, assignedTo: string) => void
+  assets: AssetListItem[]
   canApproveWorkOrders: boolean
   canAssignWorkOrders: boolean
   canSupervisorAssistant: boolean
@@ -68,6 +80,13 @@ export function WorkOrdersRoute({
   completeSelectedWorkOrder: () => void
   dispatchWorkOrder: (workOrderId: string) => void
   planWorkOrder: (workOrderId: string, payload: WorkOrderPlanningUpdate) => void
+  pmPlanLoading: boolean
+  pmPlanMessage: string
+  pmPlanStreamText: string
+  pmPlans: PmPlan[]
+  pmTemplates: PmTemplate[]
+  convertPmPlanToWorkOrder: (planId: string) => void
+  draftPreventivePlan: (equipmentId: string, templateId?: string) => void
   runSupervisorAssistant: (workOrderId?: string) => void
   runTechnicianAssistant: () => void
   selectedWorkOrder?: WorkOrder
@@ -106,17 +125,29 @@ export function WorkOrdersRoute({
   }, [technicianLoading, technicianStreaming])
 
   return (
-    <section className="workOrderLayout">
+    <section className={`workOrderLayout${isPlanningMode ? ' planningMode' : ''}`}>
       <section className="workOrderCenterColumn" aria-label="Work order center pane">
         {isPlanningMode && canAssignWorkOrders && (
-          <PlannerDispatchBoard
-            onDispatch={dispatchWorkOrder}
-            onOpen={setSelectedWorkOrderId}
-            onPlan={planWorkOrder}
-            selectedWorkOrderId={selectedWorkOrder?.id}
-            technicians={technicians}
-            workOrders={workOrders}
-          />
+          <>
+            <PreventiveMaintenancePanel
+              assets={assets}
+              convertPmPlanToWorkOrder={convertPmPlanToWorkOrder}
+              draftPreventivePlan={draftPreventivePlan}
+              isLoading={pmPlanLoading}
+              message={pmPlanMessage}
+              streamText={pmPlanStreamText}
+              plans={pmPlans}
+              templates={pmTemplates}
+            />
+            <PlannerDispatchBoard
+              onDispatch={dispatchWorkOrder}
+              onOpen={setSelectedWorkOrderId}
+              onPlan={planWorkOrder}
+              selectedWorkOrderId={selectedWorkOrder?.id}
+              technicians={technicians}
+              workOrders={workOrders}
+            />
+          </>
         )}
         {!isPlanningMode && canUseAssistant && (
           <section className="detailPanel workOrderAssistantPanel">
@@ -252,77 +283,79 @@ export function WorkOrdersRoute({
           {workOrderMessage && <p className="inlineStatus">{workOrderMessage}</p>}
         </section>
       </section>
-      <section className="workOrderRightColumn" aria-label="Work order right pane">
-        <section className="detailPanel workOrderDetail">
-          {selectedWorkOrder ? (
-            <>
-              <div className="sectionHeader">
-                <FileText size={18} />
-                <h2>Work Order {selectedWorkOrder.id.replace('WO-', '')}</h2>
-              </div>
-              <StatusTimeline status={selectedEffectiveStatus ?? selectedWorkOrder.status} />
-              <div className="workOrderSummary">
-                <div className="workOrderBadges">
-                  <span className="statusPill connected priorityPill">Priority {selectedWorkOrder.priority}</span>
-                  <StatusBadge status={selectedEffectiveStatus ?? selectedWorkOrder.status} />
+      {!isPlanningMode && (
+        <section className="workOrderRightColumn" aria-label="Work order right pane">
+          <section className="detailPanel workOrderDetail">
+            {selectedWorkOrder ? (
+              <>
+                <div className="sectionHeader">
+                  <FileText size={18} />
+                  <h2>Work Order {selectedWorkOrder.id.replace('WO-', '')}</h2>
                 </div>
-                <p className="statusDescription">{selectedEffectiveStatusDetail?.description}</p>
-                <p>{selectedWorkOrder.description}</p>
-                <dl>
-                  <dt>Assigned to</dt>
-                  <dd>{selectedWorkOrder.assigned_to}</dd>
-                  <dt>Problem code</dt>
-                  <dd>{technicianAssistant?.suggested_problem_code ?? selectedWorkOrder.problem_code}</dd>
-                  <dt>Failure class</dt>
-                  <dd>{technicianAssistant?.suggested_failure_class ?? selectedWorkOrder.failure_class}</dd>
-                  <dt>Due date</dt>
-                  <dd>{formatDate(selectedWorkOrder.due_date)}</dd>
-                  <dt>Planning status</dt>
-                  <dd>{planningStatusLabels[selectedWorkOrder.planning_status]}</dd>
-                  <dt>Planned window</dt>
-                  <dd>{formatPlanningWindow(selectedWorkOrder)}</dd>
-                  <dt>Material readiness</dt>
-                  <dd>{materialReadinessLabels[selectedWorkOrder.material_readiness]}</dd>
-                  <dt>Material blocker</dt>
-                  <dd>{materialBlockerStatusLabels[selectedWorkOrder.material_blocker_status]}</dd>
-                  {selectedWorkOrder.material_blocker_note && (
-                    <>
-                      <dt>Blocker note</dt>
-                      <dd>{selectedWorkOrder.material_blocker_note}</dd>
-                    </>
-                  )}
-                  {selectedWorkOrder.spare_reservations.length > 0 && (
-                    <>
-                      <dt>Spare reservations</dt>
-                      <dd>
-                        <ul className="spareSummaryList">
-                          {selectedWorkOrder.spare_reservations.map((reservation) => (
-                            <li key={`${reservation.id ?? reservation.spare_id ?? reservation.spare_name}`}>
-                              <strong>{reservation.spare_name}</strong>
-                              <span>
-                                {reservation.reserved_qty}/{reservation.required_qty} reserved · {procurementStatusLabels[reservation.procurement_status]} · {materialBlockerStatusLabels[reservation.blocker_status]}
-                              </span>
-                              {reservation.substitute_name && <span>Substitute: {reservation.substitute_name}</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      </dd>
-                    </>
-                  )}
-                  {selectedWorkOrder.dispatch_notes && (
-                    <>
-                      <dt>Dispatch notes</dt>
-                      <dd>{selectedWorkOrder.dispatch_notes}</dd>
-                    </>
-                  )}
-                </dl>
-              </div>
-            </>
-          ) : (
-            <p className="emptyState">Select a work order to review.</p>
-          )}
+                <StatusTimeline status={selectedEffectiveStatus ?? selectedWorkOrder.status} />
+                <div className="workOrderSummary">
+                  <div className="workOrderBadges">
+                    <span className="statusPill connected priorityPill">Priority {selectedWorkOrder.priority}</span>
+                    <StatusBadge status={selectedEffectiveStatus ?? selectedWorkOrder.status} />
+                  </div>
+                  <p className="statusDescription">{selectedEffectiveStatusDetail?.description}</p>
+                  <p>{selectedWorkOrder.description}</p>
+                  <dl>
+                    <dt>Assigned to</dt>
+                    <dd>{selectedWorkOrder.assigned_to}</dd>
+                    <dt>Problem code</dt>
+                    <dd>{technicianAssistant?.suggested_problem_code ?? selectedWorkOrder.problem_code}</dd>
+                    <dt>Failure class</dt>
+                    <dd>{technicianAssistant?.suggested_failure_class ?? selectedWorkOrder.failure_class}</dd>
+                    <dt>Due date</dt>
+                    <dd>{formatDate(selectedWorkOrder.due_date)}</dd>
+                    <dt>Planning status</dt>
+                    <dd>{planningStatusLabels[selectedWorkOrder.planning_status]}</dd>
+                    <dt>Planned window</dt>
+                    <dd>{formatPlanningWindow(selectedWorkOrder)}</dd>
+                    <dt>Material readiness</dt>
+                    <dd>{materialReadinessLabels[selectedWorkOrder.material_readiness]}</dd>
+                    <dt>Material blocker</dt>
+                    <dd>{materialBlockerStatusLabels[selectedWorkOrder.material_blocker_status]}</dd>
+                    {selectedWorkOrder.material_blocker_note && (
+                      <>
+                        <dt>Blocker note</dt>
+                        <dd>{selectedWorkOrder.material_blocker_note}</dd>
+                      </>
+                    )}
+                    {selectedWorkOrder.spare_reservations.length > 0 && (
+                      <>
+                        <dt>Spare reservations</dt>
+                        <dd>
+                          <ul className="spareSummaryList">
+                            {selectedWorkOrder.spare_reservations.map((reservation) => (
+                              <li key={`${reservation.id ?? reservation.spare_id ?? reservation.spare_name}`}>
+                                <strong>{reservation.spare_name}</strong>
+                                <span>
+                                  {reservation.reserved_qty}/{reservation.required_qty} reserved · {procurementStatusLabels[reservation.procurement_status]} · {materialBlockerStatusLabels[reservation.blocker_status]}
+                                </span>
+                                {reservation.substitute_name && <span>Substitute: {reservation.substitute_name}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                        </dd>
+                      </>
+                    )}
+                    {selectedWorkOrder.dispatch_notes && (
+                      <>
+                        <dt>Dispatch notes</dt>
+                        <dd>{selectedWorkOrder.dispatch_notes}</dd>
+                      </>
+                    )}
+                  </dl>
+                </div>
+              </>
+            ) : (
+              <p className="emptyState">Select a work order to review.</p>
+            )}
+          </section>
         </section>
-      </section>
+      )}
     </section>
   )
 }
@@ -383,6 +416,188 @@ const procurementStatusLabels: Record<ProcurementStatus, string> = {
 }
 
 const procurementStatusOptions: ProcurementStatus[] = ['not_required', 'not_requested', 'requested', 'ordered', 'received']
+
+function PreventiveMaintenancePanel({
+  assets,
+  convertPmPlanToWorkOrder,
+  draftPreventivePlan,
+  isLoading,
+  message,
+  plans,
+  streamText,
+  templates,
+}: {
+  assets: AssetListItem[]
+  convertPmPlanToWorkOrder: (planId: string) => void
+  draftPreventivePlan: (equipmentId: string, templateId?: string) => void
+  isLoading: boolean
+  message: string
+  plans: PmPlan[]
+  streamText: string
+  templates: PmTemplate[]
+}) {
+  const streamEndRef = useRef<HTMLDivElement | null>(null)
+  const assetOptions = useMemo(() => {
+    const ids = new Set<string>()
+    const options = [
+      ...assets.map((asset) => {
+        ids.add(asset.id)
+        return { id: asset.id, label: `${asset.id} - ${asset.name}` }
+      }),
+      ...templates
+        .filter((template) => template.equipment_id && !ids.has(template.equipment_id))
+        .map((template) => ({ id: template.equipment_id as string, label: template.equipment_id as string })),
+    ]
+    return options.length ? options : [{ id: 'RM-DRIVE-01', label: 'RM-DRIVE-01' }]
+  }, [assets, templates])
+  const [selectedEquipmentId, setSelectedEquipmentId] = useState(assetOptions[0]?.id ?? 'RM-DRIVE-01')
+  const applicableTemplates = templates.filter((template) => !template.equipment_id || template.equipment_id === selectedEquipmentId)
+  const [selectedTemplateId, setSelectedTemplateId] = useState(applicableTemplates[0]?.id ?? '')
+
+  useEffect(() => {
+    if (!assetOptions.some((asset) => asset.id === selectedEquipmentId)) {
+      setSelectedEquipmentId(assetOptions[0]?.id ?? 'RM-DRIVE-01')
+    }
+  }, [assetOptions, selectedEquipmentId])
+
+  useEffect(() => {
+    const nextTemplates = templates.filter((template) => !template.equipment_id || template.equipment_id === selectedEquipmentId)
+    if (!nextTemplates.some((template) => template.id === selectedTemplateId)) {
+      setSelectedTemplateId(nextTemplates[0]?.id ?? '')
+    }
+  }, [selectedEquipmentId, selectedTemplateId, templates])
+
+  const displayedPlans = plans.length ? plans : []
+
+  useEffect(() => {
+    if (streamText) {
+      streamEndRef.current?.scrollIntoView?.({ block: 'end' })
+    }
+  }, [streamText])
+
+  return (
+    <section className="detailPanel pmPlanningPanel" aria-label="Preventive maintenance planning">
+      <div className="sectionHeader">
+        <Sparkles size={18} />
+        <div>
+          <h2>Preventive Maintenance Plans</h2>
+          <small>Morpheus drafts proactive PM; Smith turns it into technician-ready steps.</small>
+        </div>
+      </div>
+      <div className="pmDraftControls">
+        <label>
+          Asset
+          <select
+            aria-label="Select asset for preventive maintenance plan"
+            value={selectedEquipmentId}
+            onChange={(event) => setSelectedEquipmentId(event.target.value)}
+          >
+            {assetOptions.map((asset) => (
+              <option value={asset.id} key={asset.id}>{asset.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Template
+          <select
+            aria-label="Select preventive maintenance template"
+            value={selectedTemplateId}
+            onChange={(event) => setSelectedTemplateId(event.target.value)}
+          >
+            {applicableTemplates.length ? applicableTemplates.map((template) => (
+              <option value={template.id} key={template.id}>{template.title}</option>
+            )) : <option value="">No template</option>}
+          </select>
+        </label>
+        <button
+          className="textButton"
+          type="button"
+          disabled={isLoading}
+          onClick={() => draftPreventivePlan(selectedEquipmentId, selectedTemplateId)}
+        >
+          {isLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
+          Morpheus PM draft
+        </button>
+      </div>
+      <div className="pmTemplateStrip" aria-label="PM templates">
+        {applicableTemplates.map((template) => (
+          <article className="pmTemplateCard" key={template.id}>
+            <strong>{template.title}</strong>
+            <small>{template.cadence_days} day cadence · {template.source}</small>
+            <p>{template.description}</p>
+          </article>
+        ))}
+      </div>
+      {(isLoading || streamText) && (
+        <article className="pmDraftStream" aria-label="Morpheus PM draft stream">
+          <div className="miniHeader">
+            <Sparkles size={16} />
+            <h3>Morpheus PM live draft</h3>
+          </div>
+          <div className="pmDraftStreamViewport">
+            {streamText
+              ? <FormattedAssistantContent content={streamText} />
+              : <p className="emptyState">Morpheus is opening the PM draft stream...</p>}
+            <div ref={streamEndRef} aria-hidden="true" />
+          </div>
+        </article>
+      )}
+      {displayedPlans.length ? (
+        <div className="pmPlanGrid">
+          {displayedPlans.map((plan) => (
+            <article className={`pmPlanCard ${plan.status}`} key={plan.id}>
+              <div className="plannerCardHeader">
+                <div>
+                  <strong>{plan.title}</strong>
+                  <small>{plan.id} · {plan.equipment_id} · next due {formatDate(plan.next_due_date)}</small>
+                </div>
+                <span className={`planningBadge ${plan.status === 'converted' ? 'dispatched' : plan.status === 'draft' ? 'unscheduled' : 'planned'}`}>
+                  {plan.status}
+                </span>
+              </div>
+              <p>{plan.trigger.description}</p>
+              <div className="pmPlanColumns">
+                <PmList title="Monitoring thresholds" items={plan.thresholds} />
+                <PmList title="Generated task list" items={plan.tasks.map((task) => task.task)} />
+                <PmList title="Smith steps" items={plan.smith_steps} />
+              </div>
+              {plan.adjustment_notes.length > 0 && <PmList title="LLM adjustment notes" items={plan.adjustment_notes} />}
+              {plan.spares_strategy.length > 0 && <PmList title="Spares strategy" items={plan.spares_strategy} />}
+              <div className="plannerActions">
+                <button
+                  className="outlineButton"
+                  type="button"
+                  disabled={isLoading || plan.status === 'converted'}
+                  onClick={() => convertPmPlanToWorkOrder(plan.id)}
+                >
+                  Convert to planned work
+                </button>
+                {plan.converted_work_order_id && <span className="plannerHint">Created {plan.converted_work_order_id}</span>}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="plannerHint">No PM plans generated yet. Draft one from asset risk prediction and a PM template.</p>
+      )}
+      {message && <p className="inlineStatus">{message}</p>}
+    </section>
+  )
+}
+
+function PmList({ title, items }: { title: string; items: string[] }) {
+  if (!items.length) return null
+  return (
+    <section className="pmPlanList">
+      <h3>{title}</h3>
+      <ul>
+        {items.slice(0, 6).map((item, index) => (
+          <li key={`${title}-${index}`}>{item}</li>
+        ))}
+      </ul>
+    </section>
+  )
+}
 
 function PlannerDispatchBoard({
   onDispatch,

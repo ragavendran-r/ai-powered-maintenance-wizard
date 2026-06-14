@@ -6,6 +6,10 @@ import type {
   DashboardSummary,
   LearningEmbeddingProfile,
   LearningSummary,
+  PmPlan,
+  PmPlanDraftResponse,
+  PmPlanDraftStreamEvent,
+  PmTemplate,
   RcaCase,
   StreamingStatus,
   TechnicianAssistantResponse,
@@ -240,6 +244,62 @@ export const workOrders: WorkOrder[] = [
     spare_reservations: [],
   },
 ]
+
+export const pmTemplates: PmTemplate[] = [
+  {
+    id: 'PMT-RM-DRIVE-BEARING',
+    equipment_id: 'RM-DRIVE-01',
+    title: 'Drive bearing and coupling health PM',
+    description: 'Recurring vibration, temperature, lubrication, and coupling inspection.',
+    cadence_days: 14,
+    work_type: 'PM',
+    task_list: ['Trend drive-end vibration.', 'Inspect coupling alignment.'],
+    thresholds: ['drive_end_vibration >= 7.1 mm/s'],
+    source: 'sop',
+    created_at: '2026-06-14T09:00:00+05:30',
+    updated_at: '2026-06-14T09:00:00+05:30',
+  },
+]
+
+export const generatedPmPlan: PmPlan = {
+  id: 'PM-7001',
+  equipment_id: 'RM-DRIVE-01',
+  template_id: 'PMT-RM-DRIVE-BEARING',
+  title: 'Main drive proactive PM plan',
+  status: 'draft',
+  cadence_days: 14,
+  next_due_date: '2026-06-18T08:00:00+05:30',
+  trigger: {
+    type: 'risk_prediction',
+    metric_key: 'drive_end_vibration',
+    operator: '>=',
+    threshold: 7.1,
+    unit: 'mm/s',
+    description: 'Generate planned PM when vibration risk remains high or crosses 7.1 mm/s.',
+  },
+  thresholds: ['drive_end_vibration >= 7.1 mm/s'],
+  tasks: [
+    {
+      id: 'TASK-1',
+      sequence: 1,
+      task: 'Inspect drive-end bearing housing and coupling alignment.',
+      owner_role: 'Maintenance Technician',
+      estimated_minutes: 45,
+      safety_note: 'Apply LOTO before inspection.',
+    },
+  ],
+  smith_steps: ['Confirm LOTO and permits.', 'Inspect drive-end bearing housing and coupling alignment.'],
+  spares_strategy: ['Check Drive end spherical roller bearing availability.'],
+  evidence: [],
+  adjustment_notes: ['Adjust cadence using accepted feedback after repeated vibration findings.'],
+  source: 'deterministic',
+  generated_by: 'morpheus',
+  used_live_provider: false,
+  provider: 'playwright',
+  converted_work_order_id: null,
+  created_at: '2026-06-14T09:05:00+05:30',
+  updated_at: '2026-06-14T09:05:00+05:30',
+}
 
 export const rcaCases: RcaCase[] = [
   {
@@ -488,6 +548,20 @@ const embeddingProfile: LearningEmbeddingProfile = {
   updated_at: '2026-06-13T09:00:00+05:30',
 }
 
+function pmDraftStreamBody(response: PmPlanDraftResponse): string {
+  const events: PmPlanDraftStreamEvent[] = [
+    { type: 'meta', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '### PM Plan\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'Main drive proactive PM plan\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '### Monitoring Thresholds\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '- drive_end_vibration >= 7.1 mm/s\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '### Generated Task List\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '- Inspect bearing condition and coupling alignment.\n', provider: 'openai', used_live_provider: true },
+    { type: 'done', response },
+  ]
+  return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
+}
+
 const learningSummary: LearningSummary = {
   counts: {
     interactions: 1,
@@ -607,6 +681,7 @@ function workOrdersFor(user: AuthUser) {
 
 export async function installMaintenanceApi(page: Page, initialUser: AuthUser = roleUsers.admin) {
   let currentUser = initialUser
+  let pmPlans: PmPlan[] = []
 
   await page.route('**/api/**', async (route: Route) => {
     const request = route.request()
@@ -645,6 +720,55 @@ export async function installMaintenanceApi(page: Page, initialUser: AuthUser = 
     }
     if (path === '/api/rca-cases') {
       await route.fulfill(json(rcaCases))
+      return
+    }
+    if (path === '/api/pm-templates') {
+      await route.fulfill(json(pmTemplates))
+      return
+    }
+    if (path === '/api/pm-plans/morpheus-draft/stream') {
+      pmPlans = [generatedPmPlan, ...pmPlans.filter((plan) => plan.id !== generatedPmPlan.id)]
+      await route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: pmDraftStreamBody({
+          plan: generatedPmPlan,
+          templates: pmTemplates,
+          message: 'Morpheus drafted PM plan PM-7001 and Smith generated technician-ready steps.',
+        }),
+      })
+      return
+    }
+    if (path === '/api/pm-plans/morpheus-draft') {
+      pmPlans = [generatedPmPlan, ...pmPlans.filter((plan) => plan.id !== generatedPmPlan.id)]
+      await route.fulfill(
+        json({
+          plan: generatedPmPlan,
+          templates: pmTemplates,
+          message: 'Morpheus drafted PM plan PM-7001 and Smith generated technician-ready steps.',
+        }),
+      )
+      return
+    }
+    if (path.startsWith('/api/pm-plans/') && path.endsWith('/convert-work-order')) {
+      const planId = path.split('/').at(-2) ?? 'PM-7001'
+      const created: WorkOrder = {
+        ...workOrders[0],
+        id: 'WO-9100',
+        title: 'PM: Main drive proactive PM plan',
+        work_type: 'PM',
+        planning_status: 'planned',
+        recommended_action: generatedPmPlan.tasks[0].task,
+        ai_summary: `Generated from PM plan ${planId}.`,
+      }
+      pmPlans = pmPlans.map((plan) => (
+        plan.id === planId ? { ...plan, status: 'converted', converted_work_order_id: created.id } : plan
+      ))
+      await route.fulfill(json(created))
+      return
+    }
+    if (path === '/api/pm-plans') {
+      await route.fulfill(json(pmPlans))
       return
     }
     if (path.startsWith('/api/work-orders/') && request.method() === 'PATCH') {

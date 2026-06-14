@@ -1,0 +1,647 @@
+from __future__ import annotations
+
+from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+
+from fastapi import HTTPException
+from pydantic import BaseModel, Field
+
+from app.data import repository
+from app.models.schemas import PmPlan, PmPlanDraftRequest, PmPlanDraftResponse, PmTemplate, UserPublic, WorkOrder
+from app.services.ai_client import configured_llm_client
+from app.services.learning import record_assistant_interaction
+from app.services.llm import LLMTextResponse
+from app.services.retrieval import retrieve_evidence
+from app.services.risk import health_summary, predict_failure
+
+
+class _PmTaskDraft(BaseModel):
+    task: str
+    owner_role: str = "Maintenance Technician"
+    estimated_minutes: int = Field(default=30, ge=1)
+    safety_note: Optional[str] = None
+
+
+class _PmTriggerDraft(BaseModel):
+    type: str = "recurring"
+    metric_key: Optional[str] = None
+    operator: Optional[str] = None
+    threshold: Optional[float] = None
+    unit: Optional[str] = None
+    description: str
+
+
+class _PmPlanDraft(BaseModel):
+    title: str
+    cadence_days: int = Field(default=30, ge=1)
+    next_due_days: int = Field(default=7, ge=1)
+    trigger: _PmTriggerDraft
+    thresholds: list[str] = Field(default_factory=list)
+    tasks: list[_PmTaskDraft] = Field(default_factory=list)
+    spares_strategy: list[str] = Field(default_factory=list)
+    adjustment_notes: list[str] = Field(default_factory=list)
+    used_live_provider: bool = False
+    provider: str = "mock"
+
+
+PM_PLAN_ROLES = ("admin", "planner", "maintenance_supervisor", "reliability_engineer", "maintenance_engineer")
+
+
+def list_templates(equipment_id: Optional[str] = None) -> list[PmTemplate]:
+    return [PmTemplate(**item) for item in repository.list_pm_templates(equipment_id)]
+
+
+def list_plans(equipment_id: Optional[str] = None, status: Optional[str] = None) -> list[PmPlan]:
+    return [PmPlan(**item) for item in repository.list_pm_plans(equipment_id=equipment_id, status=status)]
+
+
+def draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> PmPlanDraftResponse:
+    context = _resolve_pm_context(request)
+    llm_client = configured_llm_client()
+    draft = llm_client.complete_model(
+        context["prompt"],
+        _PmPlanDraft,
+        _morpheus_system_prompt(),
+        lambda provider, reason: _fallback_from_context(context, provider, reason),
+        max_tokens=1200,
+    )
+    return _store_pm_plan_response(context, request, current_user, draft)
+
+
+def stream_draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> Iterator[dict[str, Any]]:
+    context = _resolve_pm_context(request)
+    llm_client = configured_llm_client()
+    yield {"type": "meta", "provider": llm_client.provider_name, "used_live_provider": llm_client.provider_name in {"openai", "ollama"}}
+    if llm_client.provider_name not in {"openai", "ollama"}:
+        response = draft_plan(request, current_user)
+        yield {"type": "done", "response": response.model_dump(mode="json")}
+        return
+
+    chunks: list[str] = []
+    provider = llm_client.provider_name
+    used_live_provider = True
+    for chunk in llm_client.stream_text(
+        context["prompt"],
+        _morpheus_stream_system_prompt(),
+        lambda provider, reason: LLMTextResponse(content=reason, provider=provider, used_live_provider=False),
+        max_tokens=1200,
+    ):
+        provider = chunk.provider
+        used_live_provider = chunk.used_live_provider
+        if not chunk.used_live_provider:
+            fallback = _fallback_from_context(context, provider, chunk.content)
+            response = _store_pm_plan_response(context, request, current_user, fallback)
+            yield {"type": "token", "content": _stream_text_from_pm_draft(fallback), "provider": provider, "used_live_provider": False}
+            yield {"type": "done", "response": response.model_dump(mode="json")}
+            return
+        chunks.append(chunk.content)
+        yield {"type": "token", "content": chunk.content, "provider": provider, "used_live_provider": True}
+
+    streamed_answer = "".join(chunks).strip()
+    if streamed_answer:
+        draft = _draft_from_streamed_pm_answer(context, streamed_answer, provider, used_live_provider)
+    else:
+        draft = _fallback_from_context(context, provider, "stream returned no content")
+        yield {"type": "token", "content": _stream_text_from_pm_draft(draft), "provider": provider, "used_live_provider": False}
+    response = _store_pm_plan_response(context, request, current_user, draft)
+    yield {"type": "done", "response": response.model_dump(mode="json")}
+
+
+def _resolve_pm_context(request: PmPlanDraftRequest) -> dict[str, Any]:
+    equipment = repository.get_equipment(request.equipment_id)
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    template = _select_template(request.equipment_id, request.template_id)
+    health_summary(request.equipment_id)
+    prediction = predict_failure(request.equipment_id)
+    evidence = retrieve_evidence(_evidence_query(equipment, template, request), request.equipment_id)[:6]
+    feedback = repository.list_feedback(request.equipment_id)[:5]
+    events = repository.list_maintenance_events(request.equipment_id)[:8]
+    spares = repository.list_spares(request.equipment_id)[:4]
+
+    prompt = _morpheus_prompt(equipment, template, request, prediction, evidence, feedback, events, spares)
+    return {
+        "equipment": equipment,
+        "template": template,
+        "prediction": prediction,
+        "evidence": evidence,
+        "feedback": feedback,
+        "events": events,
+        "spares": spares,
+        "prompt": prompt,
+    }
+
+
+def _store_pm_plan_response(
+    context: dict[str, Any],
+    request: PmPlanDraftRequest,
+    current_user: UserPublic,
+    draft: _PmPlanDraft,
+) -> PmPlanDraftResponse:
+    equipment = context["equipment"]
+    evidence = context["evidence"]
+    prompt = context["prompt"]
+    plan_payload = _plan_payload(request.equipment_id, context["template"], draft, evidence)
+    saved = repository.save_pm_plan(plan_payload)
+    smith_steps = _smith_steps(PmPlan(**saved), equipment, evidence)
+    saved = repository.save_pm_plan({**saved, "smith_steps": smith_steps})
+
+    record_assistant_interaction(
+        assistant="morpheus",
+        interaction_type="pm_plan_draft",
+        current_user=current_user,
+        prompt=prompt,
+        response=_plan_response_text(PmPlan(**saved)),
+        equipment_id=request.equipment_id,
+        provider=saved["provider"],
+        used_live_provider=saved["used_live_provider"],
+        source_refs=[item.model_dump(mode="json") for item in evidence],
+        outcome_status=saved["status"],
+    )
+    record_assistant_interaction(
+        assistant="smith",
+        interaction_type="pm_plan_steps",
+        current_user=current_user,
+        prompt=f"Convert PM plan {saved['id']} into technician-ready steps.",
+        response="\n".join(smith_steps),
+        equipment_id=request.equipment_id,
+        provider=saved["provider"],
+        used_live_provider=saved["used_live_provider"],
+        source_refs=[item.model_dump(mode="json") for item in evidence],
+        outcome_status="generated",
+    )
+    return PmPlanDraftResponse(
+        plan=PmPlan(**saved),
+        templates=list_templates(request.equipment_id),
+        message=f"Morpheus drafted PM plan {saved['id']} and Smith generated technician-ready steps.",
+    )
+
+
+def convert_plan_to_work_order(plan_id: str, current_user: UserPublic) -> WorkOrder:
+    plan = repository.get_pm_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="PM plan not found")
+    if plan.get("converted_work_order_id"):
+        work_order = repository.get_work_order(plan["converted_work_order_id"])
+        if work_order:
+            return WorkOrder(**work_order)
+    tasks = [task.get("task", "") for task in plan.get("tasks", []) if task.get("task")]
+    due_date = plan["next_due_date"]
+    payload = {
+        "equipment_id": plan["equipment_id"],
+        "title": f"PM: {plan['title']}",
+        "description": _work_order_description(plan),
+        "priority": 2 if plan["trigger"].get("type") != "risk_prediction" else 1,
+        "work_type": "PM",
+        "failure_class": "PM",
+        "problem_code": "PMPLAN",
+        "classification": "Preventive maintenance",
+        "assigned_to": "Maintenance Technician",
+        "supervisor": "Maintenance Supervisor",
+        "due_date": due_date,
+        "planning_status": "planned",
+        "planned_start": due_date,
+        "planned_end": None,
+        "outage_window": plan["trigger"].get("description"),
+        "material_readiness": "pending" if plan.get("spares_strategy") else "unknown",
+        "material_blocker_status": "not_required",
+        "dispatch_notes": "\n".join(plan.get("smith_steps", [])[:5]) or None,
+        "recommended_action": tasks[0] if tasks else "Execute the preventive maintenance task list and update findings.",
+        "follow_up_required": False,
+        "ai_summary": f"Generated from PM plan {plan_id}: {', '.join(plan.get('thresholds', [])[:3])}",
+    }
+    work_order = repository.create_work_order(payload)
+    repository.mark_pm_plan_converted(plan_id, work_order["id"])
+    record_assistant_interaction(
+        assistant="smith",
+        interaction_type="pm_plan_to_work_order",
+        current_user=current_user,
+        prompt=f"Convert PM plan {plan_id} to planned work.",
+        response=f"Created planned PM work order {work_order['id']}.",
+        equipment_id=plan["equipment_id"],
+        work_order_id=work_order["id"],
+        provider=plan.get("provider") or "mock",
+        used_live_provider=bool(plan.get("used_live_provider")),
+        source_refs=[{"source_type": "pm_plan", "source_id": plan_id, "title": plan["title"]}],
+        outcome_status="converted",
+    )
+    return WorkOrder(**work_order)
+
+
+def _select_template(equipment_id: str, template_id: Optional[str]) -> Optional[dict[str, Any]]:
+    if template_id:
+        template = repository.get_pm_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail="PM template not found")
+        if template.get("equipment_id") not in {None, equipment_id}:
+            raise HTTPException(status_code=400, detail="PM template does not apply to this equipment")
+        return template
+    templates = repository.list_pm_templates(equipment_id)
+    return templates[0] if templates else None
+
+
+def _evidence_query(equipment: dict[str, Any], template: Optional[dict[str, Any]], request: PmPlanDraftRequest) -> str:
+    parts = [
+        equipment["name"],
+        "preventive maintenance",
+        "condition monitoring thresholds",
+        request.requested_focus or "",
+    ]
+    if template:
+        parts.extend([template["title"], template["description"], *template.get("task_list", [])])
+    return " ".join(part for part in parts if part)
+
+
+def _morpheus_system_prompt() -> str:
+    return (
+        "You are Morpheus, a reliability planning assistant for steel-plant preventive maintenance. "
+        "Return only valid JSON matching the requested schema. Use supplied SOP, manual, history, "
+        "risk prediction, spares, and feedback context. Do not invent measurements, people, or parts."
+    )
+
+
+def _morpheus_stream_system_prompt() -> str:
+    return (
+        "You are Morpheus, a reliability planning assistant for steel-plant preventive maintenance. "
+        "Stream a concise, readable PM plan in Markdown, not JSON. Use only the supplied SOP, manual, "
+        "history, risk prediction, spares, and feedback context. Use these sections: ### PM Plan, "
+        "### Trigger, ### Monitoring Thresholds, ### Generated Task List, ### Spares Strategy, and "
+        "### Adjustment Notes. Use short bullets and operational language. Do not mention JSON, schemas, "
+        "backend fields, table names, or row counts. Do not invent measurements, people, or parts."
+    )
+
+
+def _morpheus_prompt(
+    equipment,
+    template,
+    request,
+    prediction,
+    evidence,
+    feedback,
+    events,
+    spares,
+) -> str:
+    lines = [
+        f"Equipment: {equipment['id']} {equipment['name']} in {equipment['area']}",
+        f"Request: convert_from_prediction={request.convert_from_prediction}; risk_threshold={request.risk_threshold}; focus={request.requested_focus or 'general PM'}",
+        f"Prediction: risk={prediction.risk_level}; probability={prediction.failure_probability:.0%}; RUL={prediction.remaining_useful_life_days} days",
+        "Prediction drivers:",
+        *[f"- {item}" for item in prediction.drivers[:6]],
+        "Template:",
+        f"- {template['title']}: {template['description']}" if template else "- No template supplied",
+        *[f"- Template task: {item}" for item in (template or {}).get("task_list", [])[:6]],
+        *[f"- Template threshold: {item}" for item in (template or {}).get("thresholds", [])[:6]],
+        "Evidence:",
+        *[f"- {item.title}: {item.excerpt}" for item in evidence[:6]],
+        "Maintenance history:",
+        *[f"- {item['date']}: {item['issue']} | root cause={item['root_cause']} | action={item['action']}" for item in events[:6]],
+        "Accepted/corrected feedback:",
+        *[f"- {item['status']}: {item.get('actual_root_cause') or item.get('corrected_diagnosis') or ''}; action={item.get('action_taken') or ''}" for item in feedback[:5]],
+        "Spares:",
+        *[f"- {item['name']}: qty={item['available_qty']} lead={item['lead_time_days']}d criticality={item['criticality']}" for item in spares[:4]],
+        "Output a PM plan with recurring and/or condition trigger, monitoring thresholds, task list, spares strategy, and adjustment notes after repeated failures or feedback.",
+    ]
+    return "\n".join(lines)
+
+
+def _fallback_from_context(context: dict[str, Any], provider: str, reason: str) -> _PmPlanDraft:
+    return _fallback_pm_plan(
+        provider,
+        reason,
+        context["equipment"],
+        context["template"],
+        context["prediction"],
+        context["evidence"],
+        context["feedback"],
+        context["events"],
+        context["spares"],
+    )
+
+
+def _draft_from_streamed_pm_answer(
+    context: dict[str, Any],
+    answer: str,
+    provider: str,
+    used_live_provider: bool,
+) -> _PmPlanDraft:
+    equipment = context["equipment"]
+    template = context["template"]
+    prediction = context["prediction"]
+    feedback = context["feedback"]
+    events = context["events"]
+    spares = context["spares"]
+    fallback = _fallback_from_context(context, provider, "streamed PM draft omitted required fields")
+    thresholds = (
+        _extract_section_bullets(answer, "Monitoring Thresholds", "Thresholds")
+        or list((template or {}).get("thresholds", []))[:6]
+        or prediction.drivers[:3]
+    )
+    task_texts = (
+        _extract_section_bullets(answer, "Generated Task List", "Task List", "Tasks")
+        or [task.task for task in fallback.tasks]
+    )
+    spares_strategy = _extract_section_bullets(answer, "Spares Strategy", "Spares") or fallback.spares_strategy
+    adjustment_notes = (
+        _extract_section_bullets(answer, "Adjustment Notes", "Adjustments")
+        or _adjustment_notes(feedback, events)
+        or fallback.adjustment_notes
+    )
+    trigger_description = _extract_section_first_line(answer, "Trigger") or fallback.trigger.description
+    metric_key, threshold_value, unit = _first_threshold_hint(thresholds)
+    trigger_type = "risk_prediction" if prediction.risk_level in {"high", "critical"} else "condition"
+    title = _extract_section_first_line(answer, "PM Plan", "Plan") or f"{equipment['name']} proactive PM plan"
+    cadence = int((template or {}).get("cadence_days") or fallback.cadence_days)
+    return _PmPlanDraft(
+        title=_clip_pm_text(title, 120),
+        cadence_days=max(cadence, 1),
+        next_due_days=fallback.next_due_days,
+        trigger=_PmTriggerDraft(
+            type=trigger_type,
+            metric_key=metric_key,
+            operator=">=" if threshold_value is not None else None,
+            threshold=threshold_value,
+            unit=unit,
+            description=_clip_pm_text(trigger_description, 240),
+        ),
+        thresholds=[_clip_pm_text(item, 240) for item in thresholds[:6]],
+        tasks=[
+            _PmTaskDraft(
+                task=_clip_pm_text(task, 240),
+                owner_role="Maintenance Technician",
+                estimated_minutes=30 + index * 10,
+                safety_note="Follow LOTO and area access controls before inspection." if index == 0 else None,
+            )
+            for index, task in enumerate(task_texts[:6])
+            if task.strip()
+        ]
+        or fallback.tasks,
+        spares_strategy=[_clip_pm_text(item, 240) for item in spares_strategy[:6]],
+        adjustment_notes=[_clip_pm_text(item, 240) for item in adjustment_notes[:6]],
+        used_live_provider=used_live_provider,
+        provider=provider,
+    )
+
+
+def _stream_text_from_pm_draft(draft: _PmPlanDraft) -> str:
+    return "\n".join(
+        [
+            "### PM Plan",
+            draft.title,
+            "",
+            "### Trigger",
+            f"- {draft.trigger.description}",
+            "",
+            "### Monitoring Thresholds",
+            *[f"- {item}" for item in draft.thresholds],
+            "",
+            "### Generated Task List",
+            *[f"- {item.task}" for item in draft.tasks],
+            "",
+            "### Spares Strategy",
+            *[f"- {item}" for item in draft.spares_strategy],
+            "",
+            "### Adjustment Notes",
+            *[f"- {item}" for item in draft.adjustment_notes],
+            "",
+        ]
+    )
+
+
+def _fallback_pm_plan(provider, reason, equipment, template, prediction, evidence, feedback, events, spares) -> _PmPlanDraft:
+    cadence = int((template or {}).get("cadence_days") or (14 if prediction.risk_level in {"high", "critical"} else 30))
+    thresholds = list((template or {}).get("thresholds", []))
+    if not thresholds:
+        thresholds = prediction.drivers[:3] or ["Monitor condition indicators against latest baseline."]
+    task_source = list((template or {}).get("task_list", []))
+    if not task_source:
+        task_source = [
+            "Review latest sensor trend and active alerts before scheduling.",
+            "Inspect component condition tied to the highest prediction driver.",
+            "Record findings, readings, and any follow-up corrective scope.",
+        ]
+    adjustment_notes = _adjustment_notes(feedback, events)
+    trigger_type = "risk_prediction" if prediction.risk_level in {"high", "critical"} else "condition"
+    metric_key, threshold_value, unit = _first_threshold_hint(thresholds)
+    return _PmPlanDraft(
+        title=f"{equipment['name']} proactive PM plan",
+        cadence_days=cadence,
+        next_due_days=min(max(prediction.remaining_useful_life_days // 4, 1), cadence),
+        trigger=_PmTriggerDraft(
+            type=trigger_type,
+            metric_key=metric_key,
+            operator=">=" if threshold_value is not None else None,
+            threshold=threshold_value,
+            unit=unit,
+            description=(
+                f"Generate planned PM when risk is {prediction.risk_level} or when monitored condition crosses template threshold."
+            ),
+        ),
+        thresholds=thresholds[:6],
+        tasks=[
+            _PmTaskDraft(
+                task=task,
+                owner_role="Maintenance Technician",
+                estimated_minutes=30 + index * 10,
+                safety_note="Follow LOTO and area access controls before inspection." if index == 0 else None,
+            )
+            for index, task in enumerate(task_source[:6])
+        ],
+        spares_strategy=[
+            f"Check {item['name']} availability ({item['available_qty']} on hand, {item['lead_time_days']} day lead time)."
+            for item in spares[:3]
+        ],
+        adjustment_notes=adjustment_notes
+        or [f"Deterministic PM plan used because {reason}; review against SOP/manual before dispatch."],
+        used_live_provider=False,
+        provider=provider,
+    )
+
+
+def _plan_payload(equipment_id: str, template: Optional[dict[str, Any]], draft: _PmPlanDraft, evidence) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    next_due = now + timedelta(days=draft.next_due_days)
+    return {
+        "equipment_id": equipment_id,
+        "template_id": template.get("id") if template else None,
+        "title": draft.title,
+        "status": "draft",
+        "cadence_days": draft.cadence_days,
+        "next_due_date": next_due.isoformat(),
+        "trigger": _normalized_trigger(draft.trigger),
+        "thresholds": draft.thresholds,
+        "tasks": [
+            {"id": f"TASK-{index + 1}", "sequence": index + 1, **task.model_dump(mode="json")}
+            for index, task in enumerate(draft.tasks)
+        ],
+        "smith_steps": [],
+        "spares_strategy": draft.spares_strategy,
+        "evidence": [item.model_dump(mode="json") for item in evidence],
+        "adjustment_notes": draft.adjustment_notes,
+        "source": "llm" if draft.used_live_provider else "deterministic",
+        "generated_by": "morpheus",
+        "used_live_provider": draft.used_live_provider,
+        "provider": draft.provider,
+    }
+
+
+def _smith_steps(plan: PmPlan, equipment: dict[str, Any], evidence) -> list[str]:
+    fallback_steps = _fallback_smith_steps(plan, equipment)
+    llm_client = configured_llm_client()
+    response = llm_client.complete_text(
+        "\n".join(
+            [
+                f"Equipment: {equipment['id']} {equipment['name']}",
+                f"PM plan: {plan.title}",
+                "Tasks:",
+                *[f"- {task.task}" for task in plan.tasks],
+                "Thresholds:",
+                *[f"- {item}" for item in plan.thresholds],
+                "Evidence:",
+                *[f"- {item.title}: {item.excerpt}" for item in evidence[:4]],
+                "Write concise technician-ready numbered steps. Do not include JSON.",
+            ]
+        ),
+        "You are Smith, a maintenance execution assistant. Convert PM plans into safe, technician-ready steps.",
+        lambda provider, reason: LLMTextResponse(content="\n".join(fallback_steps), provider=provider, used_live_provider=False),
+        max_tokens=500,
+    )
+    steps = _lines_to_steps(response.content)
+    return steps or fallback_steps
+
+
+def _fallback_smith_steps(plan: PmPlan, equipment: dict[str, Any]) -> list[str]:
+    steps = [f"Confirm LOTO, permit, and access controls for {equipment['name']}."]
+    for task in plan.tasks:
+        steps.append(f"{task.sequence}. {task.task}")
+        if task.safety_note:
+            steps.append(f"Safety: {task.safety_note}")
+    if plan.thresholds:
+        steps.append(f"Record readings against thresholds: {'; '.join(plan.thresholds[:3])}.")
+    steps.append("Attach findings to the work order and escalate any crossed threshold before restart.")
+    return steps
+
+
+def _lines_to_steps(content: str) -> list[str]:
+    return [
+        line.strip().lstrip("- ").strip()
+        for line in content.splitlines()
+        if line.strip()
+    ][:10]
+
+
+def _normalized_trigger(trigger: _PmTriggerDraft) -> dict[str, Any]:
+    trigger_type = trigger.type if trigger.type in {"recurring", "condition", "risk_prediction"} else "condition"
+    operator = trigger.operator if trigger.operator in {">=", "<=", ">", "<", "change"} else None
+    return {
+        **trigger.model_dump(mode="json"),
+        "type": trigger_type,
+        "operator": operator,
+    }
+
+
+def _adjustment_notes(feedback: list[dict[str, Any]], events: list[dict[str, Any]]) -> list[str]:
+    notes = []
+    roots = [item.get("actual_root_cause") or item.get("corrected_diagnosis") for item in feedback if item.get("status") in {"accepted", "corrected"}]
+    repeated_events = {}
+    for event in events:
+        key = str(event.get("root_cause") or event.get("issue") or "").strip().lower()
+        if key:
+            repeated_events[key] = repeated_events.get(key, 0) + 1
+    if roots:
+        notes.append(f"Adjust PM tasks using accepted feedback: {roots[0]}.")
+    repeated = [key for key, count in repeated_events.items() if count > 1]
+    if repeated:
+        notes.append(f"Repeated history detected for {repeated[0]}; shorten cadence or add condition trigger.")
+    return notes
+
+
+def _first_threshold_hint(thresholds: list[str]) -> tuple[Optional[str], Optional[float], Optional[str]]:
+    for threshold in thresholds:
+        parts = threshold.replace(">=", " >= ").replace("<=", " <= ").replace(">", " > ").replace("<", " < ").split()
+        for index, part in enumerate(parts):
+            try:
+                value = float(part)
+            except ValueError:
+                continue
+            metric = parts[0] if parts else None
+            unit = parts[index + 1] if index + 1 < len(parts) else None
+            return metric, value, unit
+    return None, None, None
+
+
+def _plan_response_text(plan: PmPlan) -> str:
+    return "\n".join(
+        [
+            f"PM plan {plan.id}: {plan.title}",
+            f"Trigger: {plan.trigger.description}",
+            "Tasks:",
+            *[f"- {task.task}" for task in plan.tasks],
+            "Smith steps:",
+            *[f"- {step}" for step in plan.smith_steps],
+        ]
+    )
+
+
+def _extract_section_first_line(content: str, *headings: str) -> Optional[str]:
+    for line in _extract_section_lines(content, *headings):
+        cleaned = _clean_pm_markdown_line(line)
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _extract_section_bullets(content: str, *headings: str) -> list[str]:
+    return [
+        cleaned
+        for line in _extract_section_lines(content, *headings)
+        if (cleaned := _clean_pm_markdown_line(line))
+    ]
+
+
+def _extract_section_lines(content: str, *headings: str) -> list[str]:
+    requested = {_normalize_pm_heading(heading) for heading in headings}
+    active = False
+    lines: list[str] = []
+    for raw_line in content.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("#"):
+            heading = _normalize_pm_heading(stripped.lstrip("#").strip())
+            if active and heading not in requested:
+                break
+            active = heading in requested
+            continue
+        if active:
+            lines.append(raw_line)
+    return lines
+
+
+def _normalize_pm_heading(value: str) -> str:
+    return "".join(character.lower() for character in value if character.isalnum())
+
+
+def _clean_pm_markdown_line(value: str) -> str:
+    cleaned = value.strip()
+    while cleaned[:2] in {"- ", "* "}:
+        cleaned = cleaned[2:].strip()
+    if len(cleaned) > 3 and cleaned[0].isdigit() and cleaned[1:3] in {". ", ") "}:
+        cleaned = cleaned[3:].strip()
+    cleaned = cleaned.replace("**", "").replace("__", "").strip()
+    return cleaned
+
+
+def _clip_pm_text(value: str, limit: int) -> str:
+    compact = " ".join(value.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1].rstrip() + "."
+
+
+def _work_order_description(plan: dict[str, Any]) -> str:
+    lines = [
+        f"Execute preventive maintenance plan {plan['id']} for {plan['equipment_id']}.",
+        f"Trigger: {plan['trigger'].get('description') or 'Recurring PM cadence'}.",
+        "Tasks:",
+        *[f"- {task.get('task')}" for task in plan.get("tasks", [])[:8]],
+    ]
+    return "\n".join(lines)

@@ -20,6 +20,8 @@ ProcurementStatus = Literal["not_required", "not_requested", "requested", "order
 WorkOrderAssistantAudience = Literal["technician", "supervisor"]
 RcaCaseStatus = Literal["open", "investigating", "actions_defined", "closed"]
 RcaCorrectiveActionStatus = Literal["proposed", "approved", "in_progress", "complete", "rejected"]
+PmPlanStatus = Literal["draft", "active", "converted", "paused"]
+PmTriggerType = Literal["recurring", "condition", "risk_prediction"]
 AnomalyContextClass = Literal[
     "requires_investigation",
     "startup_transient",
@@ -273,6 +275,76 @@ class WorkOrderUpdateRequest(BaseModel):
     completion_summary: Optional[str] = None
 
 
+class PmTemplate(BaseModel):
+    id: str
+    equipment_id: Optional[str] = None
+    title: str
+    description: str
+    cadence_days: int = Field(default=30, ge=1)
+    work_type: str = "PM"
+    task_list: list[str] = Field(default_factory=list)
+    thresholds: list[str] = Field(default_factory=list)
+    source: str = "seed"
+    created_at: str
+    updated_at: str
+
+
+class PmTask(BaseModel):
+    id: str
+    sequence: int = Field(ge=1)
+    task: str
+    owner_role: str = "Maintenance Technician"
+    estimated_minutes: int = Field(default=30, ge=1)
+    safety_note: Optional[str] = None
+
+
+class PmTrigger(BaseModel):
+    type: PmTriggerType = "recurring"
+    metric_key: Optional[str] = None
+    operator: Optional[Literal[">=", "<=", ">", "<", "change"]] = None
+    threshold: Optional[float] = None
+    unit: Optional[str] = None
+    description: str
+
+
+class PmPlan(BaseModel):
+    id: str
+    equipment_id: str
+    template_id: Optional[str] = None
+    title: str
+    status: PmPlanStatus = "draft"
+    cadence_days: int = Field(default=30, ge=1)
+    next_due_date: str
+    trigger: PmTrigger
+    thresholds: list[str] = Field(default_factory=list)
+    tasks: list[PmTask] = Field(default_factory=list)
+    smith_steps: list[str] = Field(default_factory=list)
+    spares_strategy: list[str] = Field(default_factory=list)
+    evidence: list[Evidence] = Field(default_factory=list)
+    adjustment_notes: list[str] = Field(default_factory=list)
+    source: str = "deterministic"
+    generated_by: str = "morpheus"
+    used_live_provider: bool = False
+    provider: str = "mock"
+    converted_work_order_id: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class PmPlanDraftRequest(BaseModel):
+    equipment_id: str
+    template_id: Optional[str] = None
+    convert_from_prediction: bool = False
+    risk_threshold: RiskLevel = "high"
+    requested_focus: Optional[str] = None
+
+
+class PmPlanDraftResponse(BaseModel):
+    plan: PmPlan
+    templates: list[PmTemplate] = Field(default_factory=list)
+    message: str
+
+
 class AssetDocument(BaseModel):
     id: str
     source_type: str
@@ -425,6 +497,7 @@ class RcaCase(BaseModel):
     confidence: float = Field(default=0.0, ge=0, le=1)
     missing_checks: list[str] = Field(default_factory=list)
     morpheus_summary: Optional[str] = None
+    morpheus_fishbone_text: Optional[str] = None
     used_live_provider: bool = False
     provider: str = "mock"
     created_at: str
@@ -456,6 +529,7 @@ class RcaCaseUpdateRequest(BaseModel):
     confidence: Optional[float] = Field(default=None, ge=0, le=1)
     missing_checks: Optional[list[str]] = None
     morpheus_summary: Optional[str] = None
+    morpheus_fishbone_text: Optional[str] = None
     used_live_provider: Optional[bool] = None
     provider: Optional[str] = None
 

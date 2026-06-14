@@ -899,6 +899,77 @@ export interface SupervisorAssistantResponse {
   provider: string
 }
 
+export type PmPlanStatus = 'draft' | 'active' | 'converted' | 'paused'
+export type PmTriggerType = 'recurring' | 'condition' | 'risk_prediction'
+
+export interface PmTemplate {
+  id: string
+  equipment_id?: string | null
+  title: string
+  description: string
+  cadence_days: number
+  work_type: string
+  task_list: string[]
+  thresholds: string[]
+  source: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PmTask {
+  id: string
+  sequence: number
+  task: string
+  owner_role: string
+  estimated_minutes: number
+  safety_note?: string | null
+}
+
+export interface PmTrigger {
+  type: PmTriggerType
+  metric_key?: string | null
+  operator?: '>=' | '<=' | '>' | '<' | 'change' | null
+  threshold?: number | null
+  unit?: string | null
+  description: string
+}
+
+export interface PmPlan {
+  id: string
+  equipment_id: string
+  template_id?: string | null
+  title: string
+  status: PmPlanStatus
+  cadence_days: number
+  next_due_date: string
+  trigger: PmTrigger
+  thresholds: string[]
+  tasks: PmTask[]
+  smith_steps: string[]
+  spares_strategy: string[]
+  evidence: Evidence[]
+  adjustment_notes: string[]
+  source: string
+  generated_by: string
+  used_live_provider: boolean
+  provider: string
+  converted_work_order_id?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PmPlanDraftResponse {
+  plan: PmPlan
+  templates: PmTemplate[]
+  message: string
+}
+
+export type PmPlanDraftStreamEvent =
+  | { type: 'meta'; provider: string; used_live_provider: boolean }
+  | { type: 'token'; content: string; provider: string; used_live_provider: boolean }
+  | { type: 'done'; response: PmPlanDraftResponse }
+  | { type: 'error'; message: string }
+
 export type RcaCaseStatus = 'open' | 'investigating' | 'actions_defined' | 'closed'
 export type RcaCorrectiveActionStatus = 'proposed' | 'approved' | 'in_progress' | 'complete' | 'rejected'
 
@@ -958,6 +1029,7 @@ export interface RcaCase {
   confidence: number
   missing_checks: string[]
   morpheus_summary?: string | null
+  morpheus_fishbone_text?: string | null
   used_live_provider: boolean
   provider: string
   created_at: string
@@ -970,6 +1042,12 @@ export interface RcaMorpheusDraftResponse {
   evidence: Evidence[]
   message: string
 }
+
+export type RcaMorpheusDraftStreamEvent =
+  | { type: 'meta'; provider: string; used_live_provider: boolean }
+  | { type: 'token'; content: string; provider: string; used_live_provider: boolean }
+  | { type: 'done'; response: RcaMorpheusDraftResponse }
+  | { type: 'error'; message: string }
 
 export interface UserCreateRequest {
   email: string
@@ -1131,6 +1209,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  draftRcaWithMorpheusStream: (
+    payload: {
+      case_id?: string
+      equipment_id?: string
+      work_order_id?: string
+      symptoms?: string[]
+      question?: string
+    },
+    onEvent: (event: RcaMorpheusDraftStreamEvent) => void,
+  ) =>
+    streamRequest<RcaMorpheusDraftStreamEvent>(
+      '/api/rca-cases/morpheus-draft/stream',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      onEvent,
+    ),
   learningSummary: () => request<LearningSummary>('/api/learning/summary'),
   refreshLearningExamples: () =>
     request<LearningExample[]>('/api/learning/examples/refresh', {
@@ -1262,6 +1358,51 @@ export const api = {
     const query = params.toString()
     return request<WorkOrder[]>(`/api/work-orders/planning/board${query ? `?${query}` : ''}`)
   },
+  pmTemplates: (equipmentId?: string) => {
+    const params = new URLSearchParams()
+    if (equipmentId) params.set('equipment_id', equipmentId)
+    const query = params.toString()
+    return request<PmTemplate[]>(`/api/pm-templates${query ? `?${query}` : ''}`)
+  },
+  pmPlans: (equipmentId?: string) => {
+    const params = new URLSearchParams()
+    if (equipmentId) params.set('equipment_id', equipmentId)
+    const query = params.toString()
+    return request<PmPlan[]>(`/api/pm-plans${query ? `?${query}` : ''}`)
+  },
+  draftPmPlanWithMorpheus: (payload: {
+    equipment_id: string
+    template_id?: string | null
+    convert_from_prediction?: boolean
+    risk_threshold?: RiskLevel
+    requested_focus?: string
+  }) =>
+    request<PmPlanDraftResponse>('/api/pm-plans/morpheus-draft', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  draftPmPlanWithMorpheusStream: (
+    payload: {
+      equipment_id: string
+      template_id?: string | null
+      convert_from_prediction?: boolean
+      risk_threshold?: RiskLevel
+      requested_focus?: string
+    },
+    onEvent: (event: PmPlanDraftStreamEvent) => void,
+  ) =>
+    streamRequest<PmPlanDraftStreamEvent>(
+      '/api/pm-plans/morpheus-draft/stream',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      onEvent,
+    ),
+  convertPmPlanToWorkOrder: (planId: string) =>
+    request<WorkOrder>(`/api/pm-plans/${planId}/convert-work-order`, {
+      method: 'POST',
+    }),
   workOrder: (workOrderId: string) => request<WorkOrder>(`/api/work-orders/${workOrderId}`),
   createWorkOrder: (payload: WorkOrderCreateRequest) =>
     request<WorkOrder>('/api/work-orders', {

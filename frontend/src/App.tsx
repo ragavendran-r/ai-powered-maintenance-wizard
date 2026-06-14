@@ -34,6 +34,8 @@ import {
   type NeoAction,
   type NeoChatResponse,
   type NeoTable,
+  type PmPlan,
+  type PmTemplate,
   type PredictionResponse,
   type RcaCase,
   type Recommendation,
@@ -186,6 +188,11 @@ export function App() {
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>(fallbackWorkOrders)
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState('WO-8304')
   const [workOrderMessage, setWorkOrderMessage] = useState('')
+  const [pmTemplates, setPmTemplates] = useState<PmTemplate[]>([])
+  const [pmPlans, setPmPlans] = useState<PmPlan[]>([])
+  const [pmPlanLoading, setPmPlanLoading] = useState(false)
+  const [pmPlanMessage, setPmPlanMessage] = useState('')
+  const [pmPlanStreamText, setPmPlanStreamText] = useState('')
   const [technicianObservation, setTechnicianObservation] = useState('There are hotspots and looseness around the checked connections.')
   const [technicianAssistant, setTechnicianAssistant] = useState<TechnicianAssistantResponse | null>(null)
   const [technicianLoading, setTechnicianLoading] = useState(false)
@@ -239,6 +246,8 @@ export function App() {
   const [selectedRcaCaseId, setSelectedRcaCaseId] = useState('')
   const [rcaLoading, setRcaLoading] = useState(false)
   const [rcaMessage, setRcaMessage] = useState('')
+  const [rcaDraftStreamText, setRcaDraftStreamText] = useState('')
+  const [rcaDraftCaseId, setRcaDraftCaseId] = useState('')
   const [selectedEmbeddingProfileId, setSelectedEmbeddingProfileId] = useState('')
   const [ragMigrationPreview, setRagMigrationPreview] = useState<LearningRagMigrationPlan | null>(null)
   const [ragTargetCollection, setRagTargetCollection] = useState('')
@@ -292,6 +301,11 @@ export function App() {
     setSession(null)
     setActiveView('commandCenter')
     setWorkOrders(fallbackWorkOrders)
+    setPmTemplates([])
+    setPmPlans([])
+    setPmPlanLoading(false)
+    setPmPlanMessage('')
+    setPmPlanStreamText('')
     setAssets([])
     setAssetDetail(null)
     setAssetLoadedSections([])
@@ -782,6 +796,25 @@ export function App() {
       .catch(() => setWorkOrders(fallbackWorkOrdersForUser(currentUser)))
   }
 
+  function loadPmPlanning() {
+    setPmPlanLoading(true)
+    setPmPlanMessage('')
+    return Promise.all([
+      api.pmTemplates().catch((): PmTemplate[] => []),
+      api.pmPlans().catch((): PmPlan[] => []),
+    ])
+      .then(([templates, plans]) => {
+        setPmTemplates(templates)
+        setPmPlans(plans)
+        setApiState('connected')
+      })
+      .catch(() => {
+        setPmPlanMessage('Preventive maintenance plans could not be loaded')
+        setApiState('fallback')
+      })
+      .finally(() => setPmPlanLoading(false))
+  }
+
   function loadNeoWelcome() {
     setNeoMessages([
       {
@@ -863,6 +896,12 @@ export function App() {
   useEffect(() => {
     if (activeView === 'admin' && canAdminUsers) loadUsers()
   }, [activeView, canAdminUsers])
+
+  useEffect(() => {
+    if (activeView === 'planning' && canAssignWorkOrders) {
+      void loadPmPlanning()
+    }
+  }, [activeView, canAssignWorkOrders])
 
   useEffect(() => {
     if (activeView === 'reliability') {
@@ -1291,6 +1330,81 @@ export function App() {
     }
   }
 
+  async function draftPreventivePlan(equipmentId: string, templateId?: string) {
+    setPmPlanLoading(true)
+    setPmPlanMessage('')
+    setPmPlanStreamText('')
+    const payload = {
+      equipment_id: equipmentId,
+      template_id: templateId || undefined,
+      convert_from_prediction: true,
+      risk_threshold: 'high' as const,
+      requested_focus: 'Generate proactive PM plan with monitoring thresholds and technician-ready steps.',
+    }
+    try {
+      let streamedText = ''
+      let completed = false
+      await api.draftPmPlanWithMorpheusStream(payload, (event) => {
+        if (event.type === 'meta') {
+          setPmPlanMessage(`Morpheus is streaming PM draft content from ${event.used_live_provider ? `live ${event.provider}` : event.provider}.`)
+          return
+        }
+        if (event.type === 'token') {
+          streamedText += event.content
+          setPmPlanStreamText(streamedText)
+          return
+        }
+        if (event.type === 'done') {
+          completed = true
+          const response = event.response
+          setPmPlans((items) => [response.plan, ...items.filter((item) => item.id !== response.plan.id)])
+          setPmTemplates(response.templates.length ? response.templates : pmTemplates)
+          setPmPlanMessage(`${response.message} Provider: ${response.plan.used_live_provider ? `live ${response.plan.provider}` : response.plan.provider}.`)
+          setApiState('connected')
+          return
+        }
+        if (event.type === 'error') {
+          throw new Error(event.message)
+        }
+      })
+      if (!completed) {
+        setPmPlanMessage('Morpheus PM draft stream ended before the plan was ready.')
+        setApiState('fallback')
+      }
+    } catch {
+      try {
+        const response = await api.draftPmPlanWithMorpheus(payload)
+        setPmPlans((items) => [response.plan, ...items.filter((item) => item.id !== response.plan.id)])
+        setPmTemplates(response.templates.length ? response.templates : pmTemplates)
+        setPmPlanMessage(`${response.message} Provider: ${response.plan.used_live_provider ? `live ${response.plan.provider}` : response.plan.provider}.`)
+        setApiState('connected')
+      } catch {
+        setPmPlanMessage('Morpheus could not draft the preventive maintenance plan')
+        setApiState('fallback')
+      }
+    } finally {
+      setPmPlanLoading(false)
+    }
+  }
+
+  async function convertPmPlanToWorkOrder(planId: string) {
+    setPmPlanLoading(true)
+    setPmPlanMessage('')
+    try {
+      const workOrder = await api.convertPmPlanToWorkOrder(planId)
+      setWorkOrders((items) => [workOrder, ...items.filter((item) => item.id !== workOrder.id)])
+      setSelectedWorkOrderId(workOrder.id)
+      const plans = await api.pmPlans().catch((): PmPlan[] => [])
+      setPmPlans(plans)
+      setPmPlanMessage(`Converted ${planId} to planned work order ${workOrder.id}`)
+      setWorkOrderMessage(`Created ${workOrder.id} from preventive maintenance plan`)
+    } catch {
+      setPmPlanMessage('Preventive maintenance plan could not be converted to planned work')
+    } finally {
+      setPmPlanLoading(false)
+    }
+  }
+
   async function createRcaCaseFromSelectedWorkOrder() {
     if (!selectedWorkOrder) {
       setRcaMessage('Select a work order before creating an RCA case')
@@ -1322,22 +1436,65 @@ export function App() {
   async function draftRcaCase(caseId?: string) {
     setRcaLoading(true)
     setRcaMessage('')
+    setRcaDraftStreamText('')
+    setRcaDraftCaseId(caseId ?? '')
     try {
       const selectedCase = rcaCases.find((item) => item.id === caseId)
-      const response = await api.draftRcaWithMorpheus({
+      let streamedText = ''
+      let completed = false
+      await api.draftRcaWithMorpheusStream({
         case_id: selectedCase?.id,
         equipment_id: selectedCase?.equipment_id ?? selectedWorkOrder?.equipment_id,
         work_order_id: selectedCase?.work_order_id ?? selectedWorkOrder?.id,
         symptoms: selectedCase?.symptoms,
         question: 'Draft RCA hypotheses, evidence timeline, 5-Why, fishbone causes, corrective actions, and missing checks.',
+      }, (event) => {
+        if (event.type === 'meta') {
+          setRcaMessage(`Morpheus is streaming RCA draft content from ${event.used_live_provider ? `live ${event.provider}` : event.provider}.`)
+          return
+        }
+        if (event.type === 'token') {
+          streamedText += event.content
+          setRcaDraftStreamText(streamedText)
+          return
+        }
+        if (event.type === 'done') {
+          completed = true
+          const response = event.response
+          setRcaDraftCaseId(response.case.id)
+          setRcaCases((items) => [response.case, ...items.filter((item) => item.id !== response.case.id)])
+          setSelectedRcaCaseId(response.case.id)
+          setRcaMessage(`${response.message} Provider: ${response.case.used_live_provider ? `live ${response.case.provider}` : response.case.provider}.`)
+          setApiState('connected')
+          return
+        }
+        if (event.type === 'error') {
+          throw new Error(event.message)
+        }
       })
-      setRcaCases((items) => [response.case, ...items.filter((item) => item.id !== response.case.id)])
-      setSelectedRcaCaseId(response.case.id)
-      setRcaMessage(`${response.message} Provider: ${response.case.used_live_provider ? `live ${response.case.provider}` : response.case.provider}.`)
-      setApiState('connected')
+      if (!completed) {
+        setRcaMessage('Morpheus RCA draft stream ended before the case was ready.')
+        setApiState('fallback')
+      }
     } catch {
-      setRcaMessage('Morpheus could not draft the RCA case')
-      setApiState('fallback')
+      try {
+        const selectedCase = rcaCases.find((item) => item.id === caseId)
+        const response = await api.draftRcaWithMorpheus({
+          case_id: selectedCase?.id,
+          equipment_id: selectedCase?.equipment_id ?? selectedWorkOrder?.equipment_id,
+          work_order_id: selectedCase?.work_order_id ?? selectedWorkOrder?.id,
+          symptoms: selectedCase?.symptoms,
+          question: 'Draft RCA hypotheses, evidence timeline, 5-Why, fishbone causes, corrective actions, and missing checks.',
+        })
+        setRcaDraftCaseId(response.case.id)
+        setRcaCases((items) => [response.case, ...items.filter((item) => item.id !== response.case.id)])
+        setSelectedRcaCaseId(response.case.id)
+        setRcaMessage(`${response.message} Provider: ${response.case.used_live_provider ? `live ${response.case.provider}` : response.case.provider}.`)
+        setApiState('connected')
+      } catch {
+        setRcaMessage('Morpheus could not draft the RCA case')
+        setApiState('fallback')
+      }
     } finally {
       setRcaLoading(false)
     }
@@ -2007,6 +2164,7 @@ export function App() {
       <WorkOrdersRoute
         approveWorkOrder={approveWorkOrder}
         assignWorkOrder={assignWorkOrder}
+        assets={assets}
         canApproveWorkOrders={canApproveWorkOrders}
         canAssignWorkOrders={canAssignWorkOrders}
         canSupervisorAssistant={canSupervisorAssistant}
@@ -2014,6 +2172,13 @@ export function App() {
         completeSelectedWorkOrder={completeSelectedWorkOrder}
         dispatchWorkOrder={dispatchWorkOrder}
         planWorkOrder={planWorkOrder}
+        pmPlanLoading={pmPlanLoading}
+        pmPlanMessage={pmPlanMessage}
+        pmPlanStreamText={pmPlanStreamText}
+        pmPlans={pmPlans}
+        pmTemplates={pmTemplates}
+        convertPmPlanToWorkOrder={convertPmPlanToWorkOrder}
+        draftPreventivePlan={draftPreventivePlan}
         runSupervisorAssistant={runSupervisorAssistant}
         runTechnicianAssistant={runTechnicianAssistant}
         selectedWorkOrder={selectedWorkOrder}
@@ -2043,6 +2208,8 @@ export function App() {
           createRcaCase={createRcaCaseFromSelectedWorkOrder}
           draftRcaCase={draftRcaCase}
           rcaCases={rcaCases}
+          rcaDraftCaseId={rcaDraftCaseId}
+          rcaDraftStreamText={rcaDraftStreamText}
           rcaLoading={rcaLoading}
           rcaMessage={rcaMessage}
           selectedRcaCaseId={selectedRcaCaseId}
@@ -2227,7 +2394,7 @@ export function App() {
       {roleProfile && (
         <section className="roleContextBar" aria-label="Role workspace context">
           <div>
-            <strong>{roleProfile.focus}</strong>
+            <strong>{currentUser ? `Signed in as ${roleLabels[currentUser.role]}` : roleProfile.focus}</strong>
             <span>{roleProfile.mission}</span>
           </div>
           <div>

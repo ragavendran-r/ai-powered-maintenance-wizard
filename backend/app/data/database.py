@@ -237,6 +237,7 @@ SCHEMA_STATEMENTS = [
         confidence REAL NOT NULL DEFAULT 0,
         missing_checks TEXT NOT NULL DEFAULT '[]',
         morpheus_summary TEXT,
+        morpheus_fishbone_text TEXT,
         used_live_provider INTEGER NOT NULL DEFAULT 0,
         provider TEXT NOT NULL DEFAULT 'mock',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -244,6 +245,50 @@ SCHEMA_STATEMENTS = [
         closed_at TEXT,
         FOREIGN KEY (equipment_id) REFERENCES equipment(id),
         FOREIGN KEY (work_order_id) REFERENCES work_orders(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS pm_templates (
+        id TEXT PRIMARY KEY,
+        equipment_id TEXT,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        cadence_days INTEGER NOT NULL DEFAULT 30,
+        work_type TEXT NOT NULL DEFAULT 'PM',
+        task_list TEXT NOT NULL DEFAULT '[]',
+        thresholds TEXT NOT NULL DEFAULT '[]',
+        source TEXT NOT NULL DEFAULT 'seed',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (equipment_id) REFERENCES equipment(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS pm_plans (
+        id TEXT PRIMARY KEY,
+        equipment_id TEXT NOT NULL,
+        template_id TEXT,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft',
+        cadence_days INTEGER NOT NULL DEFAULT 30,
+        next_due_date TEXT NOT NULL,
+        trigger TEXT NOT NULL DEFAULT '{}',
+        thresholds TEXT NOT NULL DEFAULT '[]',
+        tasks TEXT NOT NULL DEFAULT '[]',
+        smith_steps TEXT NOT NULL DEFAULT '[]',
+        spares_strategy TEXT NOT NULL DEFAULT '[]',
+        evidence TEXT NOT NULL DEFAULT '[]',
+        adjustment_notes TEXT NOT NULL DEFAULT '[]',
+        source TEXT NOT NULL DEFAULT 'deterministic',
+        generated_by TEXT NOT NULL DEFAULT 'morpheus',
+        used_live_provider INTEGER NOT NULL DEFAULT 0,
+        provider TEXT NOT NULL DEFAULT 'mock',
+        converted_work_order_id TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (equipment_id) REFERENCES equipment(id),
+        FOREIGN KEY (template_id) REFERENCES pm_templates(id),
+        FOREIGN KEY (converted_work_order_id) REFERENCES work_orders(id)
     )
     """,
     """
@@ -537,7 +582,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "17"
+SCHEMA_VERSION = "19"
 _INITIALIZING = False
 
 
@@ -596,6 +641,9 @@ def initialize_database(seed: bool = True) -> None:
             _ensure_column(connection, "work_orders", "material_blocker_note", "TEXT")
             _ensure_column(connection, "work_orders", "dispatch_notes", "TEXT")
             _ensure_column(connection, "work_orders", "dispatched_at", "TEXT")
+            _ensure_column(connection, "rca_cases", "morpheus_fishbone_text", "TEXT")
+            _ensure_column(connection, "pm_plans", "smith_steps", "TEXT NOT NULL DEFAULT '[]'")
+            _ensure_column(connection, "pm_plans", "converted_work_order_id", "TEXT")
             connection.execute(
                 """
                 UPDATE document_chunks
@@ -661,6 +709,7 @@ def seed_from_sample_data(connection: sqlite3.Connection) -> None:
     )
     seed_demo_work_orders(connection)
     seed_demo_rca_cases(connection)
+    seed_demo_pm_templates(connection)
     _execute_seed_sql(connection, "asset_detail_seed.sql")
     from app.data.repository import rebuild_document_chunks
 
@@ -1038,11 +1087,90 @@ def seed_demo_rca_cases(connection: sqlite3.Connection) -> None:
             "confidence",
             "missing_checks",
             "morpheus_summary",
+            "morpheus_fishbone_text",
             "used_live_provider",
             "provider",
             "closed_at",
         ],
         cases,
+    )
+
+
+def seed_demo_pm_templates(connection: sqlite3.Connection) -> None:
+    templates = [
+        {
+            "id": "PMT-RM-DRIVE-BEARING",
+            "equipment_id": "RM-DRIVE-01",
+            "title": "Drive bearing and coupling health PM",
+            "description": "Recurring vibration, temperature, lubrication, and coupling inspection for the hot strip mill main drive.",
+            "cadence_days": 14,
+            "work_type": "PM",
+            "task_list": [
+                "Trend drive-end vibration against trip advisory threshold.",
+                "Measure bearing housing temperature and compare to baseline.",
+                "Inspect coupling alignment marks and foundation bolt torque.",
+                "Check lubricant condition and contamination indicators.",
+            ],
+            "thresholds": [
+                "drive_end_vibration >= 7.1 mm/s",
+                "bearing_temperature above rolling baseline by 10 C",
+            ],
+            "source": "sop",
+        },
+        {
+            "id": "PMT-HYD-TEMP-PULSATION",
+            "equipment_id": "HYD-SYS-04",
+            "title": "Hydraulic temperature and pulsation PM",
+            "description": "Condition-based hydraulic oil temperature, cooler, pump, and pressure pulsation inspection.",
+            "cadence_days": 21,
+            "work_type": "PM",
+            "task_list": [
+                "Inspect cooler differential temperature and cleanliness.",
+                "Trend hydraulic oil temperature during roll gap correction.",
+                "Check pressure pulsation and pump cartridge condition.",
+                "Verify servo valve contamination and seal condition.",
+            ],
+            "thresholds": [
+                "hydraulic_oil_temperature >= 68 C",
+                "pressure_pulsation trend increase during AGC correction",
+            ],
+            "source": "manual",
+        },
+        {
+            "id": "PMT-CRANE-HOIST-BRAKE",
+            "equipment_id": "OH-CRANE-05",
+            "title": "Hoist brake and motor current PM",
+            "description": "Recurring inspection for hoist brake thermal risk and motor current abnormality.",
+            "cadence_days": 30,
+            "work_type": "PM",
+            "task_list": [
+                "Trend hoist motor current during heavy lift cycles.",
+                "Measure brake shoe temperature after load restriction.",
+                "Inspect brake shoe wear and air gap.",
+                "Confirm replacement shoe availability before intrusive work.",
+            ],
+            "thresholds": [
+                "hoist_motor_current above current baseline",
+                "brake_temperature above safe operating threshold",
+            ],
+            "source": "history",
+        },
+    ]
+    _insert_many(
+        connection,
+        "pm_templates",
+        [
+            "id",
+            "equipment_id",
+            "title",
+            "description",
+            "cadence_days",
+            "work_type",
+            "task_list",
+            "thresholds",
+            "source",
+        ],
+        templates,
     )
 
 
@@ -1070,6 +1198,8 @@ def database_status() -> dict[str, Any]:
         "work_order_spares",
         "work_order_logs",
         "rca_cases",
+        "pm_templates",
+        "pm_plans",
         "documents",
         "document_chunks",
         "rag_embedding_profiles",

@@ -83,7 +83,7 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "17"
+    assert status["schema_version"] == "19"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["asset_profiles"] == 5
     assert status["counts"]["asset_metric_snapshots"] == 15
@@ -102,6 +102,8 @@ def test_database_status_reports_seeded_tables():
     assert "work_order_logs" in status["counts"]
     assert "rca_cases" in status["counts"]
     assert status["counts"]["rca_cases"] >= 1
+    assert status["counts"]["pm_templates"] >= 3
+    assert "pm_plans" in status["counts"]
     assert status["counts"]["users"] == 8
     assert "learning_interactions" in status["counts"]
     assert "learning_examples" in status["counts"]
@@ -137,6 +139,7 @@ def test_rca_workspace_drafts_closes_and_feeds_learning():
     assert draft["case"]["why_chain"]
     assert draft["case"]["fishbone"]
     assert draft["case"]["corrective_actions"]
+    assert "morpheus_fishbone_text" in draft["case"]
     assert draft["evidence"]
 
     close_response = client.patch(
@@ -468,6 +471,99 @@ def test_planner_board_filters_open_scheduled_work_orders():
     assert {item["id"] for item in payload} == {"WO-8304", "WO-8275"}
     assert all(item["status"] not in {"COMP", "CLOSE"} for item in payload)
     assert all(item["planning_status"] == "planned" for item in payload)
+
+
+def test_pm_plan_draft_and_conversion_to_planned_work_order():
+    headers = auth_headers("planner@plant.local")
+
+    templates_response = client.get("/api/pm-templates?equipment_id=HYD-SYS-04", headers=headers)
+    assert templates_response.status_code == 200
+    templates = templates_response.json()
+    assert any(template["id"] == "PMT-HYD-TEMP-PULSATION" for template in templates)
+
+    draft_response = client.post(
+        "/api/pm-plans/morpheus-draft",
+        headers=headers,
+        json={
+            "equipment_id": "HYD-SYS-04",
+            "template_id": "PMT-HYD-TEMP-PULSATION",
+            "convert_from_prediction": True,
+            "requested_focus": "temperature rise and pressure pulsation",
+        },
+    )
+    assert draft_response.status_code == 200, draft_response.text
+    draft = draft_response.json()
+    plan = draft["plan"]
+    assert plan["id"].startswith("PM-")
+    assert plan["equipment_id"] == "HYD-SYS-04"
+    assert plan["template_id"] == "PMT-HYD-TEMP-PULSATION"
+    assert plan["trigger"]["type"] in {"condition", "risk_prediction"}
+    assert plan["thresholds"]
+    assert plan["tasks"]
+    assert plan["smith_steps"]
+    assert plan["evidence"]
+
+    list_response = client.get("/api/pm-plans?equipment_id=HYD-SYS-04", headers=headers)
+    assert list_response.status_code == 200
+    assert any(item["id"] == plan["id"] for item in list_response.json())
+
+    convert_response = client.post(f"/api/pm-plans/{plan['id']}/convert-work-order", headers=headers)
+    assert convert_response.status_code == 200, convert_response.text
+    work_order = convert_response.json()
+    assert work_order["id"].startswith("WO-")
+    assert work_order["equipment_id"] == "HYD-SYS-04"
+    assert work_order["work_type"] == "PM"
+    assert work_order["planning_status"] == "planned"
+    assert "PM:" in work_order["title"]
+    assert "preventive maintenance plan" in work_order["description"].lower()
+
+    converted = repository.get_pm_plan(plan["id"])
+    assert converted["status"] == "converted"
+    assert converted["converted_work_order_id"] == work_order["id"]
+
+
+def test_pm_plan_morpheus_draft_stream_persists_plan():
+    headers = auth_headers("planner@plant.local")
+    with client.stream(
+        "POST",
+        "/api/pm-plans/morpheus-draft/stream",
+        headers=headers,
+        json={"equipment_id": "RM-DRIVE-01", "template_id": "PMT-RM-DRIVE-BEARING", "convert_from_prediction": True},
+    ) as response:
+        assert response.status_code == 200, response.text
+        content = "".join(response.iter_text())
+
+    events = [
+        json.loads(line.removeprefix("data: ").strip())
+        for line in content.splitlines()
+        if line.startswith("data:")
+    ]
+    assert events[0]["type"] == "meta"
+    assert events[-1]["type"] == "done"
+    plan = events[-1]["response"]["plan"]
+    assert plan["id"].startswith("PM-")
+    assert plan["equipment_id"] == "RM-DRIVE-01"
+    assert repository.get_pm_plan(plan["id"]) is not None
+
+
+def test_pm_plan_planning_roles_are_enforced():
+    planner_response = client.get("/api/pm-plans", headers=auth_headers("planner@plant.local"))
+    reliability_response = client.post(
+        "/api/pm-plans/morpheus-draft",
+        headers=auth_headers("reliability@plant.local"),
+        json={"equipment_id": "RM-DRIVE-01", "convert_from_prediction": True},
+    )
+    technician_response = client.get("/api/pm-plans", headers=auth_headers("technician@plant.local"))
+    operator_response = client.post(
+        "/api/pm-plans/morpheus-draft",
+        headers=auth_headers("operator@plant.local"),
+        json={"equipment_id": "RM-DRIVE-01"},
+    )
+
+    assert planner_response.status_code == 200
+    assert reliability_response.status_code == 200
+    assert technician_response.status_code == 403
+    assert operator_response.status_code == 403
 
 
 def test_planner_can_schedule_and_dispatch_approved_work_order():

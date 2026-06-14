@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     llm_stream_timeout_seconds: float = Field(default=60.0, ge=1.0, alias="LLM_STREAM_TIMEOUT_SECONDS")
     llm_structured_max_tokens: int = Field(default=300, ge=64, le=2048, alias="LLM_STRUCTURED_MAX_TOKENS")
     llm_text_max_tokens: int = Field(default=600, ge=64, le=2048, alias="LLM_TEXT_MAX_TOKENS")
+    llm_rca_draft_timeout_seconds: float = Field(default=45.0, ge=1.0, alias="LLM_RCA_DRAFT_TIMEOUT_SECONDS")
+    llm_rca_draft_max_tokens: int = Field(default=700, ge=64, le=2048, alias="LLM_RCA_DRAFT_MAX_TOKENS")
+    llm_rca_draft_response_format: str = Field(default="json_schema", alias="LLM_RCA_DRAFT_RESPONSE_FORMAT")
+    llm_rca_draft_stream_enabled: bool = Field(default=True, alias="LLM_RCA_DRAFT_STREAM_ENABLED")
     llm_use_active_learning_model: bool = Field(default=True, alias="LLM_USE_ACTIVE_LEARNING_MODEL")
     auth_enabled: bool = Field(default=True, alias="AUTH_ENABLED")
     jwt_secret_key: str = Field(

@@ -68,6 +68,9 @@ class LLMClient(ABC):
         response_model: type[T],
         system_prompt: str,
         fallback_factory: Callable[[str, str], T],
+        max_tokens: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
+        response_format: Optional[str] = None,
     ) -> T:
         raise NotImplementedError
 
@@ -96,6 +99,9 @@ class MockLLMClient(LLMClient):
         response_model: type[T],
         system_prompt: str,
         fallback_factory: Callable[[str, str], T],
+        max_tokens: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
+        response_format: Optional[str] = None,
     ) -> T:
         return fallback_factory(self.provider, self.reason)
 
@@ -214,24 +220,31 @@ class OpenAIClient(LLMClient):
         response_model: type[T],
         system_prompt: str,
         fallback_factory: Callable[[str, str], T],
+        max_tokens: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
+        response_format: Optional[str] = None,
     ) -> T:
         if not self.api_key:
             return fallback_factory("openai", "OPENAI_API_KEY is not set")
+        token_budget = _bounded_token_budget(max_tokens or self.structured_max_tokens)
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.1,
+            "max_tokens": token_budget,
+        }
+        selected_response_format = _openai_response_format(response_model, response_format)
+        if selected_response_format:
+            payload["response_format"] = selected_response_format
         try:
             response = httpx.post(
                 f"{self.base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": self.structured_max_tokens,
-                    "response_format": _json_schema_response_format(response_model),
-                },
-                timeout=self.timeout_seconds,
+                json=payload,
+                timeout=timeout_seconds or self.timeout_seconds,
             )
             response.raise_for_status()
             content = response.json()["choices"][0]["message"]["content"]
@@ -343,7 +356,11 @@ class OllamaClient(LLMClient):
         response_model: type[T],
         system_prompt: str,
         fallback_factory: Callable[[str, str], T],
+        max_tokens: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
+        response_format: Optional[str] = None,
     ) -> T:
+        token_budget = _bounded_token_budget(max_tokens or self.structured_max_tokens)
         try:
             response = httpx.post(
                 f"{self.base_url.rstrip('/')}/api/chat",
@@ -355,9 +372,9 @@ class OllamaClient(LLMClient):
                     ],
                     "stream": False,
                     "format": "json",
-                    "options": {"num_predict": self.structured_max_tokens},
+                    "options": {"num_predict": token_budget},
                 },
-                timeout=self.timeout_seconds,
+                timeout=timeout_seconds or self.timeout_seconds,
             )
             response.raise_for_status()
             content = response.json()["message"]["content"]
@@ -417,6 +434,19 @@ def _json_schema_response_format(response_model: type[BaseModel]) -> dict[str, o
             "schema": response_model.model_json_schema(),
         },
     }
+
+
+def _openai_response_format(response_model: type[BaseModel], response_format: Optional[str]) -> Optional[dict[str, object]]:
+    selected = (response_format or "json_schema").strip().lower()
+    if selected == "json_object":
+        return {"type": "json_object"}
+    if selected == "none":
+        return None
+    return _json_schema_response_format(response_model)
+
+
+def _bounded_token_budget(max_tokens: int) -> int:
+    return max(64, min(max_tokens, 2048))
 
 
 def _fallback_context(provider: str, reason: str) -> LLMContext:
