@@ -6,6 +6,7 @@ import type {
   DashboardSummary,
   LearningEmbeddingProfile,
   LearningSummary,
+  RcaCase,
   StreamingStatus,
   TechnicianAssistantResponse,
   UserRole,
@@ -237,6 +238,83 @@ export const workOrders: WorkOrder[] = [
     completed_at: null,
     logs: [],
     spare_reservations: [],
+  },
+]
+
+export const rcaCases: RcaCase[] = [
+  {
+    id: 'RCA-9001',
+    equipment_id: 'RM-DRIVE-01',
+    work_order_id: 'WO-8304',
+    title: 'Drive-end vibration root cause review',
+    status: 'investigating',
+    severity: 'critical',
+    problem_statement: 'Drive-end vibration remains elevated after temporary load reduction.',
+    symptoms: [
+      'Drive-end vibration exceeded advisory threshold during finishing stand operation.',
+      'Bearing temperature crossed 85 C during the last rolling campaign.',
+    ],
+    hypotheses: [
+      {
+        id: 'HYP-1',
+        cause: 'Drive-end bearing wear or coupling looseness under load',
+        confidence: 0.82,
+        evidence: ['ALT-1001 vibration alert', 'DOC-1 bearing vibration SOP'],
+        missing_checks: ['Verify coupling alignment after load reduction'],
+        status: 'candidate',
+      },
+    ],
+    why_chain: [
+      'Why did vibration rise? Bearing housing vibration increased during operation.',
+      'Why did housing vibration increase? Drive-end bearing or coupling looseness is likely.',
+      'Why was looseness not detected earlier? Inspection was deferred until a planned window.',
+    ],
+    fishbone: {
+      Machine: ['Drive-end bearing wear', 'Coupling looseness'],
+      Method: ['Inspection deferred to planned stoppage'],
+      Material: ['Bearing spare readiness must be confirmed'],
+      Measurement: ['Trend relies on vibration and temperature signals'],
+    },
+    evidence_timeline: [
+      {
+        id: 'EV-1',
+        timestamp: '2026-06-13T08:15:00+05:30',
+        source_type: 'alert',
+        source_id: 'ALT-1001',
+        title: 'Drive-end vibration alert',
+        summary: 'Vibration exceeded threshold during hot strip finishing operation.',
+        relevance: 'primary symptom',
+      },
+      {
+        id: 'EV-2',
+        timestamp: '2026-06-13T09:00:00+05:30',
+        source_type: 'sop',
+        source_id: 'DOC-1',
+        title: 'Bearing vibration SOP',
+        summary: 'Confirm lubrication, alignment, and bearing housing condition before restart.',
+        relevance: 'required checks',
+      },
+    ],
+    corrective_actions: [
+      {
+        id: 'CA-1',
+        action: 'Inspect drive-end bearing housing and verify coupling alignment.',
+        owner: 'Maintenance Technician',
+        due_date: '2026-06-14T18:00:00+05:30',
+        status: 'proposed',
+        verification: 'Record vibration before and after load-reduction inspection.',
+      },
+    ],
+    closure_review: null,
+    probable_cause: 'Drive-end bearing wear or coupling looseness under load',
+    confidence: 0.82,
+    missing_checks: ['Confirm spare readiness before intrusive bearing inspection'],
+    morpheus_summary: 'Morpheus correlated vibration, temperature, SOP guidance, and work-order history to narrow the RCA candidate.',
+    used_live_provider: false,
+    provider: 'playwright',
+    created_at: '2026-06-13T09:00:00+05:30',
+    updated_at: '2026-06-13T10:00:00+05:30',
+    closed_at: null,
   },
 ]
 
@@ -565,6 +643,10 @@ export async function installMaintenanceApi(page: Page, initialUser: AuthUser = 
       await route.fulfill(json(workOrdersFor(currentUser)))
       return
     }
+    if (path === '/api/rca-cases') {
+      await route.fulfill(json(rcaCases))
+      return
+    }
     if (path.startsWith('/api/work-orders/') && request.method() === 'PATCH') {
       const workOrderId = path.split('/').at(-1)
       const body = JSON.parse(request.postData() || '{}')
@@ -671,7 +753,7 @@ export async function signInAs(page: Page, role: RoleKey) {
   await page.getByLabel('Email').fill(user.email)
   await page.getByLabel('Password').fill(demoPassword)
   await page.getByRole('button', { name: 'Sign In' }).click()
-  await expect(page.getByRole('heading', { name: 'Maintenance Wizard' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Maintenance Wizard/ })).toBeVisible()
   await expect(page.locator('.userPill strong', { hasText: user.display_name })).toBeVisible()
 }
 
