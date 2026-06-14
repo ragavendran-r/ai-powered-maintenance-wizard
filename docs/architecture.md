@@ -176,7 +176,7 @@ flowchart LR
 7. Dashboard and equipment endpoints expose plant health, the full priority-sorted asset list, asset risk, anomaly findings, alert context, and spares constraints.
 8. Chat or diagnosis requests trigger Qdrant-backed vector retrieval over persisted document chunks plus matching maintenance history, with SQLite/local-vector fallback, embedding profile/version metadata, optional LLM/SLM reranking, and relevance reasons.
 9. Anomaly service evaluates sensor readings by signal using rolling baseline, z-score, threshold breach, and trend delta, then classifies context and inspection steps when enrichment is enabled.
-10. Risk and prediction services combine alerts, anomaly findings, asset criticality, spares constraints, maintenance history, normalized labels, and feedback signals to compute health score, risk level, failure probability, and estimated RUL.
+10. Risk and prediction services combine alerts, anomaly findings, asset criticality, spares constraints, maintenance history, normalized labels, and feedback signals to compute health score, risk level, failure probability, estimated RUL, model version metadata, backtest metrics, confidence intervals, prediction evidence, and degradation trend history.
 11. Recommendation service requests structured LLM context when configured, validates it, merges safe suggestions with deterministic fallback actions and prior engineer feedback, and returns diagnosis, root causes, actions, spares strategy, learning notes, reasoning explanation, confidence, and evidence.
 12. PM plan drafting combines PM templates, risk prediction, RAG evidence, maintenance history, spares, and accepted feedback. Morpheus drafts the plan; Smith turns plan tasks into technician-ready steps; accepted plans can convert to planned PM work orders.
 13. Report service converts recommendations into Markdown with diagnosis, risk, RUL, actions, spares strategy, learning notes, reasoning explanation, evidence, and summary.
@@ -189,7 +189,7 @@ flowchart LR
 
 LLM/SLM use is isolated behind validated service contracts. Diagnosis, chat, and report endpoints call the recommendation pipeline, which can include optional LLM-generated root causes, immediate actions, planned actions, summaries, confidence adjustment, and reasoning explanation. Document ingestion, retrieval, anomaly context, maintenance labeling, technician work-order assistance, and supervisor follow-up review can also call the same provider adapter for structured enrichment.
 
-The LLM/SLM is not the source of truth for raw ingestion, NATS streaming ingestion, deterministic anomaly scores, risk scoring, RUL calculation, dashboard aggregation, work-order persistence, status transitions, or feedback persistence. These parts remain deterministic so the demo works without external credentials.
+The LLM/SLM is not the source of truth for raw ingestion, NATS streaming ingestion, deterministic anomaly scores, risk scoring, RUL calculation, model evaluation metrics, confidence intervals, dashboard aggregation, work-order persistence, status transitions, or feedback persistence. These parts remain deterministic so the demo works without external credentials.
 
 Provider output must validate to the expected structured JSON contract. Missing credentials, network errors, malformed JSON, invalid schema, or provider timeout automatically fall back to deterministic local reasoning.
 
@@ -223,5 +223,5 @@ The active continuous-learning implementation is production-aligned but scoped t
 - Authentication and role-based authorization use local SQLite users and JWT bearer tokens. Production SSO remains a hardening item.
 - Live LLM calls are available through provider adapters when configured; deterministic fallback output remains the default local-demo behavior.
 - LLM-as-a-Judge scoring improves dataset quality but is not a safety authority. Role checks, schema validation, approval controls, and deterministic backend workflow rules remain authoritative.
-- Anomaly scoring and RUL are heuristic and intended for demonstration until richer plant time-series data exists. LLM/SLM enrichment classifies and explains results but does not compute final risk or RUL.
+- Anomaly scoring and RUL are heuristic and intended for demonstration until richer plant time-series data exists. LLM/SLM enrichment classifies and explains fixed prediction outputs, evidence, confidence, and trend history but does not compute final risk or RUL.
 - PDF extraction depends on embedded text; scanned PDFs would need OCR in a production version.

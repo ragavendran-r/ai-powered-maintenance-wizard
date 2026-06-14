@@ -2699,6 +2699,13 @@ def test_prediction_drivers_include_anomaly_explanations():
     assert response.status_code == 200
     payload = response.json()
     assert payload["failure_probability"] > 0.5
+    assert payload["model_version"]["id"] == "rul-risk-heuristic-v2"
+    assert payload["model_evaluation"]["backtest_window_days"] == 180
+    assert payload["model_evaluation"]["sample_count"] > 0
+    assert payload["confidence_interval"]["lower_probability"] < payload["failure_probability"]
+    assert payload["confidence_interval"]["upper_probability"] > payload["failure_probability"]
+    assert payload["prediction_evidence"]
+    assert payload["degradation_trend"]
     assert any("z-score" in driver for driver in payload["drivers"])
     assert payload["reasoning_explanation"]["driver_explanations"]
 

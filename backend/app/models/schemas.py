@@ -660,11 +660,64 @@ class ChatResponse(BaseModel):
     evidence: list[Evidence]
 
 
+class PredictionConfidenceInterval(BaseModel):
+    lower_probability: float = Field(ge=0, le=1)
+    upper_probability: float = Field(ge=0, le=1)
+    lower_rul_days: int = Field(ge=0)
+    upper_rul_days: int = Field(ge=0)
+    confidence_level: float = Field(default=0.8, ge=0, le=1)
+    rationale: str
+
+
+class PredictionModelVersion(BaseModel):
+    id: str
+    name: str
+    version: str
+    algorithm: str
+    feature_set: list[str] = Field(default_factory=list)
+    trained_on: str
+    status: str = "active"
+
+
+class PredictionModelEvaluation(BaseModel):
+    evaluation_id: str
+    backtest_window_days: int = Field(ge=1)
+    sample_count: int = Field(ge=0)
+    precision: float = Field(ge=0, le=1)
+    recall: float = Field(ge=0, le=1)
+    mean_absolute_rul_error_days: int = Field(ge=0)
+    calibration_error: float = Field(ge=0, le=1)
+    summary: str
+
+
+class PredictionEvidence(BaseModel):
+    source_type: str
+    source_id: str
+    title: str
+    detail: str
+    contribution: float = Field(ge=0, le=1)
+
+
+class DegradationTrendPoint(BaseModel):
+    timestamp: str
+    signal: str
+    value: float
+    unit: str
+    threshold: float
+    normalized_severity: float = Field(ge=0, le=1)
+    estimated_rul_days: int = Field(ge=0)
+
+
 class PredictionResponse(BaseModel):
     equipment_id: str
     risk_level: RiskLevel
     failure_probability: float = Field(ge=0, le=1)
     remaining_useful_life_days: int
+    confidence_interval: Optional[PredictionConfidenceInterval] = None
+    model_version: Optional[PredictionModelVersion] = None
+    model_evaluation: Optional[PredictionModelEvaluation] = None
+    prediction_evidence: list[PredictionEvidence] = Field(default_factory=list)
+    degradation_trend: list[DegradationTrendPoint] = Field(default_factory=list)
     drivers: list[str]
     reasoning_explanation: Optional["ReasoningExplanation"] = None
 

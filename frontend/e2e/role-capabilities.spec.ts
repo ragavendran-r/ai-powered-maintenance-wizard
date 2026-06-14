@@ -77,6 +77,12 @@ test.describe('role capability rendering', () => {
     await expectPrimaryNav(page, ['Command Center', 'Assets', 'Reliability', 'Learning and Tuning'], ['Work Execution', 'Planning', 'Admin'])
     await openAssetDetail(page)
     await expect(page.getByRole('button', { name: 'Run Morpheus' })).toBeVisible()
+    await page.getByRole('button', { name: 'Reliability' }).last().click()
+    const predictionEvidence = page.getByLabel('Prediction model evidence')
+    await expect(predictionEvidence).toBeVisible()
+    await expect(predictionEvidence.getByText('Maintenance Wizard RUL Risk Model 2.0.0', { exact: true })).toBeVisible()
+    await expect(predictionEvidence.getByText('74% precision / 69% recall')).toBeVisible()
+    await expect(predictionEvidence.getByText('67-84% probability')).toBeVisible()
 
     await primaryNavButton(page, 'Reliability').click()
     await expect(page.getByRole('heading', { name: 'RCA Workspace' })).toBeVisible()

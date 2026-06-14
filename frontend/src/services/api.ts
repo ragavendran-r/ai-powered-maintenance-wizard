@@ -224,8 +224,61 @@ export interface PredictionResponse {
   risk_level: RiskLevel
   failure_probability: number
   remaining_useful_life_days: number
+  confidence_interval?: PredictionConfidenceInterval | null
+  model_version?: PredictionModelVersion | null
+  model_evaluation?: PredictionModelEvaluation | null
+  prediction_evidence?: PredictionEvidence[]
+  degradation_trend?: DegradationTrendPoint[]
   drivers: string[]
   reasoning_explanation?: ReasoningExplanation | null
+}
+
+export interface PredictionConfidenceInterval {
+  lower_probability: number
+  upper_probability: number
+  lower_rul_days: number
+  upper_rul_days: number
+  confidence_level: number
+  rationale: string
+}
+
+export interface PredictionModelVersion {
+  id: string
+  name: string
+  version: string
+  algorithm: string
+  feature_set: string[]
+  trained_on: string
+  status: string
+}
+
+export interface PredictionModelEvaluation {
+  evaluation_id: string
+  backtest_window_days: number
+  sample_count: number
+  precision: number
+  recall: number
+  mean_absolute_rul_error_days: number
+  calibration_error: number
+  summary: string
+}
+
+export interface PredictionEvidence {
+  source_type: string
+  source_id: string
+  title: string
+  detail: string
+  contribution: number
+}
+
+export interface DegradationTrendPoint {
+  timestamp: string
+  signal: string
+  value: number
+  unit: string
+  threshold: number
+  normalized_severity: number
+  estimated_rul_days: number
 }
 
 export interface AssetDocument {

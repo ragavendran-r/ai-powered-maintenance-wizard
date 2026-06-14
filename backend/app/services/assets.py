@@ -222,8 +222,9 @@ def _reliability_prediction_system_prompt() -> str:
     return (
         "You are an LLM reliability engineer for a steel plant maintenance application. "
         "Produce a concise failure prediction for the selected asset using only the supplied "
-        "asset profile, reliability metrics, probability, remaining useful life, and drivers. "
-        "Do not say the prediction is deterministic. Do not change the numeric probability or RUL. "
+        "asset profile, reliability metrics, probability, remaining useful life, confidence interval, "
+        "model version, backtest metrics, evidence, degradation trend, and drivers. "
+        "Do not calculate raw sensor predictions. Do not change the numeric probability, confidence interval, or RUL. "
         "Do not include table names, column names, row counts, or table-update metadata. "
         "Use Markdown with short headings and bullets. Complete the answer within 600 output tokens."
     )
@@ -238,6 +239,21 @@ def _reliability_prediction_prompt(
         f"- {metric.metric_name}: {metric.value}{metric.unit} ({metric.status}). {metric.detail}"
         for metric in reliability_metrics
     ]
+    interval = prediction.confidence_interval
+    model = prediction.model_version
+    evaluation = prediction.model_evaluation
+    evidence_lines = [
+        f"- {item.title}: {item.detail} Contribution {round(item.contribution * 100)}%."
+        for item in prediction.prediction_evidence[:6]
+    ]
+    trend_lines = [
+        (
+            f"- {point.timestamp}: {point.signal} {point.value:g}{point.unit} "
+            f"vs threshold {point.threshold:g}{point.unit}; severity {round(point.normalized_severity * 100)}%; "
+            f"trend RUL {point.estimated_rul_days} days."
+        )
+        for point in prediction.degradation_trend[-6:]
+    ]
     return "\n".join(
         [
             f"Asset: {profile['name']} ({profile['equipment_id']})",
@@ -247,16 +263,41 @@ def _reliability_prediction_prompt(
             f"LLM prediction target probability: {prediction.failure_probability}",
             f"LLM prediction target risk level: {prediction.risk_level}",
             f"Remaining useful life days: {prediction.remaining_useful_life_days}",
+            (
+                "Confidence interval: "
+                f"{interval.lower_probability}-{interval.upper_probability} probability; "
+                f"{interval.lower_rul_days}-{interval.upper_rul_days} RUL days at {round(interval.confidence_level * 100)}% confidence. "
+                f"{interval.rationale}"
+            ) if interval else "Confidence interval: unavailable",
+            (
+                f"Model version: {model.id} ({model.name} {model.version}); "
+                f"algorithm: {model.algorithm}; status: {model.status}."
+            ) if model else "Model version: unavailable",
+            (
+                "Backtest evaluation: "
+                f"{evaluation.sample_count} samples over {evaluation.backtest_window_days} days; "
+                f"precision {evaluation.precision}; recall {evaluation.recall}; "
+                f"mean absolute RUL error {evaluation.mean_absolute_rul_error_days} days; "
+                f"calibration error {evaluation.calibration_error}. {evaluation.summary}"
+            ) if evaluation else "Backtest evaluation: unavailable",
             "Reliability metrics:",
             *metric_lines,
+            "Prediction evidence:",
+            *evidence_lines,
+            "Degradation trend history:",
+            *trend_lines,
             "Prediction drivers:",
             *[f"- {driver}" for driver in prediction.drivers[:10]],
             "",
             "Return:",
             "### Failure Prediction",
-            "- One sentence with probability, risk, and RUL.",
+            "- One sentence with probability, risk, RUL, and confidence interval.",
+            "### Model Confidence",
+            "- Explain model version, backtest quality, and confidence limitations.",
             "### Why",
             "- 3-5 bullets explaining the strongest drivers.",
+            "### Trend Evidence",
+            "- 2-3 bullets summarizing degradation trend history.",
             "### Next Actions",
             "- 2-4 prioritized maintenance actions.",
         ]
