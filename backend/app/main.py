@@ -56,6 +56,11 @@ from app.models.schemas import (
     LearningPeftJobCreateRequest,
     LearningSummary,
     MaintenanceLabelsResponse,
+    AbnormalAlertReport,
+    DigitalMaintenanceLogEntry,
+    MaintenanceDecisionSummary,
+    MaintenanceInsightReportBundle,
+    MaintenanceInsightReportSummary,
     LoginRequest,
     NeoChatRequest,
     NeoChatResponse,
@@ -77,6 +82,7 @@ from app.models.schemas import (
     RcaMorpheusDraftResponse,
     Recommendation,
     StreamingStatus,
+    StructuredMaintenanceReport,
     SupervisorAssistantRequest,
     SupervisorAssistantResponse,
     TechnicianAssistantRequest,
@@ -134,7 +140,16 @@ from app.services.rca import list_cases as list_rca_case_records
 from app.services.rca import stream_draft_case as stream_rca_draft_case_record
 from app.services.rca import update_case as update_rca_case_record
 from app.services.document_parser import parse_upload_to_document
-from app.services.reports import recommendation_to_markdown
+from app.services.reports import (
+    abnormal_alert_reports,
+    digital_maintenance_log_entries,
+    maintenance_decision_summaries,
+    maintenance_insight_report_summary,
+    maintenance_insight_reports,
+    maintenance_insights_to_markdown,
+    recommendation_to_markdown,
+    structured_maintenance_reports,
+)
 from app.services.retrieval import retrieve_evidence
 from app.services.risk import active_alerts, equipment_records, health_summary, predict_failure
 from app.services.anomaly import analyze_anomalies, sensor_readings
@@ -149,6 +164,7 @@ from app.services.work_order_assistant import (
 LEARNING_REVIEW_ROLES = ("admin", "maintenance_engineer", "reliability_engineer")
 LEARNING_ARTIFACT_CLEANUP_ROLES = {"admin", "reliability_engineer"}
 RCA_WORKSPACE_ROLES = ("admin", "maintenance_engineer", "reliability_engineer", "maintenance_supervisor")
+MAINTENANCE_REPORT_ROLES = ("admin", "maintenance_engineer", "maintenance_supervisor", "reliability_engineer", "planner")
 MATERIAL_BLOCKER_STATUSES = {"blocked", "waiting_procurement", "reorder_requested"}
 MATERIAL_UNREADY_STATUSES = {"blocked", "pending"}
 
@@ -1328,6 +1344,95 @@ def create_learning_peft_job(
         return queue_peft_tuning_job(request, current_user)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/reports/maintenance-insights",
+    response_model=MaintenanceInsightReportBundle,
+    dependencies=[Depends(require_roles(*MAINTENANCE_REPORT_ROLES))],
+)
+def maintenance_insight_report_bundle(equipment_id: Optional[str] = None):
+    try:
+        return maintenance_insight_reports(equipment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/reports/maintenance-insights/summary",
+    response_model=MaintenanceInsightReportSummary,
+    dependencies=[Depends(require_roles(*MAINTENANCE_REPORT_ROLES))],
+)
+def maintenance_insight_report_summary_route(equipment_id: Optional[str] = None):
+    try:
+        return maintenance_insight_report_summary(equipment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/reports/maintenance-insights/structured-reports",
+    response_model=list[StructuredMaintenanceReport],
+    dependencies=[Depends(require_roles(*MAINTENANCE_REPORT_ROLES))],
+)
+def maintenance_insight_structured_reports(equipment_id: Optional[str] = None):
+    try:
+        return structured_maintenance_reports(equipment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/reports/maintenance-insights/abnormal-alerts",
+    response_model=list[AbnormalAlertReport],
+    dependencies=[Depends(require_roles(*MAINTENANCE_REPORT_ROLES))],
+)
+def maintenance_insight_abnormal_alert_reports(equipment_id: Optional[str] = None):
+    try:
+        return abnormal_alert_reports(equipment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/reports/maintenance-insights/decision-summaries",
+    response_model=list[MaintenanceDecisionSummary],
+    dependencies=[Depends(require_roles(*MAINTENANCE_REPORT_ROLES))],
+)
+def maintenance_insight_decision_summaries(equipment_id: Optional[str] = None):
+    try:
+        return maintenance_decision_summaries(equipment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/reports/maintenance-insights/maintenance-log-entries",
+    response_model=list[DigitalMaintenanceLogEntry],
+    dependencies=[Depends(require_roles(*MAINTENANCE_REPORT_ROLES))],
+)
+def maintenance_insight_log_entries(equipment_id: Optional[str] = None):
+    try:
+        return digital_maintenance_log_entries(equipment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/reports/maintenance-insights/markdown",
+    dependencies=[Depends(require_roles(*MAINTENANCE_REPORT_ROLES))],
+)
+def maintenance_insight_report_markdown(equipment_id: Optional[str] = None):
+    try:
+        bundle = maintenance_insight_reports(equipment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    filename = f"{equipment_id or 'plant'}-maintenance-insights.md"
+    return Response(
+        content=maintenance_insights_to_markdown(bundle),
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get(

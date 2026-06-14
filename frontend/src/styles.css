@@ -3851,6 +3851,161 @@ h3 {
   font-weight: 800;
 }
 
+.reportsRouteStack {
+  display: grid;
+  gap: 16px;
+}
+
+.reportToolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.reportKpiBand {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.reportKpiBand > div {
+  background: var(--color-panel-soft);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+}
+
+.reportKpiBand small,
+.reportCard small,
+.maintenanceLogList small {
+  color: var(--color-text-muted);
+  font-weight: 700;
+}
+
+.reportKpiBand strong {
+  color: var(--color-text-deep);
+  font-size: 1.5rem;
+}
+
+.reportGrid,
+.reportTwoColumn {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.reportCard {
+  background: var(--color-panel-soft);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.reportCardHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.reportCardHeader span:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.reportCard h3,
+.reportTwoColumn h3 {
+  color: var(--color-text-deep);
+  font-size: 0.92rem;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.reportCard ul,
+.reportTwoColumn ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.reportFactGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+}
+
+.reportFactGrid div {
+  background: var(--color-surface);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.reportFactGrid dt {
+  color: var(--color-text-muted);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.reportFactGrid dd {
+  color: var(--color-text-deep);
+  font-weight: 800;
+  margin: 0;
+}
+
+.abnormalAlertTable {
+  display: grid;
+  overflow-x: auto;
+}
+
+.abnormalAlertHead,
+.abnormalAlertRow {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 150px minmax(220px, 1.2fr) 170px 120px minmax(240px, 1.3fr);
+  min-width: 920px;
+  padding: 12px;
+}
+
+.abnormalAlertHead {
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.abnormalAlertRow {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.abnormalAlertRow > span:first-child {
+  align-items: flex-start;
+  display: grid;
+  gap: 6px;
+}
+
+.maintenanceLogList {
+  display: grid;
+  gap: 12px;
+}
+
+.maintenanceLogList article {
+  border-left: 4px solid var(--color-primary);
+  display: grid;
+  gap: 6px;
+  padding: 8px 0 8px 14px;
+}
+
 .neoPanel[aria-busy="true"],
 .assistantBox[aria-busy="true"] {
   cursor: progress;
@@ -3880,6 +4035,10 @@ h3 {
   .migrationPreview,
   .ragControls,
   .pmDraftControls,
+  .reportKpiBand,
+  .reportGrid,
+  .reportTwoColumn,
+  .reportFactGrid,
   .userCreateGrid,
   .userRow {
     grid-template-columns: 1fr;
@@ -4031,7 +4190,8 @@ h3 {
   .reliabilityRouteStack,
   .rcaWorkspace,
   .learningView,
-  .ingestionView
+  .ingestionView,
+  .reportsRouteStack
 ) :where(p, li, dd, dt, span, small, button, input, select, textarea, strong),
 .loginShell :where(
   .loginPanel
