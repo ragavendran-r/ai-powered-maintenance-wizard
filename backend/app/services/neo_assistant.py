@@ -298,7 +298,7 @@ def _engineering_welcome(current_user: UserPublic) -> NeoChatResponse:
             type="neo_welcome",
             label="Loaded engineering attention",
             status="completed",
-            detail=f"{len(rows)} engineering attention row(s).",
+            detail="Engineering attention loaded.",
         ),
         used_live_provider=False,
         provider="deterministic",
@@ -353,6 +353,7 @@ def _neo_system_prompt() -> str:
         "Give practical inspection steps, safety checks, escalation criteria, and closeout guidance. "
         "Format general answers as concise Markdown with exactly four sections: Safety, Inspection, Escalation, Closeout. "
         "Do not add Data Review, Documentation, Evidence Used, or any extra section headings. "
+        "Do not include table names, column names, row counts, or table-update metadata in the chat answer. "
         f"Keep the complete answer under {NEO_GENERAL_TARGET_WORDS} words and finish all sections within "
         f"{NEO_GENERAL_MAX_TOKENS} output tokens. Do not start a section unless you can complete it. "
         "Do not invent rows, permissions, private user details, or measurements not in the evidence."
@@ -392,7 +393,7 @@ def _fallback_answer(
     live_failure_reason: Optional[str] = None,
 ) -> str:
     if table:
-        return f"I found {len(table.rows)} row(s) for {table.title.lower()}. Review the table in the dashboard center pane."
+        return "I loaded the requested results."
     if evidence:
         return _evidence_based_answer(message, evidence, live_failure_reason)
     return (
@@ -538,7 +539,7 @@ def _asset_section_response(message: str, current_user: UserPublic) -> Optional[
             label=f"Loaded asset {section}",
             status="completed",
             target_id=equipment_id,
-            detail=f"{len(table.rows)} row(s) returned for {equipment['name']}.",
+            detail=f"{equipment['name']} {section} results loaded.",
         ),
         used_live_provider=False,
         provider="deterministic",

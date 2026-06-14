@@ -224,6 +224,7 @@ def _reliability_prediction_system_prompt() -> str:
         "Produce a concise failure prediction for the selected asset using only the supplied "
         "asset profile, reliability metrics, probability, remaining useful life, and drivers. "
         "Do not say the prediction is deterministic. Do not change the numeric probability or RUL. "
+        "Do not include table names, column names, row counts, or table-update metadata. "
         "Use Markdown with short headings and bullets. Complete the answer within 600 output tokens."
     )
 

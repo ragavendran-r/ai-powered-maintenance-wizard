@@ -11,7 +11,7 @@ import {
   supervisorAssistantName,
   technicianAssistantName,
 } from '../appModel'
-import { formatWorkOrderStatusText, workOrderStatusDetail } from '../workOrderStatus'
+import { workOrderStatusDetail } from '../workOrderStatus'
 import {
   StatusBadge,
   StatusTimeline,
@@ -107,7 +107,6 @@ export function WorkOrdersRoute({
                           <span>{turn.role === 'assistant' ? technicianAssistantName : 'You'}</span>
                           {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
                           <AssistantMessageContent turn={turn} />
-                          {turn.details && <ul>{turn.details.map((item, index) => <li key={`${turn.id}-${index}`}>{formatWorkOrderStatusText(item)}</li>)}</ul>}
                         </div>
                       ))}
                       {technicianLoading && !technicianStreaming && (
@@ -149,7 +148,6 @@ export function WorkOrdersRoute({
                           <span>{turn.role === 'assistant' ? supervisorAssistantName : 'You'}</span>
                           {turn.provider && <small>{turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · {turn.provider}</small>}
                           <AssistantMessageContent turn={turn} />
-                          {turn.details && <ul>{turn.details.map((item, index) => <li key={`${turn.id}-${index}`}>{formatWorkOrderStatusText(item)}</li>)}</ul>}
                         </div>
                       ))}
                       {supervisorLoading && !supervisorStreaming && (
