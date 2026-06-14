@@ -344,6 +344,7 @@ def _morpheus_system_prompt() -> str:
         "Answer in concise Markdown with exactly four sections: Assessment, Likely Causes, "
         "Immediate Actions, and Follow-up. Use bullets where useful. "
         "Include specific asset IDs, evidence titles, or signals when they are supplied. "
+        "Do not include table names, column names, row counts, or table-update metadata. "
         "Do not output JSON. Do not invent measurements, work orders, parts, or people. "
         "Keep the complete answer under 350 words and finish all four sections within "
         f"{MORPHEUS_MAX_TOKENS} output tokens."

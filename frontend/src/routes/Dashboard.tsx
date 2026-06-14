@@ -6,7 +6,6 @@ import {
   AssistantMessageContent,
   assistantProviderLabel,
 } from '../assistantContent'
-import { formatWorkOrderStatusText } from '../workOrderStatus'
 import {
   BarChart,
   KpiCard,
@@ -89,7 +88,6 @@ export function DashboardRoute({
                   <span>{turn.role === 'assistant' ? 'Neo' : 'You'}</span>
                   {assistantProviderLabel(turn) && <small>{assistantProviderLabel(turn)}</small>}
                   <AssistantMessageContent turn={turn} />
-                  {turn.details && <ul>{turn.details.map((item, index) => <li key={`${turn.id}-${index}`}>{formatWorkOrderStatusText(item)}</li>)}</ul>}
                 </div>
               ))}
               {neoLoading && !neoStreaming && (

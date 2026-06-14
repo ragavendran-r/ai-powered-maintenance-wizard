@@ -64,7 +64,7 @@ import {
   usePinnedStreamScroll,
   type AssistantTurn,
 } from './assistantContent'
-import { formatWorkOrderStatusText, workOrderStatusLabel } from './workOrderStatus'
+import { workOrderStatusLabel } from './workOrderStatus'
 import { Metric } from './sharedComponents'
 import { AuthLoadingRoute, ApiOnlyRoute, LoginRoute } from './routes/Auth'
 import { DashboardRoute } from './routes/Dashboard'
@@ -689,7 +689,6 @@ export function App() {
             id: 'neo-welcome',
             role: 'assistant',
             content: response.answer,
-            details: neoResponseDetails(response),
             provider: response.provider,
             usedLiveProvider: response.used_live_provider,
           },
@@ -1029,7 +1028,6 @@ export function App() {
             const message = neoResponseMessage(event.response)
             updateAssistantMessage({
               content: message,
-              details: neoResponseDetails(event.response),
               provider: event.response.provider,
               usedLiveProvider: event.response.used_live_provider,
             })
@@ -1054,24 +1052,7 @@ export function App() {
   }
 
   function neoResponseMessage(response: NeoChatResponse) {
-    if (response.action) return response.answer
-    return response.table
-      ? `I found ${response.table.rows.length} row${response.table.rows.length === 1 ? '' : 's'} for ${response.table.title}. The table is updated in the dashboard.`
-      : response.answer
-  }
-
-  function neoResponseDetails(response: NeoChatResponse) {
-    const details: string[] = []
-    if (response.action) {
-      details.push(`${response.action.label}: ${response.action.status.replace('_', ' ')}`)
-      if (response.action.target_id) details.push(`Target: ${response.action.target_id}`)
-      if (response.action.detail) details.push(response.action.detail)
-    }
-    if (response.table) {
-      details.push(`Updated table: ${response.table.title}`)
-      details.push(`${response.table.rows.length} row(s)`)
-    }
-    return details.length ? details : undefined
+    return response.answer
   }
 
   function refreshAfterNeoAction(action: NeoAction) {
@@ -1095,7 +1076,6 @@ export function App() {
         id: assistantTurnId('neo-assistant'),
         role: 'assistant',
         content: message,
-        details: neoResponseDetails(response),
         provider: response.provider,
         usedLiveProvider: response.used_live_provider,
       },
@@ -1171,24 +1151,6 @@ export function App() {
     }
   }
 
-  function technicianAssistantDetails(response: TechnicianAssistantResponse) {
-    return [
-      ...response.live_directions,
-      ...response.recommendations,
-      ...response.safety_reminders.map((item) => `Safety: ${item}`),
-      `Problem code: ${response.suggested_problem_code}`,
-      `Summary: ${response.completion_summary}`,
-    ]
-  }
-
-  function supervisorAssistantDetails(response: SupervisorAssistantResponse) {
-    return [
-      ...response.follow_up_actions.map(formatWorkOrderStatusText),
-      ...response.risks.map((item) => `Risk: ${formatWorkOrderStatusText(item)}`),
-      ...(response.draft_work_order ? [`Draft work order: ${response.draft_work_order.title}`] : []),
-    ]
-  }
-
   async function runTechnicianAssistant() {
     if (technicianLoading) return
     if (!selectedWorkOrder) return
@@ -1249,7 +1211,6 @@ export function App() {
           if (assistantMessageId) {
             updateAssistantMessage({
               content: streamedContent || event.response.next_prompt,
-              details: technicianAssistantDetails(event.response),
               provider: event.response.provider,
               usedLiveProvider: event.response.used_live_provider,
             })
@@ -1260,7 +1221,6 @@ export function App() {
                 id: assistantTurnId('technician-assistant'),
                 role: 'assistant',
                 content: event.response.next_prompt,
-                details: technicianAssistantDetails(event.response),
                 provider: event.response.provider,
                 usedLiveProvider: event.response.used_live_provider,
               },
@@ -1291,7 +1251,6 @@ export function App() {
           id: assistantTurnId('technician-fallback'),
           role: 'assistant',
           content: fallbackResponse.next_prompt,
-          details: technicianAssistantDetails(fallbackResponse),
           provider: fallbackResponse.provider,
           usedLiveProvider: fallbackResponse.used_live_provider,
         },
@@ -1417,7 +1376,6 @@ export function App() {
           if (assistantMessageId) {
             updateAssistantMessage({
               content: streamedContent || event.response.summary,
-              details: supervisorAssistantDetails(event.response),
               provider: event.response.provider,
               usedLiveProvider: event.response.used_live_provider,
             })
@@ -1428,7 +1386,6 @@ export function App() {
                 id: assistantTurnId('supervisor-assistant'),
                 role: 'assistant',
                 content: event.response.summary,
-                details: supervisorAssistantDetails(event.response),
                 provider: event.response.provider,
                 usedLiveProvider: event.response.used_live_provider,
               },
@@ -1457,7 +1414,6 @@ export function App() {
           id: assistantTurnId('supervisor-fallback'),
           role: 'assistant',
           content: fallbackResponse.summary,
-          details: supervisorAssistantDetails(fallbackResponse),
           provider: fallbackResponse.provider,
           usedLiveProvider: fallbackResponse.used_live_provider,
         },

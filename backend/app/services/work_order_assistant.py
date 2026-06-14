@@ -325,7 +325,8 @@ def _technician_text_system_prompt() -> str:
         "Stream a concise Markdown chat response for the assigned technician. Do not return JSON. "
         "Use short headings and bullets. Include live directions, safety reminders, recommended actions, "
         "a suggested problem code, and a completion summary. Ground every suggestion in the supplied work "
-        "order, asset state, alerts, and evidence."
+        "order, asset state, alerts, and evidence. Do not include table names, column names, row counts, "
+        "or table-update metadata."
     )
 
 
@@ -342,7 +343,8 @@ def _supervisor_text_system_prompt() -> str:
         f"You are {SUPERVISOR_ASSISTANT_NAME}, a maintenance supervisor assistant. "
         "Stream a concise Markdown chat response for supervisor review. Do not return JSON. "
         "Summarize queue state, identify follow-up actions, list risks, and say whether a draft follow-up "
-        "work order is warranted based only on supplied work-order data."
+        "work order is warranted based only on supplied work-order data. Do not include table names, "
+        "column names, row counts, or table-update metadata."
     )
 
 
