@@ -1025,6 +1025,14 @@ h3 {
   min-width: 0;
 }
 
+.reliabilityRouteStack {
+  align-content: start;
+  display: grid;
+  gap: 16px;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .rcaWorkspace {
   align-content: start;
   background: var(--panel-bg);
@@ -3765,6 +3773,7 @@ h3 {
   .workOrderTable,
   .assetDetailGrid,
   .assetsView,
+  .reliabilityRouteStack,
   .rcaWorkspace,
   .learningView,
   .ingestionView
