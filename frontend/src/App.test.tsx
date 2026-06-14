@@ -2298,6 +2298,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByText('5-Why')).toBeInTheDocument()
     expect(screen.getByText('Fishbone')).toBeInTheDocument()
     expect(screen.getByText('Evidence Timeline')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Learning and Tuning' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Morpheus draft' }))
     expect(
       await screen.findByText('Morpheus drafted RCA hypotheses, evidence, missing checks, and corrective actions. Provider: live openai.'),
@@ -2305,6 +2306,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close and learn' }))
     expect(await screen.findByText('RCA-9001 closed and accepted for learning')).toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole('button', { name: 'Learning and Tuning' }))
     expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
     expect(screen.getByText(/Review approved human feedback/)).toBeInTheDocument()
     expect(screen.getByText('RAG vector DB')).toBeInTheDocument()
@@ -2410,6 +2412,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(within(navigation).getByRole('button', { name: 'Assets' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Admin' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Reliability' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Learning and Tuning' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Planning' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Work Execution' })).not.toBeInTheDocument()
     expect(screen.queryByText('Run Morpheus')).not.toBeInTheDocument()

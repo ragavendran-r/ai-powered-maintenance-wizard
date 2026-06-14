@@ -40,14 +40,18 @@ test('RCA workspace and learning panels stay within the desktop content column',
   await expect(page.getByRole('heading', { name: 'RCA Workspace' })).toBeVisible()
   await expect(page.locator('.rcaCaseTitle strong', { hasText: 'Drive-end vibration root cause review' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Evidence Timeline' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Learning and Tuning' })).toHaveCount(0)
+
+  await expectNoDocumentHorizontalOverflow(page)
+  await expectFitsViewport(page, '.reliabilityRouteStack')
+  await expectFitsViewport(page, '.rcaWorkspace')
+
+  await primaryNavButton(page, 'Learning and Tuning').click()
   await expect(page.getByRole('heading', { name: 'Learning and Tuning' })).toBeVisible()
-  await expect(page.locator('.reliabilityRouteStack').getByRole('heading', { name: 'Learning and Tuning' })).toBeVisible()
   await expect(
     page.getByRole('complementary', { name: 'Maintenance navigation' }).getByRole('heading', { name: 'Learning and Tuning' }),
   ).toHaveCount(0)
 
   await expectNoDocumentHorizontalOverflow(page)
-  await expectFitsViewport(page, '.reliabilityRouteStack')
-  await expectFitsViewport(page, '.rcaWorkspace')
   await expectFitsViewport(page, '.learningView')
 })

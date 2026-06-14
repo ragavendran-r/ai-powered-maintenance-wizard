@@ -20,7 +20,7 @@ test.describe('role capability rendering', () => {
   test('operator keeps read-only navigation and hides action surfaces', async ({ page }) => {
     await signInAs(page, 'operator')
 
-    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning', 'Users'])
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning and Tuning', 'Users'])
     await expect(page.getByRole('button', { name: 'Create work order' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Review follow-ups' })).toHaveCount(0)
 
@@ -33,7 +33,7 @@ test.describe('role capability rendering', () => {
   test('technician sees assigned execution workflow and technician assistant only', async ({ page }) => {
     await signInAs(page, 'technician')
 
-    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning', 'Users'])
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning and Tuning', 'Users'])
     await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Review follow-ups' })).toHaveCount(0)
 
@@ -49,7 +49,7 @@ test.describe('role capability rendering', () => {
   test('supervisor sees review, assignment, and approval controls', async ({ page }) => {
     await signInAs(page, 'supervisor')
 
-    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning', 'Users'])
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning and Tuning', 'Users'])
     await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Review follow-ups' })).toBeVisible()
 
@@ -64,7 +64,7 @@ test.describe('role capability rendering', () => {
   test('engineer sees decision support and learning review without ingestion or users', async ({ page }) => {
     await signInAs(page, 'engineer')
 
-    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders', 'Learning'], ['Ingestion', 'Users'])
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders', 'Learning and Tuning'], ['Ingestion', 'Users'])
     await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
 
     await openAssetDetail(page)
@@ -75,7 +75,7 @@ test.describe('role capability rendering', () => {
   test('reliability engineer sees ingestion, streaming, decision support, and learning review', async ({ page }) => {
     await signInAs(page, 'reliability')
 
-    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders', 'Ingestion', 'Learning'], ['Users'])
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders', 'Ingestion', 'Learning and Tuning'], ['Users'])
     await openAssetDetail(page)
     await expect(page.getByRole('button', { name: 'Run Morpheus' })).toBeVisible()
 
@@ -88,7 +88,7 @@ test.describe('role capability rendering', () => {
   test('planner sees scheduling and dispatch controls without assistant panels', async ({ page }) => {
     await signInAs(page, 'planner')
 
-    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning', 'Users'])
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders'], ['Ingestion', 'Learning and Tuning', 'Users'])
     await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Review follow-ups' })).toHaveCount(0)
 
@@ -107,7 +107,7 @@ test.describe('role capability rendering', () => {
   test('admin sees administration surfaces and global review routes', async ({ page }) => {
     await signInAs(page, 'admin')
 
-    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders', 'Ingestion', 'Learning', 'Users'], [])
+    await expectPrimaryNav(page, ['Dashboard', 'Assets', 'Work Orders', 'Ingestion', 'Learning and Tuning', 'Users'], [])
     await primaryNavButton(page, 'Users').click()
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible()
     await expect(page.getByLabel('Application users')).toContainText(roleUsers.operator.display_name)

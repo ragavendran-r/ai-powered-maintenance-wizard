@@ -81,7 +81,7 @@ const routeCases: RouteCase[] = [
   {
     name: 'learning review',
     open: async (page) => {
-      await primaryNavButton(page, 'Learning').click()
+      await primaryNavButton(page, 'Learning and Tuning').click()
     },
     visible: async (page) => {
       await expect(page.getByRole('heading', { name: 'Learning and Tuning' })).toBeVisible()

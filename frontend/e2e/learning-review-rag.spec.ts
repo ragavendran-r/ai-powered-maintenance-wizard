@@ -207,7 +207,7 @@ test('shows approved learning-example Qdrant sync after Learning Review reindex'
   await page.getByRole('button', { name: 'Sign In' }).click()
   await expect(page.getByText('Plant Admin')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Learning' }).click()
+  await page.getByRole('button', { name: 'Learning and Tuning' }).click()
   await expect(page.getByRole('heading', { name: 'Learning and Tuning' })).toBeVisible()
   await expect(page.getByText('qdrant · ready')).toBeVisible()
 
