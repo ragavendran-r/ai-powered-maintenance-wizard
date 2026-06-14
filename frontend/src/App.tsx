@@ -35,6 +35,7 @@ import {
   type NeoChatResponse,
   type NeoTable,
   type PredictionResponse,
+  type RcaCase,
   type Recommendation,
   type SupervisorAssistantResponse,
   type TechnicianAssistantResponse,
@@ -81,6 +82,7 @@ import { AssetDetailRoute } from './routes/AssetDetail'
 import { WorkOrdersRoute, type WorkOrderPlanningUpdate } from './routes/WorkOrders'
 import { IngestionRoute } from './routes/Ingestion'
 import { LearningReviewRoute } from './routes/LearningReview'
+import { RcaWorkspace } from './routes/RcaWorkspace'
 import { UsersRoute } from './routes/Users'
 
 const TECHNICIAN_INITIAL_CONTEXT_TIMEOUT_MS = 90_000
@@ -230,6 +232,10 @@ export function App() {
   const [learningDatasets, setLearningDatasets] = useState<LearningDatasetSnapshot[]>([])
   const [learningDeployments, setLearningDeployments] = useState<LearningModelDeployment[]>([])
   const [learningEmbeddingProfiles, setLearningEmbeddingProfiles] = useState<LearningEmbeddingProfile[]>([])
+  const [rcaCases, setRcaCases] = useState<RcaCase[]>([])
+  const [selectedRcaCaseId, setSelectedRcaCaseId] = useState('')
+  const [rcaLoading, setRcaLoading] = useState(false)
+  const [rcaMessage, setRcaMessage] = useState('')
   const [selectedEmbeddingProfileId, setSelectedEmbeddingProfileId] = useState('')
   const [ragMigrationPreview, setRagMigrationPreview] = useState<LearningRagMigrationPlan | null>(null)
   const [ragTargetCollection, setRagTargetCollection] = useState('')
@@ -313,6 +319,10 @@ export function App() {
     setLearningDatasets([])
     setLearningDeployments([])
     setLearningEmbeddingProfiles([])
+    setRcaCases([])
+    setSelectedRcaCaseId('')
+    setRcaLoading(false)
+    setRcaMessage('')
     setSelectedEmbeddingProfileId('')
     setRagMigrationPreview(null)
     setRagTargetCollection('')
@@ -471,6 +481,25 @@ export function App() {
         setApiState('fallback')
       })
       .finally(() => setLearningLoading(false))
+  }
+
+  function loadRcaCases() {
+    setRcaLoading(true)
+    setRcaMessage('')
+    return api
+      .rcaCases()
+      .then((items) => {
+        setRcaCases(items)
+        if (items.length && !items.some((item) => item.id === selectedRcaCaseId)) {
+          setSelectedRcaCaseId(items[0].id)
+        }
+        setApiState('connected')
+      })
+      .catch(() => {
+        setRcaMessage('RCA cases could not be loaded')
+        setApiState('fallback')
+      })
+      .finally(() => setRcaLoading(false))
   }
 
   async function refreshLearningExamples() {
@@ -833,7 +862,10 @@ export function App() {
   }, [activeView, canAdminUsers])
 
   useEffect(() => {
-    if (activeView === 'reliability' && canReviewLearning) void loadLearning()
+    if (activeView === 'reliability' && canReviewLearning) {
+      void loadLearning()
+      void loadRcaCases()
+    }
   }, [activeView, canReviewLearning])
 
   useEffect(() => {
@@ -1248,6 +1280,91 @@ export function App() {
       setWorkOrderMessage(`Created ${created.id}`)
     } catch {
       setWorkOrderMessage('Work order could not be created')
+    }
+  }
+
+  async function createRcaCaseFromSelectedWorkOrder() {
+    if (!selectedWorkOrder) {
+      setRcaMessage('Select a work order before creating an RCA case')
+      return
+    }
+    setRcaLoading(true)
+    setRcaMessage('')
+    try {
+      const created = await api.createRcaCase({
+        equipment_id: selectedWorkOrder.equipment_id,
+        work_order_id: selectedWorkOrder.id,
+        title: `RCA for ${selectedWorkOrder.id} ${selectedWorkOrder.title}`,
+        symptoms: [
+          selectedWorkOrder.description,
+          selectedWorkOrder.material_blocker_note ?? '',
+          selectedWorkOrder.ai_summary ?? '',
+        ].filter(Boolean),
+      })
+      setRcaCases((items) => [created, ...items.filter((item) => item.id !== created.id)])
+      setSelectedRcaCaseId(created.id)
+      setRcaMessage(`Created ${created.id}`)
+    } catch {
+      setRcaMessage('RCA case could not be created')
+    } finally {
+      setRcaLoading(false)
+    }
+  }
+
+  async function draftRcaCase(caseId?: string) {
+    setRcaLoading(true)
+    setRcaMessage('')
+    try {
+      const selectedCase = rcaCases.find((item) => item.id === caseId)
+      const response = await api.draftRcaWithMorpheus({
+        case_id: selectedCase?.id,
+        equipment_id: selectedCase?.equipment_id ?? selectedWorkOrder?.equipment_id,
+        work_order_id: selectedCase?.work_order_id ?? selectedWorkOrder?.id,
+        symptoms: selectedCase?.symptoms,
+        question: 'Draft RCA hypotheses, evidence timeline, 5-Why, fishbone causes, corrective actions, and missing checks.',
+      })
+      setRcaCases((items) => [response.case, ...items.filter((item) => item.id !== response.case.id)])
+      setSelectedRcaCaseId(response.case.id)
+      setRcaMessage(`${response.message} Provider: ${response.case.used_live_provider ? `live ${response.case.provider}` : response.case.provider}.`)
+      setApiState('connected')
+    } catch {
+      setRcaMessage('Morpheus could not draft the RCA case')
+      setApiState('fallback')
+    } finally {
+      setRcaLoading(false)
+    }
+  }
+
+  async function closeRcaCase(caseId: string) {
+    const selectedCase = rcaCases.find((item) => item.id === caseId)
+    if (!selectedCase) return
+    setRcaLoading(true)
+    setRcaMessage('')
+    try {
+      const updated = await api.updateRcaCase(caseId, {
+        status: 'closed',
+        closure_review: {
+          reviewed_by: currentUser?.email,
+          reviewed_at: new Date().toISOString(),
+          accepted_for_learning: true,
+          final_root_cause: selectedCase.probable_cause ?? selectedCase.hypotheses[0]?.cause ?? 'Root cause accepted from RCA review',
+          recurrence_prevention: selectedCase.corrective_actions[0]?.action ?? 'Verify corrective action effectiveness after execution.',
+          lessons_learned: selectedCase.morpheus_summary ?? selectedCase.problem_statement,
+        },
+      })
+      setRcaCases((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+      setSelectedRcaCaseId(updated.id)
+      setRcaMessage(`${updated.id} closed and accepted for learning`)
+      void Promise.all([api.learningSummary(), api.learningExamples()])
+        .then(([summary, examples]) => {
+          setLearningSummary(summary)
+          setLearningExamples(examples)
+        })
+        .catch(() => undefined)
+    } catch {
+      setRcaMessage('RCA closure could not be saved')
+    } finally {
+      setRcaLoading(false)
     }
   }
 
@@ -1912,57 +2029,72 @@ export function App() {
         workOrders={workOrders}
       />
     ) : activeView === 'reliability' ? (
-      <LearningReviewRoute
-        activateSelectedEmbeddingProfile={activateSelectedEmbeddingProfile}
-        adapterBaseModel={adapterBaseModel}
-        adapterModelName={adapterModelName}
-        adapterNotes={adapterNotes}
-        adapterPath={adapterPath}
-        adapterProvider={adapterProvider}
-        artifactCleanupResult={artifactCleanupResult}
-        createLearningSnapshot={createLearningSnapshot}
-        deployLearningAdapter={deployLearningAdapter}
-        deploymentBaseUrl={deploymentBaseUrl}
-        deploymentRuntimeProvider={deploymentRuntimeProvider}
-        downloadLearningSnapshot={downloadLearningSnapshot}
-        judgeLearningExample={judgeLearningExample}
-        learningDatasetDescription={learningDatasetDescription}
-        learningDatasetName={learningDatasetName}
-        learningDatasets={learningDatasets}
-        learningDeployments={learningDeployments}
-        learningEmbeddingProfiles={learningEmbeddingProfiles}
-        learningExamples={learningExamples}
-        learningLoading={learningLoading}
-        learningMessage={learningMessage}
-        learningSummary={learningSummary}
-        peftAdapterName={peftAdapterName}
-        previewLearningArtifactCleanup={previewLearningArtifactCleanup}
-        previewLearningRagMigration={previewLearningRagMigration}
-        promoteLearningAdapter={promoteLearningAdapter}
-        queuePeftTuningJob={queuePeftTuningJob}
-        ragMigrationPreview={ragMigrationPreview}
-        ragTargetCollection={ragTargetCollection}
-        refreshLearningExamples={refreshLearningExamples}
-        registerLearningAdapter={registerLearningAdapter}
-        reindexLearningRag={reindexLearningRag}
-        rollbackLearningAdapter={rollbackLearningAdapter}
-        runLearningEvaluation={runLearningEvaluation}
-        runLearningRagMigration={runLearningRagMigration}
-        selectedEmbeddingProfileId={selectedEmbeddingProfileId}
-        setAdapterBaseModel={setAdapterBaseModel}
-        setAdapterModelName={setAdapterModelName}
-        setAdapterNotes={setAdapterNotes}
-        setAdapterPath={setAdapterPath}
-        setAdapterProvider={setAdapterProvider}
-        setDeploymentBaseUrl={setDeploymentBaseUrl}
-        setDeploymentRuntimeProvider={setDeploymentRuntimeProvider}
-        setLearningDatasetDescription={setLearningDatasetDescription}
-        setLearningDatasetName={setLearningDatasetName}
-        setPeftAdapterName={setPeftAdapterName}
-        setRagTargetCollection={setRagTargetCollection}
-        setSelectedEmbeddingProfileId={setSelectedEmbeddingProfileId}
-        toggleLearningApproval={toggleLearningApproval}
-      />
+      <>
+        <RcaWorkspace
+          closeRcaCase={closeRcaCase}
+          createRcaCase={createRcaCaseFromSelectedWorkOrder}
+          draftRcaCase={draftRcaCase}
+          rcaCases={rcaCases}
+          rcaLoading={rcaLoading}
+          rcaMessage={rcaMessage}
+          selectedRcaCaseId={selectedRcaCaseId}
+          selectedWorkOrderId={selectedWorkOrderId}
+          setSelectedRcaCaseId={setSelectedRcaCaseId}
+          setSelectedWorkOrderId={setSelectedWorkOrderId}
+          workOrders={workOrders}
+        />
+        <LearningReviewRoute
+          activateSelectedEmbeddingProfile={activateSelectedEmbeddingProfile}
+          adapterBaseModel={adapterBaseModel}
+          adapterModelName={adapterModelName}
+          adapterNotes={adapterNotes}
+          adapterPath={adapterPath}
+          adapterProvider={adapterProvider}
+          artifactCleanupResult={artifactCleanupResult}
+          createLearningSnapshot={createLearningSnapshot}
+          deployLearningAdapter={deployLearningAdapter}
+          deploymentBaseUrl={deploymentBaseUrl}
+          deploymentRuntimeProvider={deploymentRuntimeProvider}
+          downloadLearningSnapshot={downloadLearningSnapshot}
+          judgeLearningExample={judgeLearningExample}
+          learningDatasetDescription={learningDatasetDescription}
+          learningDatasetName={learningDatasetName}
+          learningDatasets={learningDatasets}
+          learningDeployments={learningDeployments}
+          learningEmbeddingProfiles={learningEmbeddingProfiles}
+          learningExamples={learningExamples}
+          learningLoading={learningLoading}
+          learningMessage={learningMessage}
+          learningSummary={learningSummary}
+          peftAdapterName={peftAdapterName}
+          previewLearningArtifactCleanup={previewLearningArtifactCleanup}
+          previewLearningRagMigration={previewLearningRagMigration}
+          promoteLearningAdapter={promoteLearningAdapter}
+          queuePeftTuningJob={queuePeftTuningJob}
+          ragMigrationPreview={ragMigrationPreview}
+          ragTargetCollection={ragTargetCollection}
+          refreshLearningExamples={refreshLearningExamples}
+          registerLearningAdapter={registerLearningAdapter}
+          reindexLearningRag={reindexLearningRag}
+          rollbackLearningAdapter={rollbackLearningAdapter}
+          runLearningEvaluation={runLearningEvaluation}
+          runLearningRagMigration={runLearningRagMigration}
+          selectedEmbeddingProfileId={selectedEmbeddingProfileId}
+          setAdapterBaseModel={setAdapterBaseModel}
+          setAdapterModelName={setAdapterModelName}
+          setAdapterNotes={setAdapterNotes}
+          setAdapterPath={setAdapterPath}
+          setAdapterProvider={setAdapterProvider}
+          setDeploymentBaseUrl={setDeploymentBaseUrl}
+          setDeploymentRuntimeProvider={setDeploymentRuntimeProvider}
+          setLearningDatasetDescription={setLearningDatasetDescription}
+          setLearningDatasetName={setLearningDatasetName}
+          setPeftAdapterName={setPeftAdapterName}
+          setRagTargetCollection={setRagTargetCollection}
+          setSelectedEmbeddingProfileId={setSelectedEmbeddingProfileId}
+          toggleLearningApproval={toggleLearningApproval}
+        />
+      </>
     ) : activeView === 'admin' && canAdminUsers ? (
       <section className="adminRouteStack" aria-label="Admin workspace">
         <section className="detailPanel pageIntroPanel">

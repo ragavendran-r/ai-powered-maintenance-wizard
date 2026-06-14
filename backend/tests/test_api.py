@@ -83,7 +83,7 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
-    assert status["schema_version"] == "16"
+    assert status["schema_version"] == "17"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["asset_profiles"] == 5
     assert status["counts"]["asset_metric_snapshots"] == 15
@@ -100,6 +100,8 @@ def test_database_status_reports_seeded_tables():
     assert "work_order_spares" in status["counts"]
     assert status["counts"]["work_order_spares"] >= 4
     assert "work_order_logs" in status["counts"]
+    assert "rca_cases" in status["counts"]
+    assert status["counts"]["rca_cases"] >= 1
     assert status["counts"]["users"] == 8
     assert "learning_interactions" in status["counts"]
     assert "learning_examples" in status["counts"]
@@ -108,6 +110,61 @@ def test_database_status_reports_seeded_tables():
     assert "learning_jobs" in status["counts"]
     assert "learning_artifacts" in status["counts"]
     assert status["counts"]["rag_embedding_profiles"] >= 1
+
+
+def test_rca_workspace_drafts_closes_and_feeds_learning():
+    headers = auth_headers("reliability@plant.local")
+
+    list_response = client.get("/api/rca-cases", headers=headers)
+    assert list_response.status_code == 200
+    seeded_case = list_response.json()[0]
+    assert seeded_case["id"] == "RCA-9001"
+    assert seeded_case["hypotheses"]
+    assert seeded_case["evidence_timeline"]
+
+    draft_response = client.post(
+        "/api/rca-cases/morpheus-draft",
+        headers=headers,
+        json={
+            "case_id": seeded_case["id"],
+            "question": "Draft RCA with hypotheses, 5-Why, fishbone, and missing checks.",
+        },
+    )
+    assert draft_response.status_code == 200, draft_response.text
+    draft = draft_response.json()
+    assert draft["case"]["status"] == "investigating"
+    assert draft["case"]["hypotheses"]
+    assert draft["case"]["why_chain"]
+    assert draft["case"]["fishbone"]
+    assert draft["case"]["corrective_actions"]
+    assert draft["evidence"]
+
+    close_response = client.patch(
+        f"/api/rca-cases/{seeded_case['id']}",
+        headers=headers,
+        json={
+            "status": "closed",
+            "probable_cause": draft["case"]["probable_cause"],
+            "closure_review": {
+                "reviewed_by": "reliability@plant.local",
+                "reviewed_at": "2026-06-14T09:00:00+05:30",
+                "accepted_for_learning": True,
+                "final_root_cause": draft["case"]["probable_cause"],
+                "recurrence_prevention": "Procure bearing and verify coupling alignment before restart.",
+                "lessons_learned": "Material blockers must be separated from safe RCA evidence capture.",
+            },
+        },
+    )
+    assert close_response.status_code == 200, close_response.text
+    closed = close_response.json()
+    assert closed["status"] == "closed"
+    assert closed["closure_review"]["accepted_for_learning"] is True
+    assert closed["closed_at"]
+
+    examples_response = client.get("/api/learning/examples?approved_only=true", headers=headers)
+    assert examples_response.status_code == 200
+    examples = examples_response.json()
+    assert any(example["source_type"] == "rca_case" and example["source_id"] == "RCA-9001" for example in examples)
 
 
 def test_embedding_profile_id_changes_with_model_version_and_dimensions():

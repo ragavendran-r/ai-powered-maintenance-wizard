@@ -340,6 +340,154 @@ def add_work_order_log(work_order_id: str, payload: dict[str, Any]) -> Optional[
     return get_work_order(work_order_id)
 
 
+def list_rca_cases(
+    equipment_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if equipment_id:
+        clauses.append("equipment_id = ?")
+        params.append(equipment_id)
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    rows = _fetch_all(
+        f"""
+        SELECT * FROM rca_cases
+        {where_sql}
+        ORDER BY
+          CASE status WHEN 'open' THEN 0 WHEN 'investigating' THEN 1 WHEN 'actions_defined' THEN 2 ELSE 3 END,
+          updated_at DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    )
+    return [_decode_rca_case(row) for row in rows]
+
+
+def get_rca_case(case_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM rca_cases WHERE id = ?", (case_id,))
+    return _decode_rca_case(row) if row else None
+
+
+def create_rca_case(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    case_id = payload.get("id") or _next_rca_case_id()
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO rca_cases (
+                id,
+                equipment_id,
+                work_order_id,
+                title,
+                status,
+                severity,
+                problem_statement,
+                symptoms,
+                hypotheses,
+                why_chain,
+                fishbone,
+                evidence_timeline,
+                corrective_actions,
+                closure_review,
+                probable_cause,
+                confidence,
+                missing_checks,
+                morpheus_summary,
+                used_live_provider,
+                provider,
+                closed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                payload["equipment_id"],
+                payload.get("work_order_id"),
+                payload["title"],
+                payload.get("status") or "open",
+                payload.get("severity") or "medium",
+                payload["problem_statement"],
+                _json_dump_any(payload.get("symptoms", [])),
+                _json_dump_any(payload.get("hypotheses", [])),
+                _json_dump_any(payload.get("why_chain", [])),
+                _json_dump_any(payload.get("fishbone", {})),
+                _json_dump_any(payload.get("evidence_timeline", [])),
+                _json_dump_any(payload.get("corrective_actions", [])),
+                _json_dump_any(payload.get("closure_review")) if payload.get("closure_review") is not None else None,
+                payload.get("probable_cause"),
+                float(payload.get("confidence") or 0),
+                _json_dump_any(payload.get("missing_checks", [])),
+                payload.get("morpheus_summary"),
+                1 if payload.get("used_live_provider") else 0,
+                payload.get("provider") or "mock",
+                payload.get("closed_at"),
+            ),
+        )
+    case = get_rca_case(case_id)
+    if not case:
+        raise RuntimeError("RCA case was not persisted")
+    return case
+
+
+def update_rca_case(case_id: str, payload: dict[str, Any]) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    if not get_rca_case(case_id):
+        return None
+    json_fields = {
+        "symptoms",
+        "hypotheses",
+        "why_chain",
+        "fishbone",
+        "evidence_timeline",
+        "corrective_actions",
+        "missing_checks",
+    }
+    text_fields = {
+        "title",
+        "status",
+        "severity",
+        "problem_statement",
+        "probable_cause",
+        "morpheus_summary",
+        "provider",
+        "closed_at",
+    }
+    fields: list[str] = []
+    values: list[Any] = []
+    for field in text_fields:
+        if field in payload and payload[field] is not None:
+            fields.append(f"{field} = ?")
+            values.append(payload[field])
+    for field in json_fields:
+        if field in payload and payload[field] is not None:
+            fields.append(f"{field} = ?")
+            values.append(_json_dump_any(payload[field]))
+    if "closure_review" in payload:
+        fields.append("closure_review = ?")
+        values.append(_json_dump_any(payload.get("closure_review")) if payload.get("closure_review") is not None else None)
+    if "confidence" in payload and payload["confidence"] is not None:
+        fields.append("confidence = ?")
+        values.append(float(payload["confidence"]))
+    if "used_live_provider" in payload and payload["used_live_provider"] is not None:
+        fields.append("used_live_provider = ?")
+        values.append(1 if payload["used_live_provider"] else 0)
+    if payload.get("status") == "closed" and "closed_at" not in payload:
+        fields.append("closed_at = CURRENT_TIMESTAMP")
+    if not fields:
+        return get_rca_case(case_id)
+    fields.append("updated_at = CURRENT_TIMESTAMP")
+    values.append(case_id)
+    with connect() as connection:
+        connection.execute(f"UPDATE rca_cases SET {', '.join(fields)} WHERE id = ?", values)
+    return get_rca_case(case_id)
+
+
 def _replace_work_order_spares(
     connection: sqlite3.Connection,
     work_order_id: str,
@@ -2067,6 +2215,21 @@ def _decode_work_order_spare(row: dict[str, Any]) -> dict[str, Any]:
     return decoded
 
 
+def _decode_rca_case(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["symptoms"] = _json_load_any(decoded.get("symptoms")) or []
+    decoded["hypotheses"] = _json_load_any(decoded.get("hypotheses")) or []
+    decoded["why_chain"] = _json_load_any(decoded.get("why_chain")) or []
+    decoded["fishbone"] = _json_load_dict(decoded.get("fishbone"))
+    decoded["evidence_timeline"] = _json_load_any(decoded.get("evidence_timeline")) or []
+    decoded["corrective_actions"] = _json_load_any(decoded.get("corrective_actions")) or []
+    decoded["closure_review"] = _json_load_any(decoded.get("closure_review"))
+    decoded["confidence"] = float(decoded.get("confidence") or 0)
+    decoded["missing_checks"] = _json_load_any(decoded.get("missing_checks")) or []
+    decoded["used_live_provider"] = bool(decoded.get("used_live_provider"))
+    return decoded
+
+
 def _next_work_order_id() -> str:
     rows = _fetch_all("SELECT id FROM work_orders WHERE id LIKE 'WO-%'")
     numeric_ids: list[int] = []
@@ -2077,6 +2240,18 @@ def _next_work_order_id() -> str:
             continue
     next_number = max(numeric_ids, default=8300) + 1
     return f"WO-{next_number}"
+
+
+def _next_rca_case_id() -> str:
+    rows = _fetch_all("SELECT id FROM rca_cases WHERE id LIKE 'RCA-%'")
+    numeric_ids: list[int] = []
+    for row in rows:
+        try:
+            numeric_ids.append(int(str(row["id"]).split("-", 1)[1]))
+        except (IndexError, ValueError):
+            continue
+    next_number = max(numeric_ids, default=9000) + 1
+    return f"RCA-{next_number}"
 
 
 def _fetch_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
