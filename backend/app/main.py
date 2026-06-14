@@ -60,6 +60,10 @@ from app.models.schemas import (
     NeoChatRequest,
     NeoChatResponse,
     PasswordResetRequest,
+    PmPlan,
+    PmPlanDraftRequest,
+    PmPlanDraftResponse,
+    PmTemplate,
     PredictionRequest,
     RagEmbeddingProfile,
     RagEmbeddingProfileCreateRequest,
@@ -116,11 +120,18 @@ from app.services.learning import (
 from app.services.vector_store import vector_store_status
 from app.services.maintenance_labeling import label_feedback, label_maintenance_event, label_maintenance_history, stored_labels
 from app.services.neo_assistant import neo_assistance, neo_welcome, stream_neo_assistance
+from app.services.pm_plans import PM_PLAN_ROLES
+from app.services.pm_plans import convert_plan_to_work_order as convert_pm_plan_to_work_order
+from app.services.pm_plans import draft_plan as draft_pm_plan
+from app.services.pm_plans import list_plans as list_pm_plan_records
+from app.services.pm_plans import list_templates as list_pm_template_records
+from app.services.pm_plans import stream_draft_plan as stream_pm_plan_draft
 from app.services.recommendations import generate_recommendation, stream_recommendation
 from app.services.rca import create_case as create_rca_case_record
 from app.services.rca import draft_case as draft_rca_case_record
 from app.services.rca import get_case as get_rca_case_record
 from app.services.rca import list_cases as list_rca_case_records
+from app.services.rca import stream_draft_case as stream_rca_draft_case_record
 from app.services.rca import update_case as update_rca_case_record
 from app.services.document_parser import parse_upload_to_document
 from app.services.reports import recommendation_to_markdown
@@ -446,6 +457,68 @@ def list_work_order_planning_board(
         planning_status=planning_status,
         open_only=True,
     )
+
+
+@app.get(
+    "/api/pm-templates",
+    response_model=list[PmTemplate],
+    dependencies=[Depends(require_roles(*PM_PLAN_ROLES))],
+)
+def list_pm_templates(equipment_id: Optional[str] = None):
+    return list_pm_template_records(equipment_id)
+
+
+@app.get(
+    "/api/pm-plans",
+    response_model=list[PmPlan],
+    dependencies=[Depends(require_roles(*PM_PLAN_ROLES))],
+)
+def list_pm_plans(equipment_id: Optional[str] = None, status: Optional[str] = None):
+    return list_pm_plan_records(equipment_id=equipment_id, status=status)
+
+
+@app.post(
+    "/api/pm-plans/morpheus-draft",
+    response_model=PmPlanDraftResponse,
+)
+def morpheus_draft_pm_plan(
+    request: PmPlanDraftRequest,
+    current_user: UserPublic = Depends(require_roles(*PM_PLAN_ROLES)),
+):
+    return draft_pm_plan(request, current_user)
+
+
+@app.post("/api/pm-plans/morpheus-draft/stream")
+def morpheus_draft_pm_plan_stream(
+    request: PmPlanDraftRequest,
+    current_user: UserPublic = Depends(require_roles(*PM_PLAN_ROLES)),
+):
+    def events():
+        try:
+            for event in stream_pm_plan_draft(request, current_user):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Morpheus could not stream the PM draft: {exc}'})}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post(
+    "/api/pm-plans/{plan_id}/convert-work-order",
+    response_model=WorkOrder,
+)
+def convert_pm_plan(
+    plan_id: str,
+    current_user: UserPublic = Depends(require_roles(*PM_PLAN_ROLES)),
+):
+    return convert_pm_plan_to_work_order(plan_id, current_user)
 
 
 @app.get("/api/work-orders/{work_order_id}", response_model=WorkOrder, dependencies=[Depends(require_roles(*READ_ROLES))])
@@ -825,6 +898,28 @@ def draft_rca_case(
     current_user: UserPublic = Depends(require_roles(*RCA_WORKSPACE_ROLES)),
 ):
     return draft_rca_case_record(request, current_user)
+
+
+@app.post("/api/rca-cases/morpheus-draft/stream")
+def draft_rca_case_stream(
+    request: RcaMorpheusDraftRequest,
+    current_user: UserPublic = Depends(require_roles(*RCA_WORKSPACE_ROLES)),
+):
+    def events():
+        try:
+            for event in stream_rca_draft_case_record(request, current_user):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Morpheus could not stream the RCA draft: {exc}'})}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get(

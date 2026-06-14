@@ -6,6 +6,8 @@ import {
   SearchCheck,
   Sparkles,
 } from 'lucide-react'
+import { useEffect, useRef } from 'react'
+import { FormattedAssistantContent } from '../assistantContent'
 import type { RcaCase, WorkOrder } from '../services/api'
 import { formatDate, metricValue } from '../appModel'
 import { workOrderStatusLabel } from '../workOrderStatus'
@@ -15,6 +17,8 @@ export function RcaWorkspace({
   createRcaCase,
   draftRcaCase,
   rcaCases,
+  rcaDraftCaseId,
+  rcaDraftStreamText,
   rcaLoading,
   rcaMessage,
   selectedRcaCaseId,
@@ -27,6 +31,8 @@ export function RcaWorkspace({
   createRcaCase: () => void
   draftRcaCase: (caseId?: string) => void
   rcaCases: RcaCase[]
+  rcaDraftCaseId: string
+  rcaDraftStreamText: string
   rcaLoading: boolean
   rcaMessage: string
   selectedRcaCaseId: string
@@ -44,6 +50,16 @@ export function RcaWorkspace({
   const visibleFishboneEntries: [string, string[]][] = fishboneEntries.length
     ? fishboneEntries
     : [['Pending', ['Run Morpheus draft to populate fishbone causes.']]]
+  const liveFishboneText = selectedCase?.id === rcaDraftCaseId
+    ? extractMarkdownSection(rcaDraftStreamText, 'Fishbone')
+    : ''
+  const morpheusFishboneText = liveFishboneText || selectedCase?.morpheus_fishbone_text || ''
+  const streamEndRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!rcaDraftStreamText) return
+    streamEndRef.current?.scrollIntoView({ block: 'end' })
+  }, [rcaDraftStreamText])
 
   return (
     <section className="rcaWorkspace" aria-label="RCA workspace">
@@ -87,6 +103,20 @@ export function RcaWorkspace({
         </button>
       </div>
       {rcaMessage && <p className="inlineStatus">{rcaMessage}</p>}
+      {(rcaLoading || rcaDraftStreamText) && (
+        <article className="dataPanel rcaDraftStream" aria-label="Morpheus RCA draft stream">
+          <div className="miniHeader">
+            <Sparkles size={16} />
+            <h3>Morpheus live draft</h3>
+          </div>
+          <div className="rcaDraftStreamViewport">
+            {rcaDraftStreamText
+              ? <FormattedAssistantContent content={rcaDraftStreamText} />
+              : <p className="emptyState">Morpheus is opening the RCA draft stream...</p>}
+            <div ref={streamEndRef} aria-hidden="true" />
+          </div>
+        </article>
+      )}
       {selectedCase ? (
         <div className="rcaCaseGrid">
           <article className="dataPanel rcaCaseSummary">
@@ -182,12 +212,18 @@ export function RcaWorkspace({
               <h3>Fishbone</h3>
             </div>
             <div className="fishboneGrid">
-              {visibleFishboneEntries.map(([category, items]) => (
-                <div className="fishboneCategory" key={category}>
-                  <strong>{category}</strong>
-                  <span>{items.join(' · ')}</span>
+              {morpheusFishboneText ? (
+                <div className="fishboneCategory morpheusFishboneCategory">
+                  <FormattedAssistantContent content={morpheusFishboneText} />
                 </div>
-              ))}
+              ) : (
+                visibleFishboneEntries.map(([category, items]) => (
+                  <div className="fishboneCategory" key={category}>
+                    <strong>{category}</strong>
+                    <span>{items.join(' · ')}</span>
+                  </div>
+                ))
+              )}
             </div>
           </article>
           <article className="dataPanel">
@@ -229,4 +265,26 @@ export function RcaWorkspace({
       )}
     </section>
   )
+}
+
+function extractMarkdownSection(content: string, heading: string) {
+  const marker = heading.toLowerCase()
+  const lines = content.split(/\r?\n/)
+  const collected: string[] = []
+  let collecting = false
+  for (const line of lines) {
+    const stripped = line.trim()
+    const normalized = stripped.replace(/^#+\s*/, '').replace(/:$/, '').trim().toLowerCase()
+    if (normalized === marker) {
+      collecting = true
+      continue
+    }
+    if (collecting && stripped.startsWith('#')) {
+      break
+    }
+    if (collecting) {
+      collected.push(line)
+    }
+  }
+  return collected.join('\n').trim()
 }

@@ -399,11 +399,12 @@ def create_rca_case(payload: dict[str, Any]) -> dict[str, Any]:
                 confidence,
                 missing_checks,
                 morpheus_summary,
+                morpheus_fishbone_text,
                 used_live_provider,
                 provider,
                 closed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 case_id,
@@ -424,6 +425,7 @@ def create_rca_case(payload: dict[str, Any]) -> dict[str, Any]:
                 float(payload.get("confidence") or 0),
                 _json_dump_any(payload.get("missing_checks", [])),
                 payload.get("morpheus_summary"),
+                payload.get("morpheus_fishbone_text"),
                 1 if payload.get("used_live_provider") else 0,
                 payload.get("provider") or "mock",
                 payload.get("closed_at"),
@@ -455,6 +457,7 @@ def update_rca_case(case_id: str, payload: dict[str, Any]) -> Optional[dict[str,
         "problem_statement",
         "probable_cause",
         "morpheus_summary",
+        "morpheus_fishbone_text",
         "provider",
         "closed_at",
     }
@@ -486,6 +489,150 @@ def update_rca_case(case_id: str, payload: dict[str, Any]) -> Optional[dict[str,
     with connect() as connection:
         connection.execute(f"UPDATE rca_cases SET {', '.join(fields)} WHERE id = ?", values)
     return get_rca_case(case_id)
+
+
+def list_pm_templates(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
+    if equipment_id:
+        rows = _fetch_all(
+            """
+            SELECT * FROM pm_templates
+            WHERE equipment_id = ? OR equipment_id IS NULL
+            ORDER BY equipment_id DESC, title ASC
+            """,
+            (equipment_id,),
+        )
+    else:
+        rows = _fetch_all("SELECT * FROM pm_templates ORDER BY equipment_id ASC, title ASC")
+    return [_decode_pm_template(row) for row in rows]
+
+
+def get_pm_template(template_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM pm_templates WHERE id = ?", (template_id,))
+    return _decode_pm_template(row) if row else None
+
+
+def list_pm_plans(equipment_id: Optional[str] = None, status: Optional[str] = None, limit: int = 50) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if equipment_id:
+        clauses.append("equipment_id = ?")
+        params.append(equipment_id)
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    rows = _fetch_all(
+        f"""
+        SELECT * FROM pm_plans
+        {where_sql}
+        ORDER BY
+          CASE status WHEN 'draft' THEN 0 WHEN 'active' THEN 1 WHEN 'converted' THEN 2 ELSE 3 END,
+          next_due_date ASC,
+          updated_at DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    )
+    return [_decode_pm_plan(row) for row in rows]
+
+
+def get_pm_plan(plan_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM pm_plans WHERE id = ?", (plan_id,))
+    return _decode_pm_plan(row) if row else None
+
+
+def save_pm_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    plan_id = payload.get("id") or _next_pm_plan_id()
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO pm_plans (
+                id,
+                equipment_id,
+                template_id,
+                title,
+                status,
+                cadence_days,
+                next_due_date,
+                trigger,
+                thresholds,
+                tasks,
+                smith_steps,
+                spares_strategy,
+                evidence,
+                adjustment_notes,
+                source,
+                generated_by,
+                used_live_provider,
+                provider,
+                converted_work_order_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                equipment_id=excluded.equipment_id,
+                template_id=excluded.template_id,
+                title=excluded.title,
+                status=excluded.status,
+                cadence_days=excluded.cadence_days,
+                next_due_date=excluded.next_due_date,
+                trigger=excluded.trigger,
+                thresholds=excluded.thresholds,
+                tasks=excluded.tasks,
+                smith_steps=excluded.smith_steps,
+                spares_strategy=excluded.spares_strategy,
+                evidence=excluded.evidence,
+                adjustment_notes=excluded.adjustment_notes,
+                source=excluded.source,
+                generated_by=excluded.generated_by,
+                used_live_provider=excluded.used_live_provider,
+                provider=excluded.provider,
+                converted_work_order_id=excluded.converted_work_order_id,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                plan_id,
+                payload["equipment_id"],
+                payload.get("template_id"),
+                payload["title"],
+                payload.get("status") or "draft",
+                int(payload.get("cadence_days") or 30),
+                payload["next_due_date"],
+                _json_dump_any(payload.get("trigger", {})),
+                _json_dump_any(payload.get("thresholds", [])),
+                _json_dump_any(payload.get("tasks", [])),
+                _json_dump_any(payload.get("smith_steps", [])),
+                _json_dump_any(payload.get("spares_strategy", [])),
+                _json_dump_any(payload.get("evidence", [])),
+                _json_dump_any(payload.get("adjustment_notes", [])),
+                payload.get("source") or "deterministic",
+                payload.get("generated_by") or "morpheus",
+                1 if payload.get("used_live_provider") else 0,
+                payload.get("provider") or "mock",
+                payload.get("converted_work_order_id"),
+            ),
+        )
+    plan = get_pm_plan(plan_id)
+    if not plan:
+        raise RuntimeError("PM plan was not persisted")
+    return plan
+
+
+def mark_pm_plan_converted(plan_id: str, work_order_id: str) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE pm_plans
+            SET status = 'converted',
+                converted_work_order_id = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (work_order_id, plan_id),
+        )
+    return get_pm_plan(plan_id)
 
 
 def _replace_work_order_spares(
@@ -2230,6 +2377,28 @@ def _decode_rca_case(row: dict[str, Any]) -> dict[str, Any]:
     return decoded
 
 
+def _decode_pm_template(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["cadence_days"] = int(decoded.get("cadence_days") or 30)
+    decoded["task_list"] = _json_load_any(decoded.get("task_list")) or []
+    decoded["thresholds"] = _json_load_any(decoded.get("thresholds")) or []
+    return decoded
+
+
+def _decode_pm_plan(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["cadence_days"] = int(decoded.get("cadence_days") or 30)
+    decoded["trigger"] = _json_load_dict(decoded.get("trigger"))
+    decoded["thresholds"] = _json_load_any(decoded.get("thresholds")) or []
+    decoded["tasks"] = _json_load_any(decoded.get("tasks")) or []
+    decoded["smith_steps"] = _json_load_any(decoded.get("smith_steps")) or []
+    decoded["spares_strategy"] = _json_load_any(decoded.get("spares_strategy")) or []
+    decoded["evidence"] = _json_load_any(decoded.get("evidence")) or []
+    decoded["adjustment_notes"] = _json_load_any(decoded.get("adjustment_notes")) or []
+    decoded["used_live_provider"] = bool(decoded.get("used_live_provider"))
+    return decoded
+
+
 def _next_work_order_id() -> str:
     rows = _fetch_all("SELECT id FROM work_orders WHERE id LIKE 'WO-%'")
     numeric_ids: list[int] = []
@@ -2252,6 +2421,18 @@ def _next_rca_case_id() -> str:
             continue
     next_number = max(numeric_ids, default=9000) + 1
     return f"RCA-{next_number}"
+
+
+def _next_pm_plan_id() -> str:
+    rows = _fetch_all("SELECT id FROM pm_plans WHERE id LIKE 'PM-%'")
+    numeric_ids: list[int] = []
+    for row in rows:
+        try:
+            numeric_ids.append(int(str(row["id"]).split("-", 1)[1]))
+        except (IndexError, ValueError):
+            continue
+    next_number = max(numeric_ids, default=7000) + 1
+    return f"PM-{next_number}"
 
 
 def _fetch_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:

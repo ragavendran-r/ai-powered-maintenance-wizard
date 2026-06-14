@@ -1,7 +1,8 @@
 import httpx
 
 from app.models.schemas import DocumentIntelligence
-from app.services.llm import LLMTextResponse, MockLLMClient, OpenAIClient, OllamaClient
+from app.services.rca import _draft_with_streaming
+from app.services.llm import LLMContext, LLMTextResponse, MockLLMClient, OpenAIClient, OllamaClient
 
 
 def test_mock_llm_returns_valid_context():
@@ -48,6 +49,70 @@ def test_openai_client_parses_structured_response(monkeypatch):
     assert captured_request["response_format"]["type"] == "json_schema"
     assert captured_request["response_format"]["json_schema"]["name"] == "LLMContext"
     assert "summary" in captured_request["response_format"]["json_schema"]["schema"]["properties"]
+
+
+def test_openai_structured_completion_supports_call_overrides(monkeypatch):
+    captured_request = {}
+    captured_timeout = {}
+
+    def fake_post(*args, **kwargs):
+        captured_request.update(kwargs["json"])
+        captured_timeout["timeout"] = kwargs["timeout"]
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://example.test/v1/chat/completions"),
+            json={"choices": [{"message": {"content": '{"summary":"RCA drafted."}'}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    context = OpenAIClient("test-key", "test-model", "https://example.test/v1", 2.0).complete_model(
+        "prompt",
+        LLMContext,
+        "Return JSON only.",
+        lambda provider, reason: LLMContext(summary=reason, provider=provider),
+        max_tokens=700,
+        timeout_seconds=45,
+        response_format="json_object",
+    )
+
+    assert context.used_live_provider is True
+    assert context.provider == "openai"
+    assert captured_request["max_tokens"] == 700
+    assert captured_request["response_format"] == {"type": "json_object"}
+    assert captured_timeout["timeout"] == 45
+
+
+def test_rca_streaming_draft_accumulates_and_validates_json():
+    captured = {}
+
+    class FakeStreamingClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            captured["prompt"] = prompt
+            captured["system_prompt"] = system_prompt
+            captured["max_tokens"] = max_tokens
+            yield LLMTextResponse(
+                content='{"summary":"Streamed RCA draft.", "probable_cause":"Bearing looseness", ',
+                used_live_provider=True,
+                provider="openai",
+            )
+            yield LLMTextResponse(
+                content='"confidence":0.72, "hypotheses":[{"cause":"Bearing looseness","confidence":0.72}], "missing_checks":["Verify alignment"]}',
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    draft = _draft_with_streaming(FakeStreamingClient(), {"symptoms": []}, "prompt", 700)
+
+    assert captured["max_tokens"] == 700
+    assert "Return JSON only" in captured["system_prompt"]
+    assert draft.used_live_provider is True
+    assert draft.provider == "openai"
+    assert draft.probable_cause == "Bearing looseness"
+    assert draft.hypotheses[0].cause == "Bearing looseness"
 
 
 def test_openai_text_completion_respects_local_token_cap(monkeypatch):

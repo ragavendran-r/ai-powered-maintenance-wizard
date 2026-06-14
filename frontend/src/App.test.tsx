@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PredictionResponse, type Recommendation, type UserRole, type WorkOrder } from './services/api'
+import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PmPlan, type PmPlanDraftResponse, type PmPlanDraftStreamEvent, type PmTemplate, type PredictionResponse, type RcaMorpheusDraftResponse, type RcaMorpheusDraftStreamEvent, type Recommendation, type UserRole, type WorkOrder } from './services/api'
 import { StatusTimeline, TechnicianExecutionCard } from './sharedComponents'
 
 const sampleFiles = [
@@ -123,6 +123,39 @@ function diagnosisStreamResponse(nextRecommendation: Recommendation) {
     { type: 'token', content: 'Morpheus is retrieving recent evidence and asset health context.' },
     { type: 'token', content: 'Morpheus is checking predictive risk and retrieved maintenance knowledge.' },
     { type: 'done', recommendation: nextRecommendation },
+  ]
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
+
+function rcaDraftStreamResponse(response: RcaMorpheusDraftResponse) {
+  const events: RcaMorpheusDraftStreamEvent[] = [
+    { type: 'meta', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '### Probable Cause\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '- Drive-end bearing looseness remains the leading candidate.\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '### Fishbone\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '- Contaminants/Buildup:\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '- Seal flush strainer restriction (Primary cause)\n', provider: 'openai', used_live_provider: true },
+    { type: 'done', response },
+  ]
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
+
+function pmDraftStreamResponse(response: PmPlanDraftResponse) {
+  const events: PmPlanDraftStreamEvent[] = [
+    { type: 'meta', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '### PM Plan\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'Main drive proactive PM plan\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '### Monitoring Thresholds\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '- drive_end_vibration >= 7.1 mm/s\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '### Generated Task List\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '- Inspect bearing condition and coupling alignment.\n', provider: 'openai', used_live_provider: true },
+    { type: 'done', response },
   ]
   return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
     status: 200,
@@ -421,6 +454,64 @@ const workOrders = [
 ]
 
 let apiWorkOrders: WorkOrder[] = workOrders as WorkOrder[]
+
+const pmTemplates: PmTemplate[] = [
+  {
+    id: 'PMT-RM-DRIVE-BEARING',
+    equipment_id: 'RM-DRIVE-01',
+    title: 'Drive bearing and coupling health PM',
+    description: 'Recurring vibration, temperature, lubrication, and coupling inspection.',
+    cadence_days: 14,
+    work_type: 'PM',
+    task_list: ['Trend drive-end vibration.', 'Inspect coupling alignment.'],
+    thresholds: ['drive_end_vibration >= 7.1 mm/s'],
+    source: 'sop',
+    created_at: '2026-06-14T09:00:00+05:30',
+    updated_at: '2026-06-14T09:00:00+05:30',
+  },
+]
+
+const generatedPmPlan: PmPlan = {
+  id: 'PM-7001',
+  equipment_id: 'RM-DRIVE-01',
+  template_id: 'PMT-RM-DRIVE-BEARING',
+  title: 'Main drive proactive PM plan',
+  status: 'draft',
+  cadence_days: 14,
+  next_due_date: '2026-06-18T08:00:00+05:30',
+  trigger: {
+    type: 'risk_prediction',
+    metric_key: 'drive_end_vibration',
+    operator: '>=',
+    threshold: 7.1,
+    unit: 'mm/s',
+    description: 'Generate planned PM when vibration risk remains high or crosses 7.1 mm/s.',
+  },
+  thresholds: ['drive_end_vibration >= 7.1 mm/s'],
+  tasks: [
+    {
+      id: 'TASK-1',
+      sequence: 1,
+      task: 'Inspect drive-end bearing housing and coupling alignment.',
+      owner_role: 'Maintenance Technician',
+      estimated_minutes: 45,
+      safety_note: 'Apply LOTO before inspection.',
+    },
+  ],
+  smith_steps: ['Confirm LOTO and permits.', 'Inspect drive-end bearing housing and coupling alignment.'],
+  spares_strategy: ['Check Drive end spherical roller bearing availability.'],
+  evidence: recommendation.evidence,
+  adjustment_notes: ['Adjust cadence using accepted feedback after repeated vibration findings.'],
+  source: 'deterministic',
+  generated_by: 'morpheus',
+  used_live_provider: false,
+  provider: 'mock',
+  converted_work_order_id: null,
+  created_at: '2026-06-14T09:05:00+05:30',
+  updated_at: '2026-06-14T09:05:00+05:30',
+}
+
+let apiPmPlans: PmPlan[] = []
 
 const rcaCase = {
   id: 'RCA-9001',
@@ -1085,6 +1176,7 @@ beforeEach(() => {
   neoResponseDelayMs = 0
   assistantResponseDelayMs = 0
   apiWorkOrders = workOrders as WorkOrder[]
+  apiPmPlans = []
   learningDeploymentResponses = [learningDeployment]
   learningArtifactCleanupRequests = []
   window.sessionStorage.clear()
@@ -1161,6 +1253,20 @@ beforeEach(() => {
         }
         return Promise.resolve(new Response(JSON.stringify([rcaCase]), { status: 200 }))
       }
+      if (url.endsWith('/api/rca-cases/morpheus-draft/stream')) {
+        return Promise.resolve(
+          rcaDraftStreamResponse({
+            case: {
+              ...rcaCase,
+              confidence: 0.74,
+              morpheus_summary: 'Morpheus drafted RCA hypotheses, missing checks, and corrective actions from RAG evidence.',
+              morpheus_fishbone_text: '- Contaminants/Buildup:\n- Seal flush strainer restriction (Primary cause)',
+            },
+            evidence: recommendation.evidence,
+            message: 'Morpheus drafted RCA hypotheses, evidence, missing checks, and corrective actions.',
+          }),
+        )
+      }
       if (url.endsWith('/api/rca-cases/morpheus-draft')) {
         return Promise.resolve(
           new Response(
@@ -1169,6 +1275,7 @@ beforeEach(() => {
                 ...rcaCase,
                 confidence: 0.74,
                 morpheus_summary: 'Morpheus drafted RCA hypotheses, missing checks, and corrective actions from RAG evidence.',
+                morpheus_fishbone_text: '- Contaminants/Buildup:\n- Seal flush strainer restriction (Primary cause)',
               },
               evidence: recommendation.evidence,
               message: 'Morpheus drafted RCA hypotheses, evidence, missing checks, and corrective actions.',
@@ -1619,6 +1726,53 @@ beforeEach(() => {
           ),
         )
       }
+      if (url.includes('/api/pm-templates')) {
+        return Promise.resolve(new Response(JSON.stringify(pmTemplates), { status: 200 }))
+      }
+      if (url.endsWith('/api/pm-plans/morpheus-draft/stream')) {
+        apiPmPlans = [generatedPmPlan, ...apiPmPlans.filter((plan) => plan.id !== generatedPmPlan.id)]
+        return Promise.resolve(
+          pmDraftStreamResponse({
+            plan: generatedPmPlan,
+            templates: pmTemplates,
+            message: 'Morpheus drafted PM plan PM-7001 and Smith generated technician-ready steps.',
+          }),
+        )
+      }
+      if (url.endsWith('/api/pm-plans/morpheus-draft')) {
+        apiPmPlans = [generatedPmPlan, ...apiPmPlans.filter((plan) => plan.id !== generatedPmPlan.id)]
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              plan: generatedPmPlan,
+              templates: pmTemplates,
+              message: 'Morpheus drafted PM plan PM-7001 and Smith generated technician-ready steps.',
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (url.includes('/api/pm-plans/') && url.endsWith('/convert-work-order')) {
+        const planId = url.match(/\/api\/pm-plans\/([^/?]+)\/convert-work-order/)?.[1] ?? 'PM-7001'
+        const created = {
+          ...workOrders[0],
+          id: 'WO-9100',
+          equipment_id: 'RM-DRIVE-01',
+          title: 'PM: Main drive proactive PM plan',
+          work_type: 'PM',
+          planning_status: 'planned',
+          recommended_action: generatedPmPlan.tasks[0].task,
+          ai_summary: `Generated from PM plan ${planId}.`,
+        } as WorkOrder
+        apiWorkOrders = [created, ...apiWorkOrders.filter((order) => order.id !== created.id)]
+        apiPmPlans = apiPmPlans.map((plan) => (
+          plan.id === planId ? { ...plan, status: 'converted', converted_work_order_id: created.id } : plan
+        ))
+        return Promise.resolve(new Response(JSON.stringify(created), { status: 200 }))
+      }
+      if (url.includes('/api/pm-plans')) {
+        return Promise.resolve(new Response(JSON.stringify(apiPmPlans), { status: 200 }))
+      }
       if (url.includes('/api/work-orders')) {
         if (init?.method === 'POST') {
           const body = JSON.parse((init.body as string) ?? '{}')
@@ -2034,6 +2188,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.queryByLabelText('Assign WO-8297')).not.toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'Planning' }))
     expect(await screen.findByText('Planning backlog')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Work order right pane')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approve WO-8297' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve WO-8275' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Approve WO-8297' }))
@@ -2060,6 +2215,20 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Planning' }))
     const centerPane = screen.getByLabelText('Work order center pane')
+    expect(screen.queryByLabelText('Work order right pane')).not.toBeInTheDocument()
+    const pmPanel = await within(centerPane).findByLabelText('Preventive maintenance planning')
+    expect(within(pmPanel).getByRole('heading', { name: 'Preventive Maintenance Plans' })).toBeInTheDocument()
+    expect(within(pmPanel).getAllByText('Drive bearing and coupling health PM').length).toBeGreaterThanOrEqual(1)
+    fireEvent.click(within(pmPanel).getByRole('button', { name: /Morpheus PM draft/i }))
+    expect(await within(pmPanel).findByRole('heading', { name: 'Morpheus PM live draft' })).toBeInTheDocument()
+    expect(await within(pmPanel).findByText('Monitoring Thresholds')).toBeInTheDocument()
+    expect((await within(pmPanel).findAllByText('Main drive proactive PM plan')).length).toBeGreaterThanOrEqual(2)
+    expect(within(pmPanel).getAllByText('drive_end_vibration >= 7.1 mm/s').length).toBeGreaterThanOrEqual(2)
+    expect(within(pmPanel).getByText('Confirm LOTO and permits.')).toBeInTheDocument()
+    fireEvent.click(within(pmPanel).getByRole('button', { name: 'Convert to planned work' }))
+    await within(pmPanel).findByText('Created WO-9100')
+    expect(await screen.findByText('Converted PM-7001 to planned work order WO-9100')).toBeInTheDocument()
+
     const dispatchBoard = await within(centerPane).findByLabelText('Maintenance planning and dispatch board')
     expect(within(dispatchBoard).getByRole('heading', { name: 'Planning, Scheduling & Dispatch' })).toBeInTheDocument()
     expect(within(centerPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
@@ -2287,6 +2456,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('lets reviewers score and export LLM-as-a-Judge learning examples', async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+
     render(<App />)
     await signIn('reliability@plant.local')
 
@@ -2300,6 +2472,10 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Evidence Timeline')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Learning and Tuning' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Morpheus draft' }))
+    expect(await screen.findByRole('heading', { name: 'Morpheus live draft' })).toBeInTheDocument()
+    expect(await screen.findByText('Drive-end bearing looseness remains the leading candidate.')).toBeInTheDocument()
+    expect(await screen.findAllByText('Seal flush strainer restriction (Primary cause)')).toHaveLength(2)
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'end' }))
     expect(
       await screen.findByText('Morpheus drafted RCA hypotheses, evidence, missing checks, and corrective actions. Provider: live openai.'),
     ).toBeInTheDocument()

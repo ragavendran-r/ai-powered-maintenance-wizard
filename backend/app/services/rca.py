@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from collections.abc import Iterator
 from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+from app.core.config import get_settings
 from app.data import repository
 from app.models.schemas import (
     Evidence,
@@ -18,6 +21,7 @@ from app.models.schemas import (
 )
 from app.services.ai_client import configured_llm_client
 from app.services.learning import record_assistant_interaction
+from app.services.llm import LLMClient, LLMTextResponse
 from app.services.retrieval import retrieve_evidence
 from app.services.vector_store import sync_learning_examples_index
 
@@ -45,6 +49,7 @@ class _RcaLlmDraft(BaseModel):
     fishbone: dict[str, list[str]] = Field(default_factory=dict)
     corrective_actions: list[_RcaCorrectiveActionDraft] = Field(default_factory=list)
     missing_checks: list[str] = Field(default_factory=list)
+    morpheus_fishbone_text: Optional[str] = None
     used_live_provider: bool = False
     provider: str = "mock"
 
@@ -112,13 +117,71 @@ def update_case(case_id: str, request: RcaCaseUpdateRequest, current_user: UserP
 def draft_case(request: RcaMorpheusDraftRequest, current_user: UserPublic) -> RcaMorpheusDraftResponse:
     context = _resolve_context(request)
     llm = configured_llm_client()
+    settings = get_settings()
     prompt = _build_prompt(context)
-    draft = llm.complete_model(
+    if settings.llm_rca_draft_stream_enabled and llm.provider_name in {"openai", "ollama"}:
+        draft = _draft_with_streaming(llm, context, prompt, settings.llm_rca_draft_max_tokens)
+    else:
+        draft = llm.complete_model(
+            prompt,
+            _RcaLlmDraft,
+            _system_prompt(),
+            lambda provider, reason: _fallback_draft(context, provider, reason),
+            max_tokens=settings.llm_rca_draft_max_tokens,
+            timeout_seconds=settings.llm_rca_draft_timeout_seconds,
+            response_format=settings.llm_rca_draft_response_format,
+        )
+    return _store_draft_response(context, request, current_user, prompt, draft)
+
+
+def stream_draft_case(request: RcaMorpheusDraftRequest, current_user: UserPublic) -> Iterator[dict[str, Any]]:
+    context = _resolve_context(request)
+    llm = configured_llm_client()
+    settings = get_settings()
+    prompt = _build_prompt(context)
+    yield {"type": "meta", "provider": llm.provider_name, "used_live_provider": llm.provider_name in {"openai", "ollama"}}
+    if not settings.llm_rca_draft_stream_enabled or llm.provider_name not in {"openai", "ollama"}:
+        response = draft_case(request, current_user)
+        yield {"type": "done", "response": response.model_dump(mode="json")}
+        return
+
+    chunks: list[str] = []
+    provider = llm.provider_name
+    used_live_provider = True
+    for chunk in llm.stream_text(
         prompt,
-        _RcaLlmDraft,
-        _system_prompt(),
-        lambda provider, reason: _fallback_draft(context, provider, reason),
-    )
+        _stream_system_prompt(),
+        lambda provider, reason: LLMTextResponse(content=reason, provider=provider),
+        max_tokens=settings.llm_rca_draft_max_tokens,
+    ):
+        provider = chunk.provider
+        used_live_provider = chunk.used_live_provider
+        if not chunk.used_live_provider:
+            fallback = _fallback_draft(context, provider, chunk.content)
+            response = _store_draft_response(context, request, current_user, prompt, fallback)
+            yield {"type": "token", "content": fallback.summary, "provider": provider, "used_live_provider": False}
+            yield {"type": "done", "response": response.model_dump(mode="json")}
+            return
+        chunks.append(chunk.content)
+        yield {"type": "token", "content": chunk.content, "provider": provider, "used_live_provider": True}
+
+    streamed_answer = "".join(chunks).strip()
+    if streamed_answer:
+        draft = _draft_from_streamed_answer(context, streamed_answer, provider, used_live_provider)
+    else:
+        draft = _fallback_draft(context, provider, "stream returned no content")
+        yield {"type": "token", "content": draft.summary, "provider": provider, "used_live_provider": False}
+    response = _store_draft_response(context, request, current_user, prompt, draft)
+    yield {"type": "done", "response": response.model_dump(mode="json")}
+
+
+def _store_draft_response(
+    context: dict[str, Any],
+    request: RcaMorpheusDraftRequest,
+    current_user: UserPublic,
+    prompt: str,
+    draft: _RcaLlmDraft,
+) -> RcaMorpheusDraftResponse:
     update_payload = _case_update_from_draft(context, draft)
     if context["case"]:
         case = repository.update_rca_case(context["case"]["id"], update_payload)
@@ -257,6 +320,7 @@ def _case_update_from_draft(context: dict[str, Any], draft: _RcaLlmDraft) -> dic
         "confidence": draft.confidence,
         "missing_checks": draft.missing_checks[:8],
         "morpheus_summary": draft.summary,
+        "morpheus_fishbone_text": draft.morpheus_fishbone_text,
         "used_live_provider": draft.used_live_provider,
         "provider": draft.provider,
     }
@@ -277,27 +341,33 @@ def _build_prompt(context: dict[str, Any]) -> str:
                 f"Recommended action: {work_order['recommended_action']}",
                 f"Material readiness: {work_order.get('material_readiness')}; blocker: {work_order.get('material_blocker_note') or 'none'}",
                 "Work order logs:",
-                *[f"- {log['created_at']} {log['entry_type']}: {log['content']}" for log in work_order.get("logs", [])[:6]],
+                *[
+                    f"- {log['created_at']} {log['entry_type']}: {_truncate(log['content'], 180)}"
+                    for log in work_order.get("logs", [])[:4]
+                ],
             ]
         )
     lines.extend(
         [
             "Alerts:",
-            *[f"- {alert['timestamp']} {alert['severity']} {alert['signal']}: {alert['message']}" for alert in context["alerts"]],
+            *[
+                f"- {alert['timestamp']} {alert['severity']} {alert['signal']}: {_truncate(alert['message'], 140)}"
+                for alert in context["alerts"][:4]
+            ],
             "Maintenance history:",
             *[
-                f"- {event['date']} {event['issue']}; root cause: {event['root_cause']}; action: {event['action']}"
-                for event in context["maintenance_events"]
+                f"- {event['date']} {_truncate(event['issue'], 120)}; root cause: {_truncate(event['root_cause'], 120)}; action: {_truncate(event['action'], 120)}"
+                for event in context["maintenance_events"][:4]
             ],
             "Retrieved RAG evidence:",
             *[
-                f"- {item.source_type} {item.source_id}: {item.title}; {item.excerpt}"
-                for item in context["evidence"]
+                f"- {item.source_type} {item.source_id}: {_truncate(item.title, 120)}; {_truncate(item.excerpt, 220)}"
+                for item in context["evidence"][:4]
             ],
             "Prior RCA cases:",
             *[
-                f"- {case['id']} {case['title']}; cause: {case.get('probable_cause') or 'open'}; status: {case['status']}"
-                for case in context["prior_cases"]
+                f"- {case['id']} {_truncate(case['title'], 120)}; cause: {_truncate(case.get('probable_cause') or 'open', 120)}; status: {case['status']}"
+                for case in context["prior_cases"][:3]
             ],
         ]
     )
@@ -313,7 +383,94 @@ def _system_prompt() -> str:
         "Return JSON only with summary, probable_cause, confidence, symptoms, hypotheses, "
         "why_chain, fishbone, corrective_actions, and missing_checks. Hypotheses must include "
         "confidence, evidence, and missing_checks. Avoid inventing closed facts; mark unknowns "
-        "as missing checks."
+        "as missing checks. Keep the draft compact: no more than 3 hypotheses, 4 why_chain "
+        "items, 4 fishbone categories, 4 corrective actions, and 6 missing checks."
+    )
+
+
+def _stream_system_prompt() -> str:
+    return (
+        "You are Morpheus, an RCA assistant for steel-plant maintenance engineers. Stream a concise, "
+        "readable RCA draft in Markdown, not JSON. Use only the supplied work-order logs, failure "
+        "history, alerts, SOP/manual evidence, and prior RCA cases. Use these sections: "
+        "### Probable Cause, ### Evidence, ### 5-Why, ### Fishbone, ### Corrective Actions, and "
+        "### Missing Checks. Use short bullets. Do not mention table names, row counts, JSON, schemas, "
+        "or backend fields. Avoid inventing closed facts; mark unknowns as missing checks."
+    )
+
+
+def _draft_with_streaming(llm: LLMClient, context: dict[str, Any], prompt: str, max_tokens: int) -> _RcaLlmDraft:
+    chunks: list[str] = []
+    provider = llm.provider_name
+    for chunk in llm.stream_text(
+        prompt,
+        _system_prompt(),
+        lambda provider, reason: LLMTextResponse(content=reason, provider=provider),
+        max_tokens=max_tokens,
+    ):
+        provider = chunk.provider
+        if not chunk.used_live_provider:
+            return _fallback_draft(context, provider, chunk.content)
+        chunks.append(chunk.content)
+    content = "".join(chunks).strip()
+    if not content:
+        return _fallback_draft(context, provider, "stream returned no content")
+    return _parse_streamed_draft(content, provider, context)
+
+
+def _parse_streamed_draft(content: str, provider: str, context: dict[str, Any]) -> _RcaLlmDraft:
+    try:
+        payload = json.loads(_extract_json_object(content))
+        draft = _RcaLlmDraft.model_validate(payload)
+        return draft.model_copy(update={"used_live_provider": True, "provider": provider})
+    except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
+        return _fallback_draft(context, provider, f"stream returned invalid JSON: {exc}")
+
+
+def _draft_from_streamed_answer(
+    context: dict[str, Any],
+    answer: str,
+    provider: str,
+    used_live_provider: bool,
+) -> _RcaLlmDraft:
+    probable = _extract_section_first_line(answer, "Probable Cause") or _fallback_probable_cause(context)
+    missing = _extract_section_bullets(answer, "Missing Checks") or _fallback_missing_checks(context)
+    corrective = _extract_section_bullets(answer, "Corrective Actions")[:4]
+    why_chain = _extract_section_bullets(answer, "5-Why")[:4]
+    evidence = _extract_section_bullets(answer, "Evidence")[:4] or [item.title for item in context["evidence"][:3]]
+    fishbone_text = _extract_section(answer, "Fishbone")
+    return _RcaLlmDraft(
+        summary=_clip(answer, 1800),
+        probable_cause=probable,
+        confidence=0.65 if used_live_provider else 0.55,
+        symptoms=context["symptoms"],
+        hypotheses=[
+            _RcaHypothesisDraft(
+                cause=probable,
+                confidence=0.65 if used_live_provider else 0.55,
+                evidence=evidence,
+                missing_checks=missing,
+            )
+        ],
+        why_chain=why_chain or [
+            "Why did the event occur? Morpheus identified abnormal operating evidence.",
+            "Why is the root cause not closed? Required verification checks are incomplete.",
+        ],
+        fishbone=_fallback_fishbone(context),
+        corrective_actions=[
+            _RcaCorrectiveActionDraft(action=item, verification="Reviewer verifies completion evidence before closure.")
+            for item in corrective
+        ]
+        or [
+            _RcaCorrectiveActionDraft(
+                action="Complete the missing checks identified in the live RCA draft.",
+                verification="Evidence timeline includes readings, inspection notes, and reviewer sign-off.",
+            )
+        ],
+        missing_checks=missing,
+        morpheus_fishbone_text=_clip(fishbone_text, 1200) if fishbone_text else None,
+        used_live_provider=used_live_provider,
+        provider=provider,
     )
 
 
@@ -537,6 +694,72 @@ def _clip(value: str, limit: int = 1800) -> str:
     if len(value) <= limit:
         return value
     return f"{value[:limit - 15].rstrip()}\n[truncated]"
+
+
+def _truncate(value: Any, limit: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3].rstrip()}..."
+
+
+def _extract_json_object(content: str) -> str:
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    if text.startswith("{"):
+        return text
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        return text[start : end + 1]
+    return text
+
+
+def _extract_section_bullets(content: str, heading: str) -> list[str]:
+    section = _extract_section(content, heading)
+    items: list[str] = []
+    for line in section.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("- ", "* ")):
+            items.append(stripped[2:].strip())
+            continue
+        numbered = stripped.split(". ", 1)
+        if len(numbered) == 2 and numbered[0].isdigit():
+            items.append(numbered[1].strip())
+    return [item for item in items if item]
+
+
+def _extract_section_first_line(content: str, heading: str) -> str:
+    section = _extract_section(content, heading)
+    for line in section.splitlines():
+        stripped = line.strip().strip("-* ")
+        if stripped:
+            return stripped
+    return ""
+
+
+def _extract_section(content: str, heading: str) -> str:
+    marker = heading.lower()
+    lines = content.splitlines()
+    collecting = False
+    collected: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        normalized = stripped.lstrip("#").strip().rstrip(":").lower()
+        if normalized == marker:
+            collecting = True
+            continue
+        if collecting and stripped.startswith("#"):
+            break
+        if collecting:
+            collected.append(line)
+    return "\n".join(collected).strip()
 
 
 def _now() -> str:
