@@ -90,10 +90,11 @@ def test_rca_streaming_draft_accumulates_and_validates_json():
         def provider_name(self):
             return "openai"
 
-        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
             captured["prompt"] = prompt
             captured["system_prompt"] = system_prompt
             captured["max_tokens"] = max_tokens
+            captured["timeout_seconds"] = timeout_seconds
             yield LLMTextResponse(
                 content='{"summary":"Streamed RCA draft.", "probable_cause":"Bearing looseness", ',
                 used_live_provider=True,
@@ -108,6 +109,7 @@ def test_rca_streaming_draft_accumulates_and_validates_json():
     draft = _draft_with_streaming(FakeStreamingClient(), {"symptoms": []}, "prompt", 700)
 
     assert captured["max_tokens"] == 700
+    assert captured["timeout_seconds"] is None
     assert "Return JSON only" in captured["system_prompt"]
     assert draft.used_live_provider is True
     assert draft.provider == "openai"
@@ -195,6 +197,52 @@ def test_openai_text_stream_uses_sse_and_token_cap(monkeypatch):
     assert captured_timeout["timeout"].connect == 2.0
     assert [chunk.content for chunk in chunks] == ["Use lockout/tagout ", "before inspection."]
     assert all(chunk.used_live_provider for chunk in chunks)
+
+
+def test_openai_text_stream_allows_per_call_timeout_override(monkeypatch):
+    captured_timeout = {}
+
+    class FakeStreamResponse:
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"Short bounded response."}}]}'
+            yield "data: [DONE]"
+
+    class FakeStream:
+        def __enter__(self):
+            return FakeStreamResponse()
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    def fake_stream(*args, **kwargs):
+        captured_timeout["timeout"] = kwargs["timeout"]
+        return FakeStream()
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    chunks = list(
+        OpenAIClient(
+            "test-key",
+            "test-model",
+            "https://example.test/v1",
+            15.0,
+            structured_max_tokens=300,
+            text_max_tokens=250,
+            stream_timeout_seconds=60.0,
+        ).stream_text(
+            "prompt",
+            "system",
+            lambda provider, reason: LLMTextResponse(content=reason, provider=provider),
+            max_tokens=250,
+            timeout_seconds=15.0,
+        )
+    )
+
+    assert captured_timeout["timeout"].read == 15.0
+    assert captured_timeout["timeout"].connect == 15.0
+    assert [chunk.content for chunk in chunks] == ["Short bounded response."]
 
 
 def test_openai_client_parses_generic_structured_response(monkeypatch):

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.data import repository
+from app.core.config import get_settings
 from app.models.schemas import Evidence, NeoAction, NeoChatRequest, NeoChatResponse, NeoTable, UserPublic, UserRole
 from app.services.ai_client import configured_llm_client
 from app.services.learning import learning_context_for_asset, record_assistant_interaction
@@ -110,6 +111,7 @@ def stream_neo_assistance(request: NeoChatRequest, current_user: UserPublic) -> 
             provider=fallback_provider,
         ),
         max_tokens=NEO_GENERAL_MAX_TOKENS,
+        timeout_seconds=get_settings().llm_timeout_seconds,
     ):
         provider = chunk.provider
         used_live_provider = chunk.used_live_provider

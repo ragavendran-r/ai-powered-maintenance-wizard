@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.config import get_settings
 from app.data import repository
 from app.models.schemas import (
     SupervisorAssistantRequest,
@@ -185,6 +186,7 @@ def stream_technician_assistance(
             provider=fallback_provider,
         ),
         max_tokens=_technician_stream_max_tokens(request),
+        timeout_seconds=get_settings().llm_timeout_seconds,
     ):
         provider = chunk.provider
         used_live_provider = chunk.used_live_provider
@@ -305,6 +307,7 @@ def stream_supervisor_assistance(
             provider=fallback_provider,
         ),
         max_tokens=WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS,
+        timeout_seconds=get_settings().llm_timeout_seconds,
     ):
         provider = chunk.provider
         used_live_provider = chunk.used_live_provider
