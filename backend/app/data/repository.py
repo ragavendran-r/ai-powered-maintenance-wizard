@@ -290,7 +290,7 @@ def update_work_order(work_order_id: str, payload: dict[str, Any]) -> Optional[d
         "ai_summary",
         "completion_summary",
     ):
-        if payload.get(field) is not None:
+        if field in payload:
             fields.append(f"{field} = ?")
             values.append(payload[field])
     if payload.get("follow_up_required") is not None:

@@ -720,6 +720,51 @@ def test_assigned_technician_can_start_when_material_blocker_is_resolved():
     assert started_response.json()["status"] == "INPRG"
 
 
+def test_planning_material_ready_clears_waiting_material_status_and_stale_spare_blockers():
+    planner_headers = auth_headers("planner@plant.local")
+
+    response = client.patch(
+        "/api/work-orders/WO-8304",
+        json={
+            "material_readiness": "ready",
+            "material_blocker_status": "reserved",
+            "material_blocker_note": None,
+        },
+        headers=planner_headers,
+    )
+
+    assert response.status_code == 200
+    work_order = response.json()
+    assert work_order["status"] == "APPR"
+    assert work_order["material_readiness"] == "ready"
+    assert work_order["material_blocker_status"] == "reserved"
+    assert work_order["material_blocker_note"] is None
+    assert work_order["spare_reservations"][0]["reserved_qty"] >= work_order["spare_reservations"][0]["required_qty"]
+    assert work_order["spare_reservations"][0]["blocker_status"] == "reserved"
+    assert work_order["spare_reservations"][0]["blocker_note"] is None
+
+
+def test_supervisor_can_resolve_material_and_move_waiting_material_order_to_in_progress():
+    supervisor_headers = auth_headers("supervisor@plant.local")
+
+    response = client.patch(
+        "/api/work-orders/WO-8304",
+        json={
+            "status": "INPRG",
+            "material_readiness": "ready",
+            "material_blocker_status": "reserved",
+            "material_blocker_note": None,
+        },
+        headers=supervisor_headers,
+    )
+
+    assert response.status_code == 200
+    work_order = response.json()
+    assert work_order["status"] == "INPRG"
+    assert work_order["material_readiness"] == "ready"
+    assert work_order["spare_reservations"][0]["blocker_status"] == "reserved"
+
+
 def test_technician_cannot_start_unassigned_work_order():
     response = client.patch(
         "/api/work-orders/WO-8311",
@@ -740,7 +785,7 @@ def test_only_waiting_approval_work_orders_can_be_approved():
     assert approve_response.status_code == 200
     assert approve_response.json()["status"] == "APPR"
     assert material_response.status_code == 400
-    assert material_response.json()["detail"] == "Only WAPPR work orders can be approved"
+    assert material_response.json()["detail"] == "Resolve material blocker before approval"
 
 
 def test_create_update_and_log_work_order():

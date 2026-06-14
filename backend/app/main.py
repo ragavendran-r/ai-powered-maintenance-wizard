@@ -542,32 +542,34 @@ def update_work_order(
     if not existing_work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
     payload = request.model_dump(exclude_unset=True)
+    _normalize_material_ready_payload(payload, existing_work_order)
+    merged_work_order = _merged_work_order(existing_work_order, payload)
     requested_status = payload.get("status")
-    if requested_status == "APPR" and existing_work_order["status"] != "WAPPR":
-        raise HTTPException(status_code=400, detail="Only WAPPR work orders can be approved")
-    if requested_status == "INPRG" and _work_order_has_material_blocker(existing_work_order):
-        raise HTTPException(status_code=400, detail=_material_start_block_reason(existing_work_order))
-    if requested_status == "COMP" and _work_order_has_material_blocker(existing_work_order):
+    if requested_status == "APPR":
+        if existing_work_order["status"] == "WMATL" and _work_order_has_material_blocker(merged_work_order):
+            raise HTTPException(status_code=400, detail="Resolve material blocker before approval")
+        if existing_work_order["status"] not in {"WAPPR", "WMATL"}:
+            raise HTTPException(status_code=400, detail="Only WAPPR work orders can be approved")
+    if requested_status == "INPRG" and _work_order_has_material_blocker(merged_work_order):
+        raise HTTPException(status_code=400, detail=_material_start_block_reason(merged_work_order))
+    if requested_status == "COMP" and _work_order_has_material_blocker(merged_work_order):
         raise HTTPException(status_code=400, detail="Resolve material blocker before completing work order")
     if payload.get("planning_status") == "dispatched":
         planned_start = payload.get("planned_start") or existing_work_order.get("planned_start")
-        material_readiness = payload.get("material_readiness") or existing_work_order.get("material_readiness")
-        material_blocker_status = payload.get("material_blocker_status") or existing_work_order.get("material_blocker_status")
-        spare_reservations = payload.get("spare_reservations") or existing_work_order.get("spare_reservations", [])
         if existing_work_order["status"] == "WAPPR":
             raise HTTPException(status_code=400, detail="Approve work order before dispatch")
         if not planned_start:
             raise HTTPException(status_code=400, detail="Planned start is required before dispatch")
-        if material_readiness == "blocked":
+        if merged_work_order.get("material_readiness") == "blocked":
             raise HTTPException(status_code=400, detail="Resolve blocked materials before dispatch")
-        if material_blocker_status in MATERIAL_BLOCKER_STATUSES:
+        if merged_work_order.get("material_blocker_status") in MATERIAL_BLOCKER_STATUSES:
             raise HTTPException(status_code=400, detail="Resolve material blocker before dispatch")
         if any(
             item.get("blocker_status") in MATERIAL_BLOCKER_STATUSES
-            for item in spare_reservations
+            for item in merged_work_order.get("spare_reservations", [])
         ):
             raise HTTPException(status_code=400, detail="Resolve material blocker before dispatch")
-    _normalize_material_blocked_work_order_status(payload, existing_work_order)
+    _normalize_material_blocked_work_order_status(payload, existing_work_order, merged_work_order)
     if current_user.role == "maintenance_technician":
         if existing_work_order["assigned_to"] != current_user.display_name:
             raise HTTPException(status_code=403, detail="Technician can update only assigned work orders")
@@ -632,22 +634,61 @@ def _material_start_block_reason(work_order: dict[str, Any]) -> str:
     return f"Resolve material blocker before starting work: {note}"
 
 
-def _normalize_material_blocked_work_order_status(
-    payload: dict[str, Any],
-    existing_work_order: dict[str, Any],
-) -> None:
-    material_fields = {"material_readiness", "material_blocker_status", "spare_reservations"}
-    if not material_fields.intersection(payload):
+MATERIAL_RESOLVED_STATUSES = {"not_required", "reserved", "substitute_available"}
+
+
+def _normalize_material_ready_payload(payload: dict[str, Any], existing_work_order: dict[str, Any]) -> None:
+    if payload.get("material_readiness") != "ready":
         return
-    merged_work_order = {
+    material_blocker_status = payload.get(
+        "material_blocker_status",
+        existing_work_order.get("material_blocker_status"),
+    )
+    if material_blocker_status not in MATERIAL_RESOLVED_STATUSES:
+        return
+    spare_reservations = payload.get("spare_reservations", existing_work_order.get("spare_reservations", []))
+    payload["spare_reservations"] = [_resolved_spare_reservation(reservation) for reservation in spare_reservations]
+
+
+def _resolved_spare_reservation(reservation: dict[str, Any]) -> dict[str, Any]:
+    required_qty = int(reservation.get("required_qty") or 0)
+    reserved_qty = max(int(reservation.get("reserved_qty") or 0), required_qty)
+    return {
+        **reservation,
+        "reserved_qty": reserved_qty,
+        "reorder_requested": False,
+        "procurement_status": "received" if required_qty else reservation.get("procurement_status", "not_required"),
+        "expected_available_date": None,
+        "blocker_status": "reserved" if required_qty else "not_required",
+        "blocker_note": None,
+    }
+
+
+def _merged_work_order(existing_work_order: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    return {
         **existing_work_order,
         "material_readiness": payload.get("material_readiness", existing_work_order.get("material_readiness")),
         "material_blocker_status": payload.get(
             "material_blocker_status",
             existing_work_order.get("material_blocker_status"),
         ),
+        "material_blocker_note": payload.get(
+            "material_blocker_note",
+            existing_work_order.get("material_blocker_note"),
+        ),
         "spare_reservations": payload.get("spare_reservations", existing_work_order.get("spare_reservations", [])),
     }
+
+
+def _normalize_material_blocked_work_order_status(
+    payload: dict[str, Any],
+    existing_work_order: dict[str, Any],
+    merged_work_order: Optional[dict[str, Any]] = None,
+) -> None:
+    material_fields = {"material_readiness", "material_blocker_status", "spare_reservations"}
+    if not material_fields.intersection(payload):
+        return
+    merged_work_order = merged_work_order or _merged_work_order(existing_work_order, payload)
     next_status = payload.get("status") or existing_work_order["status"]
     if next_status in {"WAPPR", "COMP", "CLOSE"}:
         return
