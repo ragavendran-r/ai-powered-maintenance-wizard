@@ -232,22 +232,27 @@ export function SignalLineChartCard({ chart }: { chart: AssetPerformanceChart })
   const min = Math.min(...values, ...chart.points.map((point) => point.threshold))
   const max = Math.max(...values, ...chart.points.map((point) => point.threshold))
   const span = Math.max(1, max - min)
-  const xStep = chart.points.length > 1 ? 300 / (chart.points.length - 1) : 300
+  const xStep = chart.points.length > 1 ? 260 / (chart.points.length - 1) : 260
   const path = chart.points
     .map((point, index) => {
-      const x = 20 + index * xStep
-      const y = 120 - ((point.value - min) / span) * 95
+      const x = 54 + index * xStep
+      const y = 120 - ((point.value - min) / span) * 86
       return `${index === 0 ? 'M' : 'L'} ${x} ${y}`
     })
     .join(' ')
-  const thresholdY = 120 - (((chart.points[0]?.threshold ?? min) - min) / span) * 95
+  const thresholdY = 120 - (((chart.points[0]?.threshold ?? min) - min) / span) * 86
+  const yAxisLabel = `Value (${chart.unit})`
   return (
     <section className="detailPanel chartCard">
       <h2>{chart.title}</h2>
-      <svg viewBox="0 0 340 140" role="img" aria-label={`${chart.title} line chart`}>
-        <path d="M20 120 H320" className="axis" />
-        <path d="M20 20 V120" className="axis" />
-        <path d={`M20 ${thresholdY} H320`} className="thresholdPath" />
+      <svg viewBox="0 0 340 160" role="img" aria-label={`${chart.title} line chart. X-axis: signal time. Y-axis: ${yAxisLabel}.`}>
+        <path d="M54 120 H314" className="axis" />
+        <path d="M54 34 V120" className="axis" />
+        <text className="chartTickLabel" x="48" y="39" textAnchor="end">{Math.round(max)}</text>
+        <text className="chartTickLabel" x="48" y="124" textAnchor="end">{Math.round(min)}</text>
+        <text className="chartAxisLabel" x="184" y="150" textAnchor="middle">Signal time</text>
+        <text className="chartAxisLabel chartAxisLabelVertical" x="12" y="78" textAnchor="middle">{yAxisLabel}</text>
+        <path d={`M54 ${thresholdY} H314`} className="thresholdPath" />
         <path d={path} className="linePath" />
       </svg>
       <small>{chart.points.length} readings · {chart.unit}</small>
@@ -504,24 +509,53 @@ export function WorkOrderTable({
 
 export function BarChart({ assets }: { assets: HealthSummary[] }) {
   return (
-    <div className="barChart" aria-label="Equipment efficiency bar chart">
-      {assets.map((item) => (
-        <div className="barGroup" key={item.equipment.id}>
-          <span className={`risk-${item.risk_level}`} style={{ height: `${Math.max(8, item.health_score)}%` }} />
-          <small>{item.equipment.id.split('-')[0]}</small>
+    <div className="chartFrame" aria-label="Equipment efficiency bar chart. X-axis: equipment group. Y-axis: health score percent.">
+      <span className="chartYAxisLabel">Health score (%)</span>
+      <div className="barChartGrid">
+        <div className="barChartScale" aria-hidden="true">
+          <span>100</span>
+          <span>50</span>
+          <span>0</span>
         </div>
-      ))}
+        <div className="barChart">
+          {assets.map((item) => (
+            <div className="barGroup" key={item.equipment.id}>
+              <em>{item.health_score}%</em>
+              <span className={`risk-${item.risk_level}`} style={{ height: `${Math.max(8, item.health_score)}%` }} />
+              <small>{item.equipment.id.split('-')[0]}</small>
+            </div>
+          ))}
+        </div>
+      </div>
+      <span className="chartXAxisLabel">Equipment group</span>
     </div>
   )
 }
 
-export function MiniBars({ values }: { values: number[] }) {
+export function MiniBars({ values, labels = values.map((_, index) => `P${index + 1}`) }: { values: number[]; labels?: string[] }) {
   return (
-    <div className="miniBars">
-      {values.map((value, index) => {
-        const statusClass = value >= 85 ? 'status-success' : value >= 75 ? 'status-warning' : 'status-critical'
-        return <span className={statusClass} style={{ height: `${value}%` }} key={`${value}-${index}`} />
-      })}
+    <div className="chartFrame compactChartFrame" aria-label="SLA compliance bar chart. X-axis: incident priority. Y-axis: compliance percent.">
+      <span className="chartYAxisLabel">SLA compliance (%)</span>
+      <div className="barChartGrid">
+        <div className="barChartScale" aria-hidden="true">
+          <span>100</span>
+          <span>50</span>
+          <span>0</span>
+        </div>
+        <div className="miniBars">
+          {values.map((value, index) => {
+            const statusClass = value >= 85 ? 'status-success' : value >= 75 ? 'status-warning' : 'status-critical'
+            return (
+              <span className="miniBarGroup" key={`${value}-${index}`}>
+                <em>{value}%</em>
+                <i className={statusClass} style={{ height: `${value}%` }} />
+                <small>{labels[index] ?? `P${index + 1}`}</small>
+              </span>
+            )
+          })}
+        </div>
+      </div>
+      <span className="chartXAxisLabel">Incident priority</span>
     </div>
   )
 }

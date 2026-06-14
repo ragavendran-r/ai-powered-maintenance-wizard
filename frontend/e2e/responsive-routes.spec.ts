@@ -31,6 +31,23 @@ const routeCases: RouteCase[] = [
     visible: async (page) => {
       await expect(page.getByLabel('Dashboard KPI summary')).toBeVisible()
       await expect(page.getByLabel('Neo dashboard assistant')).toBeVisible()
+      await expect(page.getByText('Health score (%)')).toBeVisible()
+      await expect(page.getByText('Equipment group')).toBeVisible()
+      await expect(page.getByText('SLA compliance (%)')).toBeVisible()
+      await expect(page.getByText('Incident priority', { exact: true })).toBeVisible()
+      const equipmentChart = page.locator('.dashboardEfficiency')
+      const slaChart = page.locator('.slaPanel')
+      await expect(equipmentChart).not.toHaveCSS('position', 'sticky')
+      await slaChart.scrollIntoViewIfNeeded()
+      const overlapArea = await page.evaluate(() => {
+        const equipment = document.querySelector('.dashboardEfficiency')?.getBoundingClientRect()
+        const sla = document.querySelector('.slaPanel')?.getBoundingClientRect()
+        if (!equipment || !sla) return 0
+        const overlapWidth = Math.max(0, Math.min(equipment.right, sla.right) - Math.max(equipment.left, sla.left))
+        const overlapHeight = Math.max(0, Math.min(equipment.bottom, sla.bottom) - Math.max(equipment.top, sla.top))
+        return overlapWidth * overlapHeight
+      })
+      expect(overlapArea).toBe(0)
     },
   },
   {

@@ -151,7 +151,7 @@ export function DashboardRoute({
           </section>
           <section className="detailPanel slaPanel">
             <h2>SLA compliance by incident priority</h2>
-            <MiniBars values={[92, 78, 64, 88]} />
+            <MiniBars values={[92, 78, 64, 88]} labels={['P1', 'P2', 'P3', 'P4']} />
           </section>
         </div>
       </div>
