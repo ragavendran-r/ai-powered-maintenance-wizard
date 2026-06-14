@@ -466,7 +466,7 @@ export type AssistantStreamEvent<TResponse> =
   | { type: 'token'; content: string }
   | { type: 'done'; response: TResponse }
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000'
 const AUTH_SESSION_KEY = 'maintenance_wizard_auth_session'
 
 let authSession: AuthSession | null = loadStoredSession()
@@ -509,9 +509,10 @@ function authHeaders(): Record<string, string> {
 }
 
 async function request<T>(path: string, init?: RequestInit, includeAuth = true): Promise<T> {
+  const hasBody = init?.body !== undefined
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
-      'Content-Type': 'application/json',
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       ...(includeAuth ? authHeaders() : {}),
       ...(init?.headers ?? {}),
     },

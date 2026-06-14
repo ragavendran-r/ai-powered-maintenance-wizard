@@ -130,6 +130,13 @@ test.describe('role capability rendering', () => {
     await expect(page.getByRole('heading', { name: 'Equipment Digital Maintenance Log Entries' })).toBeVisible()
     await expect(page.getByText('Hot Strip Mill Main Drive Motor is at critical risk with 18% health')).toBeVisible()
     await expect(page.getByText('Escalate for same-shift maintenance review.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Export Markdown' })).toBeEnabled()
+
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Export Markdown' }).click()
+    const download = await downloadPromise
+    expect(download.suggestedFilename()).toBe('plant-maintenance-insights.md')
+    await expect(page.getByText('Structured maintenance insights downloaded')).toBeVisible()
   })
 
   test('admin sees administration surfaces and global review routes', async ({ page }) => {

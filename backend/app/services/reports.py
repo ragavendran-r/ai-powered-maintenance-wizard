@@ -11,7 +11,7 @@ from app.models.schemas import (
     Recommendation,
     StructuredMaintenanceReport,
 )
-from app.services.risk import health_summary, predict_failure
+from app.services.risk import health_summary, prediction_features
 
 
 def recommendation_to_markdown(recommendation: Recommendation) -> str:
@@ -217,8 +217,8 @@ def _abnormal_alert_reports_for_scope(equipment_id: Optional[str] = None) -> lis
 
 
 def _structured_report(equipment_id: str) -> StructuredMaintenanceReport:
-    summary = health_summary(equipment_id)
-    prediction = predict_failure(equipment_id)
+    summary = health_summary(equipment_id, include_anomaly_context=False)
+    prediction = prediction_features(equipment_id)
     equipment = summary.equipment
     alerts = summary.active_alerts
     work_orders = repository.list_work_orders(equipment_id=equipment_id, open_only=True)
