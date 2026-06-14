@@ -72,7 +72,7 @@ flowchart LR
   feedback --> repo
   labels --> repo
   explainer --> recommendations
-  repo --> sqlite[("SQLite Prototype Store<br/>Equipment, alerts, sensors, spares, history, documents, chunks, document intelligence, labels, feedback, users, learning examples, dataset snapshots")]
+  repo --> sqlite[("SQLite Prototype Store<br/>Equipment, alerts, sensors, spares, work-order reservations, history, documents, chunks, document intelligence, labels, feedback, users, learning examples, dataset snapshots")]
 
   sample["Sample Steel Plant Fixture<br/>assets/sample_data/steel_plant_demo.json"] --> loader["Startup Seeder"]
   loader --> sqlite
@@ -90,7 +90,7 @@ flowchart LR
 - Auth/RBAC layer: local login, JWT validation, current-user context, role guards, and role-aware navigation for admin, maintenance engineer, maintenance technician, maintenance supervisor, reliability engineer, planner, operator, and API-only IoT service users.
 - FastAPI backend: HTTP API layer for dashboard data, work orders, planning/scheduling/dispatch, role-specific assistants, ingestion, diagnosis, prediction, chat, reports, and feedback.
 - Async IoT streaming ingestion: optional NATS JetStream durable consumer for plant applications, PLC gateways, and historians that publish alerts, sensor readings, equipment, spares, and maintenance events.
-- Data services: seed SQLite from five sample steel-plant assets and expose repository functions for equipment, asset profiles, asset metrics, seeded asset recommendations, subsystems, reliability metrics, alerts, sensor readings, spares, maintenance history, related work orders, SOP/manual/log/history documents, document chunks, and feedback.
+- Data services: seed SQLite from five sample steel-plant assets and expose repository functions for equipment, asset profiles, asset metrics, seeded asset recommendations, subsystems, reliability metrics, alerts, sensor readings, spares, work-order spare reservations, maintenance history, related work orders, SOP/manual/log/history documents, document chunks, and feedback.
 - Document parser: extracts text from uploaded text-like files and embedded-text PDFs before indexing.
 - Document intelligence service: optional LLM/SLM extraction of uploaded document summary, assets, components, failure modes, symptoms, safety constraints, spares, and thresholds, with deterministic fallback.
 - Retrieval service: production Qdrant vector database for document chunks and approved knowledge, deterministic SQLite/local-vector fallback for tests or degraded disconnected operation, lexical scoring, optional LLM/SLM reranking, and relevance reasons.
@@ -100,7 +100,7 @@ flowchart LR
 - Learning service: captures assistant interactions, converts feedback/labels/work-order outcomes/documents into candidate examples, scores them with an LLM-as-a-Judge rubric, preserves human approval state, exports judge-qualified JSONL snapshots for local adapter tuning, and provides reviewer controls for model versions, evaluation runs, artifact storage, adapter promotion/rollback, runtime deployment tracking/gating, and active serving-model resolution.
 - Async learning workers: NATS JetStream subjects under `maintenance.learning.*` drive judge, dataset, evaluation, and PEFT preparation jobs outside the FastAPI request path with retries, DLQ handling, persisted job status, and filesystem or S3-compatible artifact registration.
 - Recommendation service: combines retrieved evidence, approved judge-qualified learning examples, risk scoring, prediction, normalized labels, prior engineer feedback, reasoning explanations, and optional LLM-adapter context.
-- Work-order and planning services: persist work-order lifecycle state plus planner-owned planned start/end, outage window, material readiness, dispatch notes, and dispatch timestamp fields. Planner, supervisor, and admin users can schedule and dispatch work after deterministic validation; technicians see only assigned work and cannot mutate planning metadata. Work-order assistant service combines persisted work-order state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM output to suggest live directions, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work. Neo has role-aware work-order modes: technician mode is restricted to `maintenance_technician`, and supervisor mode is restricted to `maintenance_supervisor`; both use the shared LLM provider, model, token-limit, and streaming configuration. Dashboard Neo starts with a deterministic role-aware welcome and attention table, then routes deterministic role-aware commands for asset section summaries, assigned-work next steps, work-order creation/status updates, and admin user management through backend repository functions. Chat panels consume streaming SSE responses and apply final structured events for app-owned fields.
+- Work-order and planning services: persist work-order lifecycle state plus planner-owned planned start/end, outage window, material readiness, material blocker status/notes, spare reservations, reorder request state, procurement lead time, expected availability, substitute options, dispatch notes, and dispatch timestamp fields. Planner, supervisor, and admin users can schedule and dispatch work after deterministic validation; dispatch is blocked by waiting approval, missing planned start, blocked material readiness, or unresolved top-level/per-spare material blockers. Technicians see only assigned work and cannot mutate planning or procurement metadata. Work-order assistant service combines persisted work-order state, spare/procurement state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM output to suggest live directions, material-blocker explanations, substitute considerations, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work. Neo has role-aware work-order modes: technician mode is restricted to `maintenance_technician`, and supervisor mode is restricted to `maintenance_supervisor`; both use the shared LLM provider, model, token-limit, and streaming configuration. Dashboard Neo starts with a deterministic role-aware welcome and attention table that factors material blockers into urgency, then routes deterministic role-aware commands for asset section summaries, assigned-work next steps, work-order creation/status updates, and admin user management through backend repository functions. Chat panels consume streaming SSE responses and apply final structured events for app-owned fields.
 - Report service: formats recommendations as structured Markdown for supervisor handoff or demo export, including learning notes.
 - LLM adapter: common structured interface for mock, OpenAI-compatible chat completions, and Ollama chat providers.
 
@@ -116,7 +116,7 @@ flowchart LR
 - Ingestion:
   - `POST /api/ingest/documents` stores JSON document records, rebuilds retrieval chunks, and extracts document intelligence.
   - `POST /api/ingest/document-file` parses and stores uploaded `.txt`, `.md`, `.markdown`, `.csv`, `.log`, `.json`, and embedded-text `.pdf` files, then extracts document intelligence.
-  - `POST /api/ingest/records` upserts structured equipment, alert, spare, sensor reading, and maintenance event records.
+  - `POST /api/ingest/records` upserts structured equipment, alert, spare, work-order spare reservation, sensor reading, and maintenance event records.
   - `GET /api/streaming/status` reports NATS JetStream ingestion state, processed count, failed count, last message timestamp, and last error.
 - Decision support:
   - `GET /api/dashboard/summary` returns plant-level health and all tracked assets sorted by risk priority.
@@ -131,10 +131,10 @@ flowchart LR
   - `POST /api/predict` returns failure probability, estimated RUL, and drivers.
 - Work orders and assistants:
   - `GET /api/work-orders` lists work orders, with optional asset, follow-up, open-only, and planning-status filters. Technician users are scoped to assigned work.
-  - `POST /api/work-orders` creates a work order with assignment, priority, problem code, recommended action, follow-up, and optional planning fields.
+  - `POST /api/work-orders` creates a work order with assignment, priority, problem code, recommended action, follow-up, optional planning fields, and optional spare reservations.
   - `GET /api/work-orders/planning/board` returns open work orders for planner, supervisor, and admin scheduling/dispatch review.
   - `GET /api/work-orders/{work_order_id}` returns detail and work logs.
-  - `PATCH /api/work-orders/{work_order_id}` updates lifecycle status, assignment, schedule window, material readiness, outage window, dispatch notes, problem code, follow-up, and completion summary. Dispatch is blocked when a work order still waits for approval, has no planned start, or has blocked material readiness.
+  - `PATCH /api/work-orders/{work_order_id}` updates lifecycle status, assignment, schedule window, material readiness, material blocker status/notes, spare reservations, reorder/procurement/substitute metadata, outage window, dispatch notes, problem code, follow-up, and completion summary. Dispatch is blocked when a work order still waits for approval, has no planned start, has blocked material readiness, or has unresolved top-level/per-spare material blockers.
   - `POST /api/work-orders/{work_order_id}/logs` appends technician, supervisor, or assistant log entries.
   - `POST /api/work-orders/technician-assist` returns LLM-backed live directions, safety reminders, recommended actions, problem-code suggestions, and completion summary for technician users only.
   - `POST /api/work-orders/supervisor-assist` summarizes queue/follow-up risk and can draft a follow-up work order for supervisor users only.
@@ -159,7 +159,7 @@ flowchart LR
 
 1. Sample plant records for the hot strip mill drive, blast furnace blower, caster cooling pump, hydraulic system, and overhead crane are loaded from `assets/sample_data/steel_plant_demo.json` and upserted into SQLite on startup.
 2. File and JSON document ingestion endpoints parse manuals, SOPs, logs, CSVs, JSON, Markdown, text files, and embedded-text PDFs into document records and retrieval chunks, then extract structured document intelligence.
-3. Structured record ingestion upserts equipment, alerts, spares, sensor readings, and maintenance events; maintenance events can be normalized into reusable labels.
+3. Structured record ingestion upserts equipment, alerts, spares, work-order spare reservations, sensor readings, and maintenance events; maintenance events can be normalized into reusable labels.
 4. Optional NATS JetStream ingestion consumes plant IoT messages asynchronously and persists validated payloads through the same repository path.
 5. API endpoints read and write typed records through the repository layer.
 6. Auth/RBAC guards validate JWTs and role permissions before maintenance data or actions are served.

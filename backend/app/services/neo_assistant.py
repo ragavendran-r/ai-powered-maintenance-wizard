@@ -180,13 +180,15 @@ def _technician_welcome(current_user: UserPublic) -> NeoChatResponse:
         )
     else:
         lead = work_orders[0]
+        material_note = _material_attention_sentence(lead)
         answer = "\n\n".join(
-            [
+            [item for item in [
                 f"I’m Neo. Immediate attention: {len(work_orders)} open work order(s) are assigned to you.",
                 f"### Primary Work Order: {lead['id']} ({lead['status']})",
+                material_note,
                 _technician_completion_guide(lead),
                 "Ask me to start the work order, summarize the asset documents, or prepare completion wording when you are ready.",
-            ]
+            ] if item]
         )
     return NeoChatResponse(
         answer=answer,
@@ -207,12 +209,18 @@ def _supervisor_welcome(current_user: UserPublic) -> NeoChatResponse:
     work_orders = repository.list_work_orders()
     approvals = [item for item in work_orders if item["status"] == "WAPPR"]
     follow_ups = [item for item in work_orders if item["follow_up_required"] and item["status"] in {"COMP", "INPRG", "APPR", "WMATL"}]
+    material_blockers = [
+        item
+        for item in work_orders
+        if item.get("material_blocker_status") in {"blocked", "waiting_procurement", "reorder_requested"}
+        and item["status"] not in {"COMP", "CLOSE"}
+    ]
     priority_open = [
         item
         for item in work_orders
         if item["priority"] == 1 and item["status"] not in {"COMP", "CLOSE"} and item not in approvals
     ]
-    attention_items = approvals[:4] + follow_ups[:3] + priority_open[:3]
+    attention_items = approvals[:4] + material_blockers[:3] + follow_ups[:3] + priority_open[:3]
     table = _work_order_rows_table(_unique_work_orders(attention_items)[:8], title="Supervisor Attention") if attention_items else None
     if not attention_items:
         answer = (
@@ -222,10 +230,13 @@ def _supervisor_welcome(current_user: UserPublic) -> NeoChatResponse:
     else:
         parts = [
             f"I’m Neo. Immediate attention: {len(approvals)} work order(s) waiting for approval, "
-            f"{len(follow_ups)} follow-up item(s), and {len(priority_open)} urgent open item(s).",
+            f"{len(material_blockers)} material blocker(s), {len(follow_ups)} follow-up item(s), "
+            f"and {len(priority_open)} urgent open item(s).",
         ]
         if approvals:
             parts.append(f"Approve or reject scope for {approvals[0]['id']} first; it is blocking execution on {approvals[0]['equipment_id']}.")
+        if material_blockers:
+            parts.append(_material_attention_sentence(material_blockers[0]))
         if follow_ups:
             parts.append(f"Review follow-up action on {follow_ups[0]['id']} and decide whether a new corrective work order is needed.")
         if priority_open:
@@ -896,7 +907,7 @@ def _work_order_table(message: str, current_user: UserPublic) -> NeoTable:
             break
     return NeoTable(
         title="Work Orders",
-        columns=["Work order", "Asset", "Status", "Priority", "Follow-up", "Recommended action"],
+        columns=["Work order", "Asset", "Status", "Priority", "Follow-up", "Material", "Recommended action"],
         rows=rows,
     )
 
@@ -1001,7 +1012,7 @@ def _work_order_for_message(message: str, current_user: UserPublic) -> Optional[
 def _work_order_rows_table(work_orders: list[dict], title: str) -> NeoTable:
     return NeoTable(
         title=title,
-        columns=["Work order", "Asset", "Status", "Priority", "Follow-up", "Recommended action"],
+        columns=["Work order", "Asset", "Status", "Priority", "Follow-up", "Material", "Recommended action"],
         rows=[_work_order_table_row(item) for item in work_orders if item],
     )
 
@@ -1013,6 +1024,7 @@ def _work_order_table_row(item: dict) -> dict[str, object]:
         "Status": item["status"],
         "Priority": item["priority"],
         "Follow-up": "Yes" if item["follow_up_required"] else "No",
+        "Material": item.get("material_blocker_status") or item.get("material_readiness") or "Unknown",
         "Recommended action": item["recommended_action"],
     }
 
@@ -1067,8 +1079,10 @@ def _next_steps_for_work_order(work_order: dict, current_user: UserPublic) -> st
         if current_user.role == "maintenance_technician" and work_order["assigned_to"] == current_user.display_name
         else f"Assigned to {work_order['assigned_to']}."
     )
+    material_note = _material_attention_sentence(work_order)
     return (
         f"{work_order['id']} is {status}. {ownership} {step}\n\n"
+        f"{material_note + chr(10) + chr(10) if material_note else ''}"
         f"Recommended action: {action}\n\n"
         f"Problem code: {work_order['problem_code']}. Failure class: {work_order['failure_class']}."
     )
@@ -1087,15 +1101,31 @@ def _technician_completion_guide(work_order: dict) -> str:
     else:
         status_step = f"This work order is in {status}. Review its history before taking further action."
     return "\n".join(
-        [
+        [item for item in [
             status_step,
+            _material_attention_sentence(work_order),
             f"1. Safety: verify permits, lockout/tagout, stored-energy release, and job-area access for {work_order['equipment_id']}.",
             f"2. Execute: {work_order['recommended_action']}",
             "3. Evidence: record readings, photos, parts used, and abnormal findings in the work log.",
             f"4. Coding: use problem code {work_order['problem_code']} and failure class {work_order['failure_class']} unless your finding proves a better code.",
             "5. Closeout: summarize the actual cause, action taken, residual risk, and whether follow-up is required before submitting completion.",
-        ]
+        ] if item]
     )
+
+
+def _material_attention_sentence(work_order: dict) -> str:
+    blocker_status = work_order.get("material_blocker_status")
+    if blocker_status in {None, "not_required"}:
+        return ""
+    note = work_order.get("material_blocker_note")
+    reservations = work_order.get("spare_reservations", [])
+    lead_time_parts = [
+        f"{item['spare_name']} lead time {item.get('procurement_lead_time_days', 0)} day(s)"
+        for item in reservations[:2]
+        if item.get("procurement_lead_time_days")
+    ]
+    lead_time = f" ({'; '.join(lead_time_parts)})" if lead_time_parts else ""
+    return f"Material status for {work_order['id']}: {str(blocker_status).replace('_', ' ')}. {note or 'Review spare reservation before dispatch.'}{lead_time}"
 
 
 def _assets_requiring_attention() -> list[dict[str, object]]:

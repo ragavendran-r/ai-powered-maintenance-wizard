@@ -2,11 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bot, Briefcase, CalendarClock, FileText, Send, Truck } from 'lucide-react'
 import type {
   AuthUser,
+  MaterialBlockerStatus,
   MaterialReadiness,
+  ProcurementStatus,
   SupervisorAssistantResponse,
   TechnicianAssistantResponse,
   WorkOrder,
   WorkOrderPlanningStatus,
+  WorkOrderSpareReservation,
 } from '../services/api'
 import type { AssistantTurn } from '../assistantContent'
 import { AssistantMessageContent } from '../assistantContent'
@@ -259,6 +262,32 @@ export function WorkOrdersRoute({
                   <dd>{formatPlanningWindow(selectedWorkOrder)}</dd>
                   <dt>Material readiness</dt>
                   <dd>{materialReadinessLabels[selectedWorkOrder.material_readiness]}</dd>
+                  <dt>Material blocker</dt>
+                  <dd>{materialBlockerStatusLabels[selectedWorkOrder.material_blocker_status]}</dd>
+                  {selectedWorkOrder.material_blocker_note && (
+                    <>
+                      <dt>Blocker note</dt>
+                      <dd>{selectedWorkOrder.material_blocker_note}</dd>
+                    </>
+                  )}
+                  {selectedWorkOrder.spare_reservations.length > 0 && (
+                    <>
+                      <dt>Spare reservations</dt>
+                      <dd>
+                        <ul className="spareSummaryList">
+                          {selectedWorkOrder.spare_reservations.map((reservation) => (
+                            <li key={`${reservation.id ?? reservation.spare_id ?? reservation.spare_name}`}>
+                              <strong>{reservation.spare_name}</strong>
+                              <span>
+                                {reservation.reserved_qty}/{reservation.required_qty} reserved · {procurementStatusLabels[reservation.procurement_status]} · {materialBlockerStatusLabels[reservation.blocker_status]}
+                              </span>
+                              {reservation.substitute_name && <span>Substitute: {reservation.substitute_name}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      </dd>
+                    </>
+                  )}
                   {selectedWorkOrder.dispatch_notes && (
                     <>
                       <dt>Dispatch notes</dt>
@@ -285,6 +314,9 @@ export type WorkOrderPlanningUpdate = Partial<Pick<
   | 'planned_end'
   | 'outage_window'
   | 'material_readiness'
+  | 'material_blocker_status'
+  | 'material_blocker_note'
+  | 'spare_reservations'
   | 'dispatch_notes'
 >>
 
@@ -302,6 +334,34 @@ const materialReadinessLabels: Record<MaterialReadiness, string> = {
 }
 
 const materialReadinessOptions: MaterialReadiness[] = ['unknown', 'pending', 'ready', 'blocked']
+
+const materialBlockerStatusLabels: Record<MaterialBlockerStatus, string> = {
+  not_required: 'No blocker',
+  reserved: 'Reserved',
+  reorder_requested: 'Reorder requested',
+  waiting_procurement: 'Waiting procurement',
+  substitute_available: 'Substitute available',
+  blocked: 'Blocked',
+}
+
+const materialBlockerStatusOptions: MaterialBlockerStatus[] = [
+  'not_required',
+  'reserved',
+  'reorder_requested',
+  'waiting_procurement',
+  'substitute_available',
+  'blocked',
+]
+
+const procurementStatusLabels: Record<ProcurementStatus, string> = {
+  not_required: 'Not required',
+  not_requested: 'Not requested',
+  requested: 'Requested',
+  ordered: 'Ordered',
+  received: 'Received',
+}
+
+const procurementStatusOptions: ProcurementStatus[] = ['not_required', 'not_requested', 'requested', 'ordered', 'received']
 
 function PlannerDispatchBoard({
   onDispatch,
@@ -399,6 +459,9 @@ function PlannerDispatchCard({
   const [plannedStart, setPlannedStart] = useState(toDateTimeLocal(order.planned_start))
   const [plannedEnd, setPlannedEnd] = useState(toDateTimeLocal(order.planned_end))
   const [materialReadiness, setMaterialReadiness] = useState<MaterialReadiness>(order.material_readiness)
+  const [materialBlockerStatus, setMaterialBlockerStatus] = useState<MaterialBlockerStatus>(order.material_blocker_status)
+  const [materialBlockerNote, setMaterialBlockerNote] = useState(order.material_blocker_note ?? '')
+  const [spareReservations, setSpareReservations] = useState<WorkOrderSpareReservation[]>(order.spare_reservations)
   const [outageWindow, setOutageWindow] = useState(order.outage_window ?? '')
   const [dispatchNotes, setDispatchNotes] = useState(order.dispatch_notes ?? '')
 
@@ -407,6 +470,9 @@ function PlannerDispatchCard({
     setPlannedStart(toDateTimeLocal(order.planned_start))
     setPlannedEnd(toDateTimeLocal(order.planned_end))
     setMaterialReadiness(order.material_readiness)
+    setMaterialBlockerStatus(order.material_blocker_status)
+    setMaterialBlockerNote(order.material_blocker_note ?? '')
+    setSpareReservations(order.spare_reservations)
     setOutageWindow(order.outage_window ?? '')
     setDispatchNotes(order.dispatch_notes ?? '')
   }, [
@@ -415,6 +481,9 @@ function PlannerDispatchCard({
     order.planned_start,
     order.planned_end,
     order.material_readiness,
+    order.material_blocker_status,
+    order.material_blocker_note,
+    order.spare_reservations,
     order.outage_window,
     order.dispatch_notes,
   ])
@@ -431,7 +500,7 @@ function PlannerDispatchCard({
         },
         ...technicians,
       ]
-  const dispatchBlockedReason = dispatchBlockReason(order, plannedStart, materialReadiness)
+  const dispatchBlockedReason = dispatchBlockReason(order, plannedStart, materialReadiness, materialBlockerStatus, spareReservations)
 
   function savePlan() {
     onPlan(order.id, {
@@ -440,9 +509,38 @@ function PlannerDispatchCard({
       planned_start: plannedStart || null,
       planned_end: plannedEnd || null,
       material_readiness: materialReadiness,
+      material_blocker_status: materialBlockerStatus,
+      material_blocker_note: materialBlockerNote.trim() || null,
+      spare_reservations: spareReservations.map(normalizeSpareReservation),
       outage_window: outageWindow.trim() || null,
       dispatch_notes: dispatchNotes.trim() || null,
     })
+  }
+
+  function updateSpareReservation(index: number, updates: Partial<WorkOrderSpareReservation>) {
+    setSpareReservations((items) => items.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, ...updates } : item
+    )))
+  }
+
+  function addSpareReservation() {
+    setSpareReservations((items) => [
+      ...items,
+      {
+        spare_name: '',
+        required_qty: 1,
+        reserved_qty: 0,
+        available_qty: 0,
+        reorder_requested: false,
+        procurement_status: 'not_requested',
+        procurement_lead_time_days: 0,
+        expected_available_date: null,
+        substitute_spare_id: null,
+        substitute_name: null,
+        blocker_status: 'not_required',
+        blocker_note: null,
+      },
+    ])
   }
 
   return (
@@ -508,7 +606,150 @@ function PlannerDispatchCard({
             ))}
           </select>
         </label>
+        <label>
+          Material blocker
+          <select
+            aria-label={`Material blocker ${order.id}`}
+            value={materialBlockerStatus}
+            onChange={(event) => setMaterialBlockerStatus(event.target.value as MaterialBlockerStatus)}
+          >
+            {materialBlockerStatusOptions.map((option) => (
+              <option value={option} key={option}>{materialBlockerStatusLabels[option]}</option>
+            ))}
+          </select>
+        </label>
       </div>
+      <section className="plannerSparesPanel" aria-label={`Spare availability ${order.id}`}>
+        <div className="plannerSparesHeader">
+          <div>
+            <h3>Spare availability & procurement</h3>
+            <small>Reservations and reorder state are saved deterministically for this work order.</small>
+          </div>
+          <button className="outlineButton compactButton" type="button" onClick={addSpareReservation}>
+            Add spare
+          </button>
+        </div>
+        {spareReservations.length > 0 ? (
+          <div className="plannerSparesList">
+            {spareReservations.map((reservation, index) => (
+              <div className="plannerSpareRow" key={`${reservation.id ?? 'new'}-${index}`}>
+                <label className="plannerSpareName">
+                  Spare
+                  <input
+                    aria-label={`Spare name ${order.id} ${index + 1}`}
+                    value={reservation.spare_name}
+                    onChange={(event) => updateSpareReservation(index, { spare_name: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Required
+                  <input
+                    aria-label={`Required quantity ${order.id} ${index + 1}`}
+                    min="0"
+                    type="number"
+                    value={reservation.required_qty}
+                    onChange={(event) => updateSpareReservation(index, { required_qty: numberFromInput(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  Reserved
+                  <input
+                    aria-label={`Reserved quantity ${order.id} ${index + 1}`}
+                    min="0"
+                    type="number"
+                    value={reservation.reserved_qty}
+                    onChange={(event) => updateSpareReservation(index, { reserved_qty: numberFromInput(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  Available
+                  <input
+                    aria-label={`Available quantity ${order.id} ${index + 1}`}
+                    min="0"
+                    type="number"
+                    value={reservation.available_qty}
+                    onChange={(event) => updateSpareReservation(index, { available_qty: numberFromInput(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  Procurement
+                  <select
+                    aria-label={`Procurement status ${order.id} ${index + 1}`}
+                    value={reservation.procurement_status}
+                    onChange={(event) => updateSpareReservation(index, { procurement_status: event.target.value as ProcurementStatus })}
+                  >
+                    {procurementStatusOptions.map((option) => (
+                      <option value={option} key={option}>{procurementStatusLabels[option]}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Lead time
+                  <input
+                    aria-label={`Procurement lead time ${order.id} ${index + 1}`}
+                    min="0"
+                    type="number"
+                    value={reservation.procurement_lead_time_days}
+                    onChange={(event) => updateSpareReservation(index, { procurement_lead_time_days: numberFromInput(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  Expected
+                  <input
+                    aria-label={`Expected availability ${order.id} ${index + 1}`}
+                    type="date"
+                    value={reservation.expected_available_date ?? ''}
+                    onChange={(event) => updateSpareReservation(index, { expected_available_date: event.target.value || null })}
+                  />
+                </label>
+                <label>
+                  Row blocker
+                  <select
+                    aria-label={`Spare blocker ${order.id} ${index + 1}`}
+                    value={reservation.blocker_status}
+                    onChange={(event) => updateSpareReservation(index, { blocker_status: event.target.value as MaterialBlockerStatus })}
+                  >
+                    {materialBlockerStatusOptions.map((option) => (
+                      <option value={option} key={option}>{materialBlockerStatusLabels[option]}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="plannerSpareReorder">
+                  <input
+                    aria-label={`Reorder requested ${order.id} ${index + 1}`}
+                    checked={reservation.reorder_requested}
+                    type="checkbox"
+                    onChange={(event) => updateSpareReservation(index, { reorder_requested: event.target.checked })}
+                  />
+                  Reorder
+                </label>
+                <label className="plannerSpareSubstitute">
+                  Substitute
+                  <input
+                    aria-label={`Substitute ${order.id} ${index + 1}`}
+                    value={reservation.substitute_name ?? ''}
+                    onChange={(event) => updateSpareReservation(index, { substitute_name: event.target.value || null })}
+                  />
+                </label>
+                <label className="plannerSpareNote">
+                  Blocker note
+                  <input
+                    aria-label={`Spare blocker note ${order.id} ${index + 1}`}
+                    value={reservation.blocker_note ?? ''}
+                    onChange={(event) => updateSpareReservation(index, { blocker_note: event.target.value || null })}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="plannerHint">No spare reservations are attached to this work order.</p>
+        )}
+      </section>
+      <label className="plannerWideField">
+        Material blocker note
+        <input value={materialBlockerNote} onChange={(event) => setMaterialBlockerNote(event.target.value)} />
+      </label>
       <label className="plannerWideField">
         Outage window
         <input value={outageWindow} onChange={(event) => setOutageWindow(event.target.value)} />
@@ -576,12 +817,41 @@ function TechnicianScheduleQueue({
   )
 }
 
-function dispatchBlockReason(order: WorkOrder, plannedStart: string, materialReadiness: MaterialReadiness) {
+function dispatchBlockReason(
+  order: WorkOrder,
+  plannedStart: string,
+  materialReadiness: MaterialReadiness,
+  materialBlockerStatus: MaterialBlockerStatus,
+  spareReservations: WorkOrderSpareReservation[],
+) {
   if (order.planning_status === 'dispatched') return 'Already dispatched to the assigned technician.'
   if (order.status === 'WAPPR') return 'Approval is required before dispatch.'
   if (!plannedStart) return 'Set a planned start before dispatch.'
   if (materialReadiness === 'blocked') return 'Resolve blocked materials before dispatch.'
+  if (['blocked', 'waiting_procurement', 'reorder_requested'].includes(materialBlockerStatus)) {
+    return 'Resolve the material blocker before dispatch.'
+  }
+  if (spareReservations.some((reservation) => ['blocked', 'waiting_procurement', 'reorder_requested'].includes(reservation.blocker_status))) {
+    return 'Resolve the material blocker before dispatch.'
+  }
   return ''
+}
+
+function normalizeSpareReservation(reservation: WorkOrderSpareReservation): WorkOrderSpareReservation {
+  return {
+    ...reservation,
+    spare_name: reservation.spare_name.trim(),
+    required_qty: Math.max(0, reservation.required_qty),
+    reserved_qty: Math.max(0, reservation.reserved_qty),
+    available_qty: Math.max(0, reservation.available_qty),
+    substitute_name: reservation.substitute_name?.trim() || null,
+    blocker_note: reservation.blocker_note?.trim() || null,
+  }
+}
+
+function numberFromInput(value: string) {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
 }
 
 function toDateTimeLocal(value?: string | null) {

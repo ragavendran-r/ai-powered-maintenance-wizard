@@ -2752,6 +2752,118 @@ h3 {
   resize: vertical;
 }
 
+.plannerSparesPanel {
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.plannerSparesHeader {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.plannerSparesHeader h3 {
+  color: var(--color-text-strong);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.plannerSparesHeader small {
+  color: var(--color-text-muted);
+  display: block;
+  line-height: 1.25;
+  margin-top: 2px;
+}
+
+.compactButton {
+  min-height: 30px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.plannerSparesList {
+  display: grid;
+  gap: 10px;
+}
+
+.plannerSpareRow {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+}
+
+.plannerSpareRow label {
+  color: var(--color-text-muted);
+  display: grid;
+  font-size: 0.66rem;
+  font-weight: 800;
+  gap: 4px;
+  min-width: 0;
+}
+
+.plannerSpareRow input,
+.plannerSpareRow select {
+  box-sizing: border-box;
+  font-size: 0.7rem;
+  min-height: 30px;
+  min-width: 0;
+  padding: 5px 7px;
+  width: 100%;
+}
+
+.plannerSpareReorder {
+  align-items: center;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  color: var(--color-text);
+  display: inline-flex !important;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 8px;
+}
+
+.plannerSpareReorder input {
+  min-height: 0;
+  width: auto;
+}
+
+.plannerSpareSubstitute,
+.plannerSpareNote {
+  grid-column: span 2;
+}
+
+.plannerSpareName {
+  grid-column: span 2;
+}
+
+.spareSummaryList {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.spareSummaryList li {
+  display: grid;
+  gap: 2px;
+}
+
+.spareSummaryList strong {
+  color: var(--color-text-strong);
+}
+
+.spareSummaryList span {
+  color: var(--color-text-muted);
+}
+
 .plannerActions {
   align-items: center;
   display: flex;

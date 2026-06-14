@@ -170,6 +170,8 @@ SCHEMA_STATEMENTS = [
         planned_end TEXT,
         outage_window TEXT,
         material_readiness TEXT NOT NULL DEFAULT 'unknown',
+        material_blocker_status TEXT NOT NULL DEFAULT 'not_required',
+        material_blocker_note TEXT,
         dispatch_notes TEXT,
         dispatched_at TEXT,
         recommended_action TEXT NOT NULL,
@@ -180,6 +182,28 @@ SCHEMA_STATEMENTS = [
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         completed_at TEXT,
         FOREIGN KEY (equipment_id) REFERENCES equipment(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS work_order_spares (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        work_order_id TEXT NOT NULL,
+        spare_id TEXT,
+        spare_name TEXT NOT NULL,
+        required_qty INTEGER NOT NULL DEFAULT 1,
+        reserved_qty INTEGER NOT NULL DEFAULT 0,
+        available_qty INTEGER NOT NULL DEFAULT 0,
+        reorder_requested INTEGER NOT NULL DEFAULT 0,
+        procurement_status TEXT NOT NULL DEFAULT 'not_requested',
+        procurement_lead_time_days INTEGER NOT NULL DEFAULT 0,
+        expected_available_date TEXT,
+        substitute_spare_id TEXT,
+        substitute_name TEXT,
+        blocker_status TEXT NOT NULL DEFAULT 'not_required',
+        blocker_note TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (work_order_id) REFERENCES work_orders(id),
+        FOREIGN KEY (spare_id) REFERENCES spares(id)
     )
     """,
     """
@@ -484,7 +508,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "15"
+SCHEMA_VERSION = "16"
 _INITIALIZING = False
 
 
@@ -539,6 +563,8 @@ def initialize_database(seed: bool = True) -> None:
             _ensure_column(connection, "work_orders", "planned_end", "TEXT")
             _ensure_column(connection, "work_orders", "outage_window", "TEXT")
             _ensure_column(connection, "work_orders", "material_readiness", "TEXT NOT NULL DEFAULT 'unknown'")
+            _ensure_column(connection, "work_orders", "material_blocker_status", "TEXT NOT NULL DEFAULT 'not_required'")
+            _ensure_column(connection, "work_orders", "material_blocker_note", "TEXT")
             _ensure_column(connection, "work_orders", "dispatch_notes", "TEXT")
             _ensure_column(connection, "work_orders", "dispatched_at", "TEXT")
             connection.execute(
@@ -632,6 +658,8 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "planned_end": "2026-06-12T18:00:00+05:30",
             "outage_window": "Finishing stand load-reduction window",
             "material_readiness": "blocked",
+            "material_blocker_status": "blocked",
+            "material_blocker_note": "Drive end bearing is out of stock; procure replacement or approve temporary load-reduction inspection scope.",
             "dispatch_notes": "Bearing spare availability must be confirmed before intrusive work.",
             "dispatched_at": None,
             "recommended_action": "Reduce load if vibration persists, inspect bearing housing temperature, verify coupling alignment, and document final root cause.",
@@ -659,6 +687,8 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "planned_end": None,
             "outage_window": None,
             "material_readiness": "unknown",
+            "material_blocker_status": "not_required",
+            "material_blocker_note": None,
             "dispatch_notes": None,
             "dispatched_at": None,
             "recommended_action": "Stroke-test the guide vane actuator and compare position feedback with outlet pressure variance trend.",
@@ -686,6 +716,8 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "planned_end": "2026-06-11T16:30:00+05:30",
             "outage_window": "Crane heavy-lift restriction window",
             "material_readiness": "blocked",
+            "material_blocker_status": "reorder_requested",
+            "material_blocker_note": "Brake shoe replacement follow-up is waiting on procurement confirmation.",
             "dispatch_notes": "Replacement brake shoes require follow-up procurement.",
             "dispatched_at": "2026-06-11T12:45:00+05:30",
             "recommended_action": "Confirm brake shoe wear and motor current after lift restriction.",
@@ -713,6 +745,8 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
             "planned_end": "2026-06-14T10:00:00+05:30",
             "outage_window": "Morning roll-gap correction maintenance window",
             "material_readiness": "pending",
+            "material_blocker_status": "waiting_procurement",
+            "material_blocker_note": "Pump cartridge reservation is pending; servo valve seal kit can support a limited inspection.",
             "dispatch_notes": "Pump cartridge assembly reservation is pending.",
             "dispatched_at": None,
             "recommended_action": "Reserve pump cartridge assembly, inspect cooler differential temperature, and trend pressure pulsation.",
@@ -741,6 +775,8 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
         "planned_end",
         "outage_window",
         "material_readiness",
+        "material_blocker_status",
+        "material_blocker_note",
         "dispatch_notes",
         "dispatched_at",
         "recommended_action",
@@ -750,6 +786,96 @@ def seed_demo_work_orders(connection: sqlite3.Connection) -> None:
         "completed_at",
     ]
     _insert_many(connection, "work_orders", columns, work_orders)
+    connection.execute(
+        "DELETE FROM work_order_spares WHERE work_order_id IN ('WO-8304', 'WO-8311', 'WO-8297', 'WO-8275')"
+    )
+    connection.executemany(
+        """
+        INSERT INTO work_order_spares (
+            work_order_id,
+            spare_id,
+            spare_name,
+            required_qty,
+            reserved_qty,
+            available_qty,
+            reorder_requested,
+            procurement_status,
+            procurement_lead_time_days,
+            expected_available_date,
+            substitute_spare_id,
+            substitute_name,
+            blocker_status,
+            blocker_note
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                "WO-8304",
+                "SP-001",
+                "Drive end spherical roller bearing",
+                1,
+                0,
+                0,
+                1,
+                "requested",
+                21,
+                "2026-07-03",
+                "SP-002",
+                "High-temperature coupling grease for non-intrusive lubrication inspection",
+                "blocked",
+                "No bearing is available for replacement; substitute supports inspection only, not bearing changeout.",
+            ),
+            (
+                "WO-8311",
+                "SP-003",
+                "Blower inlet guide vane actuator",
+                1,
+                0,
+                1,
+                0,
+                "not_requested",
+                12,
+                None,
+                None,
+                None,
+                "reserved",
+                "One actuator is available if stroke testing confirms replacement need.",
+            ),
+            (
+                "WO-8297",
+                "SP-006",
+                "Main hoist brake shoe set",
+                1,
+                0,
+                0,
+                1,
+                "requested",
+                14,
+                "2026-06-25",
+                None,
+                None,
+                "reorder_requested",
+                "Procurement request is needed before brake shoe replacement follow-up.",
+            ),
+            (
+                "WO-8275",
+                "SP-004",
+                "Hydraulic pump cartridge assembly",
+                1,
+                0,
+                0,
+                1,
+                "ordered",
+                18,
+                "2026-07-02",
+                "SP-005",
+                "Servo valve seal kit",
+                "waiting_procurement",
+                "Pump cartridge is on order; seal kit can support inspection and minor leak correction.",
+            ),
+        ],
+    )
     connection.execute("DELETE FROM work_order_logs WHERE work_order_id IN ('WO-8304', 'WO-8297')")
     connection.executemany(
         """
@@ -785,6 +911,7 @@ def database_status() -> dict[str, Any]:
         "spares",
         "maintenance_events",
         "work_orders",
+        "work_order_spares",
         "work_order_logs",
         "documents",
         "document_chunks",

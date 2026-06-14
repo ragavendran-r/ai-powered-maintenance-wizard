@@ -462,12 +462,21 @@ def update_work_order(
     if payload.get("planning_status") == "dispatched":
         planned_start = payload.get("planned_start") or existing_work_order.get("planned_start")
         material_readiness = payload.get("material_readiness") or existing_work_order.get("material_readiness")
+        material_blocker_status = payload.get("material_blocker_status") or existing_work_order.get("material_blocker_status")
+        spare_reservations = payload.get("spare_reservations") or existing_work_order.get("spare_reservations", [])
         if existing_work_order["status"] == "WAPPR":
             raise HTTPException(status_code=400, detail="Approve work order before dispatch")
         if not planned_start:
             raise HTTPException(status_code=400, detail="Planned start is required before dispatch")
         if material_readiness == "blocked":
             raise HTTPException(status_code=400, detail="Resolve blocked materials before dispatch")
+        if material_blocker_status in {"blocked", "waiting_procurement", "reorder_requested"}:
+            raise HTTPException(status_code=400, detail="Resolve material blocker before dispatch")
+        if any(
+            item.get("blocker_status") in {"blocked", "waiting_procurement", "reorder_requested"}
+            for item in spare_reservations
+        ):
+            raise HTTPException(status_code=400, detail="Resolve material blocker before dispatch")
     if current_user.role == "maintenance_technician":
         if existing_work_order["assigned_to"] != current_user.display_name:
             raise HTTPException(status_code=403, detail="Technician can update only assigned work orders")
@@ -477,6 +486,9 @@ def update_work_order(
             "planned_end",
             "outage_window",
             "material_readiness",
+            "material_blocker_status",
+            "material_blocker_note",
+            "spare_reservations",
             "dispatch_notes",
             "dispatched_at",
         }
