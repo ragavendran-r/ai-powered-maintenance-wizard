@@ -349,8 +349,8 @@ const workOrders = [
     failure_class: 'MECH',
     problem_code: 'BRGVIB',
     classification: 'Bearing vibration',
-    assigned_to: 'Maintenance Technician',
-    supervisor: 'Maintenance Supervisor',
+    assigned_to: 'Vinoth',
+    supervisor: 'Dhruv',
     due_date: '2026-06-12T18:00:00+05:30',
     planning_status: 'planned',
     planned_start: '2026-06-12T14:00:00+05:30',
@@ -646,7 +646,7 @@ const assets = [
     risk_level: 'critical',
     active_alerts: 2,
     open_work_orders: 1,
-    supervisor: 'Maintenance Supervisor',
+    supervisor: 'Dhruv',
     last_updated: '2026-06-12T09:10:00+05:30',
   },
   {
@@ -685,7 +685,7 @@ const assetDetail = {
     serial_number: 'RM01-2017-044',
     installed_at: '2017-09-14',
     owner_team: 'Rolling maintenance',
-    supervisor: 'Maintenance Supervisor',
+    supervisor: 'Dhruv',
     description: 'Main finishing stand drive motor supporting high-torque strip rolling campaigns.',
     last_updated: '2026-06-12T09:10:00+05:30',
   },
@@ -1149,14 +1149,14 @@ function userFor(email = 'admin@plant.local') {
   }
   const role = roles[email] ?? 'admin'
   const displayNames: Record<UserRole, string> = {
-    admin: 'Plant Admin',
-    maintenance_engineer: 'Maintenance Engineer',
-    maintenance_technician: 'Maintenance Technician',
-    maintenance_supervisor: 'Maintenance Supervisor',
-    reliability_engineer: 'Reliability Engineer',
-    planner: 'Maintenance Planner',
-    operator: 'Shift Operator',
-    iot_service: 'IoT Service Account',
+    admin: 'Ragav',
+    maintenance_engineer: 'Lokesh',
+    maintenance_technician: 'Vinoth',
+    maintenance_supervisor: 'Dhruv',
+    reliability_engineer: 'Guna',
+    planner: 'Priya',
+    operator: 'Jan',
+    iot_service: 'Vijay',
   }
   return {
     id: `USER-${role}`,
@@ -1178,7 +1178,7 @@ function neoWelcomeFor(user = userFor()): NeoChatResponse {
   if (user.role === 'maintenance_technician') {
     return {
       answer:
-        'I’m Neo. Immediate attention: 1 open work order is assigned to you.\n\n### Primary Work Order: WO-8304 (APPR)\nThis work order is approved. Confirm lockout/tagout, then ask me to start it before field execution.\n1. Safety: verify permits and stored-energy release.\n2. Execute: Reduce load if vibration persists.\n3. Evidence: record readings and photos.\n4. Coding: use problem code BRGVIB.\n5. Closeout: summarize cause, action taken, residual risk, and follow-up.',
+        'I’m Neo. Vinoth, immediate attention: 1 open work order is assigned to you.\n\n### Primary Work Order: WO-8304 (APPR)\nThis work order is approved. Confirm lockout/tagout, then ask me to start it before field execution.\n1. Safety: verify permits and stored-energy release.\n2. Execute: Reduce load if vibration persists.\n3. Evidence: record readings and photos.\n4. Coding: use problem code BRGVIB.\n5. Closeout: summarize cause, action taken, residual risk, and follow-up.',
       table: {
         title: 'Your Assigned Work',
         columns: ['Work order', 'Asset', 'Status', 'Priority'],
@@ -1198,7 +1198,7 @@ function neoWelcomeFor(user = userFor()): NeoChatResponse {
   if (user.role === 'operator') {
     return {
       answer:
-        'I’m Neo. Immediate attention for Shift Operator: 2 critical/high-risk assets should be watched from operations. Your role is read-only here.',
+        'I’m Neo. Immediate attention for Jan: 2 critical/high-risk assets should be watched from operations. Your role is read-only here.',
       table: {
         title: 'Operator Attention',
         columns: ['Asset', 'Name', 'Area', 'Status', 'Risk'],
@@ -1216,7 +1216,7 @@ function neoWelcomeFor(user = userFor()): NeoChatResponse {
   }
   return {
     answer:
-      'I’m Neo. Immediate attention: 1 work order waiting for approval, 1 follow-up item, and 1 urgent open item.',
+      'I’m Neo. Dhruv, immediate attention: 1 work order waiting for approval, 1 follow-up item, and 1 urgent open item.',
     table: {
       title: 'Supervisor Attention',
       columns: ['Work order', 'Asset', 'Status', 'Priority'],
@@ -1702,8 +1702,8 @@ beforeEach(() => {
         if (initialContext) {
           const blocked = selectedOrder.material_readiness === 'blocked' || selectedOrder.material_blocker_status === 'blocked'
           const initialAnswer = blocked
-            ? `WO-8304 is waiting for material. Drive end spherical roller bearing is not ready; expected availability is 2026-07-03. Do not start field execution until the blocker is resolved.`
-            : `WO-8304 is approved and ready for technician execution. Review the current work order context before recording observations.`
+            ? `Vinoth, WO-8304 is waiting for material. Drive end spherical roller bearing is not ready; expected availability is 2026-07-03. Do not start field execution until the blocker is resolved.`
+            : `Vinoth, WO-8304 is approved and ready for technician execution. Review the current work order context before recording observations.`
           const response = assistantStreamResponse(
             {
               work_order_id: selectedOrder.id,
@@ -1771,8 +1771,8 @@ beforeEach(() => {
         supervisorAssistantRequests.push(body)
         const approvalQueue = body.queue_name === 'waiting_approval'
         const summary = approvalQueue
-          ? 'Waiting for approval: WO-8311 needs supervisor approval before execution.'
-          : 'Neo reviewed 2 work orders and found 2 follow-ups.'
+          ? 'Dhruv, waiting for approval: WO-8311 needs supervisor approval before execution.'
+          : 'Dhruv, Neo reviewed 2 work orders and found 2 follow-ups.'
         const response = assistantStreamResponse(
           {
             summary,
@@ -1787,7 +1787,7 @@ beforeEach(() => {
             used_live_provider: false,
             provider: 'mock',
           },
-          approvalQueue ? ['Waiting for approval: WO-8311 needs supervisor approval.'] : ['Neo reviewed 2 work orders ', 'and found 2 follow-ups.'],
+          approvalQueue ? ['Dhruv, waiting for approval: WO-8311 needs supervisor approval.'] : ['Dhruv, Neo reviewed 2 work orders ', 'and found 2 follow-ups.'],
         )
         if (assistantResponseDelayMs > 0) {
           return delayedResponse(response, init, assistantResponseDelayMs)
@@ -2016,7 +2016,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     const assetsTable = await screen.findByLabelText('Company assets table')
     expect(within(assetsTable).getByText('AC main drive motor')).toBeInTheDocument()
     expect(within(assetsTable).getByText('HSM-FS-01')).toBeInTheDocument()
-    expect(within(assetsTable).getByText('Maintenance Supervisor')).toBeInTheDocument()
+    expect(within(assetsTable).getByText('Dhruv')).toBeInTheDocument()
 
     fireEvent.click(within(assetsTable).getByRole('button', { name: /Hot Strip Mill Main Drive Motor/ }))
 
@@ -2092,7 +2092,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Command Center' }))
 
     const transcript = screen.getByLabelText('Neo chat transcript')
-    expect(await within(transcript).findByText(/Immediate attention: 1 open work order is assigned to you/)).toBeInTheDocument()
+    expect(await within(transcript).findByText(/Vinoth, immediate attention: 1 open work order is assigned to you/i)).toBeInTheDocument()
     expect(within(transcript).getByRole('heading', { name: 'Primary Work Order: WO-8304 (Approved)' })).toBeInTheDocument()
     expect(within(transcript).getByText(/Closeout: summarize cause/)).toBeInTheDocument()
     expect(transcript.textContent).not.toContain('Loaded technician attention')
@@ -2152,6 +2152,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
         work_order_id: 'WO-8304',
         requested_step: 'initial_context',
       }),
+    )
+    expect(JSON.parse((initialContextCall?.[1] as RequestInit).body as string).observation).toContain(
+      'Address Vinoth by name, not by role.',
     )
   })
 
@@ -2312,15 +2315,15 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       .mock.calls.find(([url, init]) => url.toString().includes('/api/work-orders/WO-8297') && init?.method === 'PATCH')
     expect(JSON.parse((approveCall?.[1] as RequestInit).body as string)).toEqual({ status: 'APPR' })
 
-    fireEvent.change(screen.getByLabelText('Assign WO-8297'), { target: { value: 'Maintenance Technician' } })
-    await screen.findByText('WO-8297 assigned to Maintenance Technician')
+    fireEvent.change(screen.getByLabelText('Assign WO-8297'), { target: { value: 'Vinoth' } })
+    await screen.findByText('WO-8297 assigned to Vinoth')
     const assignCall = vi
       .mocked(fetch)
       .mock.calls.find(([url, init]) => {
         if (!url.toString().includes('/api/work-orders/WO-8297') || init?.method !== 'PATCH') return false
-        return JSON.parse((init.body as string) ?? '{}').assigned_to === 'Maintenance Technician'
+        return JSON.parse((init.body as string) ?? '{}').assigned_to === 'Vinoth'
       })
-    expect(JSON.parse((assignCall?.[1] as RequestInit).body as string)).toEqual({ assigned_to: 'Maintenance Technician' })
+    expect(JSON.parse((assignCall?.[1] as RequestInit).body as string)).toEqual({ assigned_to: 'Vinoth' })
   })
 
   it('lets planners schedule and dispatch approved work orders without assistant panels', async () => {
@@ -2354,7 +2357,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     const plannerCard = within(dispatchBoard).getByLabelText('WO-8304 planner card')
     expect(within(dispatchBoard).queryByLabelText('WO-8311 planner card')).not.toBeInTheDocument()
     expect(within(plannerCard).getByText('Planned')).toBeInTheDocument()
-    expect(within(plannerCard).getByDisplayValue('Maintenance Technician')).toBeInTheDocument()
+    expect(within(plannerCard).getByDisplayValue('Vinoth')).toBeInTheDocument()
     expect(within(plannerCard).getByLabelText('Planned start WO-8304')).toHaveAttribute('type', 'datetime-local')
     expect(within(plannerCard).getByLabelText('Planned start WO-8304')).not.toHaveAttribute('placeholder')
     expect(within(plannerCard).getByLabelText('Spare availability WO-8304')).toBeInTheDocument()
@@ -2382,7 +2385,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
         return body.planned_start === '2026-06-12T15:00'
       })
     expect(JSON.parse((planCall?.[1] as RequestInit).body as string)).toMatchObject({
-      assigned_to: 'Maintenance Technician',
+      assigned_to: 'Vinoth',
       planning_status: 'planned',
       planned_start: '2026-06-12T15:00',
       material_readiness: 'ready',
@@ -2501,12 +2504,13 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
     const transcript = await screen.findByLabelText('Neo supervisor chat')
     expect(await within(transcript).findByText(/Neo reviewed 2 work orders/)).toBeInTheDocument()
+    expect(supervisorAssistantRequests[0].question).toContain('Address Dhruv by name, not by role.')
 
     const question = 'what are the work orders pending for my approval'
     fireEvent.change(screen.getByLabelText('Supervisor question'), { target: { value: question } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-    expect(await within(transcript).findByText(/Waiting for approval: WO-8311/)).toBeInTheDocument()
+    expect(await within(transcript).findByText(/waiting for approval: WO-8311/i)).toBeInTheDocument()
     expect(supervisorAssistantRequests[supervisorAssistantRequests.length - 1]).toMatchObject({
       queue_name: 'waiting_approval',
       question,
@@ -2728,7 +2732,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     render(<App />)
     await signIn('operator@plant.local')
 
-    expect(screen.getByText('Shift Operator')).toBeInTheDocument()
+    expect(screen.getByText('Jan')).toBeInTheDocument()
     const navigation = screen.getByLabelText('Maintenance navigation')
     expect(within(navigation).getByRole('button', { name: 'Command Center' })).toBeInTheDocument()
     expect(within(navigation).getByRole('button', { name: 'Assets' })).toBeInTheDocument()
@@ -2753,7 +2757,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     await signIn()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
-    expect(await screen.findByText('Shift Operator')).toBeInTheDocument()
+    expect(await screen.findByText('Jan')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new.operator@plant.local' } })
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Operator' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'NewOperator123!' } })
@@ -2769,7 +2773,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     await signIn()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
-    expect(await screen.findByText('Shift Operator')).toBeInTheDocument()
+    expect(await screen.findByText('Jan')).toBeInTheDocument()
 
     expect(screen.queryByLabelText('New Password')).not.toBeInTheDocument()
     fireEvent.click(screen.getAllByRole('button', { name: 'Reset' })[0])

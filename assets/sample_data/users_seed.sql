@@ -9,7 +9,7 @@ INSERT INTO users (
   (
     'USER-ADMIN',
     'admin@plant.local',
-    'Plant Admin',
+    'Ragav',
     'admin',
     '$2b$12$qekSj9KAF4s6g0pqxwySkeurvNetGsTOs1wLHpd39ZjgXUOAuP7Xi',
     1
@@ -17,7 +17,7 @@ INSERT INTO users (
   (
     'USER-MAINTENANCE',
     'maintenance@plant.local',
-    'Maintenance Engineer',
+    'Lokesh',
     'maintenance_engineer',
     '$2b$12$qekSj9KAF4s6g0pqxwySkeurvNetGsTOs1wLHpd39ZjgXUOAuP7Xi',
     1
@@ -25,7 +25,7 @@ INSERT INTO users (
   (
     'USER-TECHNICIAN',
     'technician@plant.local',
-    'Maintenance Technician',
+    'Vinoth',
     'maintenance_technician',
     '$2b$12$qekSj9KAF4s6g0pqxwySkeurvNetGsTOs1wLHpd39ZjgXUOAuP7Xi',
     1
@@ -33,7 +33,7 @@ INSERT INTO users (
   (
     'USER-SUPERVISOR',
     'supervisor@plant.local',
-    'Maintenance Supervisor',
+    'Dhruv',
     'maintenance_supervisor',
     '$2b$12$qekSj9KAF4s6g0pqxwySkeurvNetGsTOs1wLHpd39ZjgXUOAuP7Xi',
     1
@@ -41,7 +41,7 @@ INSERT INTO users (
   (
     'USER-RELIABILITY',
     'reliability@plant.local',
-    'Reliability Engineer',
+    'Guna',
     'reliability_engineer',
     '$2b$12$qekSj9KAF4s6g0pqxwySkeurvNetGsTOs1wLHpd39ZjgXUOAuP7Xi',
     1
@@ -49,7 +49,7 @@ INSERT INTO users (
   (
     'USER-PLANNER',
     'planner@plant.local',
-    'Maintenance Planner',
+    'Priya',
     'planner',
     '$2b$12$qekSj9KAF4s6g0pqxwySkeurvNetGsTOs1wLHpd39ZjgXUOAuP7Xi',
     1
@@ -57,7 +57,7 @@ INSERT INTO users (
   (
     'USER-OPERATOR',
     'operator@plant.local',
-    'Shift Operator',
+    'Jan',
     'operator',
     '$2b$12$qekSj9KAF4s6g0pqxwySkeurvNetGsTOs1wLHpd39ZjgXUOAuP7Xi',
     1
@@ -65,9 +65,13 @@ INSERT INTO users (
   (
     'USER-IOT-SERVICE',
     'iot-service@plant.local',
-    'IoT Service Account',
+    'Vijay',
     'iot_service',
     '$2b$12$qekSj9KAF4s6g0pqxwySkeurvNetGsTOs1wLHpd39ZjgXUOAuP7Xi',
     1
   )
-ON CONFLICT(email) DO NOTHING;
+ON CONFLICT(email) DO UPDATE SET
+  id=excluded.id,
+  display_name=excluded.display_name,
+  role=excluded.role,
+  is_active=excluded.is_active;

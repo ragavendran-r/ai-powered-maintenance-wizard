@@ -202,7 +202,7 @@ def test_assets_api_returns_company_asset_table():
     assert drive["location_code"] == "HSM-FS-01"
     assert drive["health_score"] >= 0
     assert drive["open_work_orders"] >= 1
-    assert drive["supervisor"] == "Maintenance Supervisor"
+    assert drive["supervisor"] == "Dhruv"
 
 
 def test_assets_api_requires_authenticated_read_role():
@@ -318,6 +318,7 @@ def test_login_returns_bearer_token_and_current_user():
     assert payload["access_token"]
     assert payload["expires_in"] > 0
     assert payload["user"]["role"] == "admin"
+    assert payload["user"]["display_name"] == "Ragav"
     user = repository.get_user_by_email("admin@plant.local")
     assert user
     assert user["password_hash"] != DEMO_PASSWORD
@@ -443,7 +444,7 @@ def test_technician_sees_only_assigned_work_orders():
     payload = response.json()
     assert payload
     assert {item["id"] for item in payload} == {"WO-8304"}
-    assert {item["assigned_to"] for item in payload} == {"Maintenance Technician"}
+    assert {item["assigned_to"] for item in payload} == {"Vinoth"}
 
 
 def test_admin_and_supervisor_can_list_assignment_technicians():
@@ -457,8 +458,8 @@ def test_admin_and_supervisor_can_list_assignment_technicians():
     assert planner_response.status_code == 200
     assert technician_response.status_code == 403
     assert [user["role"] for user in admin_response.json()] == ["maintenance_technician"]
-    assert [user["display_name"] for user in supervisor_response.json()] == ["Maintenance Technician"]
-    assert [user["display_name"] for user in planner_response.json()] == ["Maintenance Technician"]
+    assert [user["display_name"] for user in supervisor_response.json()] == ["Vinoth"]
+    assert [user["display_name"] for user in planner_response.json()] == ["Vinoth"]
 
 
 def test_planner_board_filters_open_scheduled_work_orders():
@@ -573,7 +574,7 @@ def test_planner_can_schedule_and_dispatch_approved_work_order():
         "/api/work-orders/WO-8311",
         json={
             "status": "APPR",
-            "assigned_to": "Maintenance Technician",
+            "assigned_to": "Vinoth",
             "planning_status": "planned",
             "planned_start": "2026-06-13T08:00:00+05:30",
             "planned_end": "2026-06-13T10:00:00+05:30",
@@ -606,7 +607,7 @@ def test_planner_can_schedule_and_dispatch_approved_work_order():
     planned = plan_response.json()
     assert planned["status"] == "APPR"
     assert planned["planning_status"] == "planned"
-    assert planned["assigned_to"] == "Maintenance Technician"
+    assert planned["assigned_to"] == "Vinoth"
     assert planned["planned_start"] == "2026-06-13T08:00:00+05:30"
     assert planned["material_readiness"] == "ready"
     assert planned["material_blocker_status"] == "substitute_available"
@@ -802,7 +803,7 @@ def test_create_update_and_log_work_order():
             "failure_class": "CTRL",
             "problem_code": "IGVACT",
             "classification": "Control actuator",
-            "assigned_to": "Reliability Engineer",
+            "assigned_to": "Guna",
             "supervisor": "Blast Furnace Supervisor",
             "due_date": "2026-06-14T09:00:00+05:30",
             "planning_status": "planned",
@@ -834,7 +835,7 @@ def test_create_update_and_log_work_order():
 
     log_response = client.post(
         f"/api/work-orders/{work_order['id']}/logs",
-        json={"author": "Reliability Engineer", "entry_type": "observation", "content": "Actuator linkage has minor play."},
+        json={"author": "Guna", "entry_type": "observation", "content": "Actuator linkage has minor play."},
         headers=headers,
     )
     assert log_response.status_code == 200
@@ -853,7 +854,7 @@ def test_operator_cannot_create_work_order():
             "failure_class": "CTRL",
             "problem_code": "IGVACT",
             "classification": "Control actuator",
-            "assigned_to": "Reliability Engineer",
+            "assigned_to": "Guna",
             "supervisor": "Blast Furnace Supervisor",
             "due_date": "2026-06-14T09:00:00+05:30",
             "recommended_action": "Stroke actuator and verify position feedback.",
@@ -931,6 +932,8 @@ def test_technician_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
             return "openai"
 
         def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["prompt"] = prompt
+            captured["system_prompt"] = system_prompt
             captured["timeout_seconds"] = timeout_seconds
             yield LLMTextResponse(content="Neo bounded guidance.", used_live_provider=True, provider="openai")
 
@@ -945,6 +948,9 @@ def test_technician_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
         body = "".join(response.iter_text())
 
     assert captured["timeout_seconds"] == 15.0
+    assert "Technician name: Vinoth" in captured["prompt"]
+    assert "Address the technician by this name; do not address them by role." in captured["prompt"]
+    assert "address them by name and not by role" in captured["system_prompt"]
     assert "Neo bounded guidance" in body
 
 
@@ -1065,6 +1071,8 @@ def test_supervisor_assistant_stream_answers_waiting_approval_queue(monkeypatch)
     assert "WO-8311" in body
     assert "WO-8297" not in body
     assert "Queue focus: waiting_approval" in captured["prompt"]
+    assert "Supervisor name: Dhruv" in captured["prompt"]
+    assert "Address the supervisor by this name; do not address them by role." in captured["prompt"]
 
 
 def test_supervisor_assistant_uses_apology_for_off_topic_query_without_llm():
@@ -1093,6 +1101,8 @@ def test_supervisor_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
             return "openai"
 
         def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["prompt"] = prompt
+            captured["system_prompt"] = system_prompt
             captured["timeout_seconds"] = timeout_seconds
             yield LLMTextResponse(content="Neo supervisor bounded review.", used_live_provider=True, provider="openai")
 
@@ -1107,6 +1117,8 @@ def test_supervisor_assistant_stream_uses_interactive_llm_timeout(monkeypatch):
         body = "".join(response.iter_text())
 
     assert captured["timeout_seconds"] == 15.0
+    assert "Supervisor name: Dhruv" in captured["prompt"]
+    assert "address them by name and not by role" in captured["system_prompt"]
     assert "Neo supervisor bounded review" in body
 
 
@@ -1423,7 +1435,7 @@ def test_neo_welcome_streams_llm_context_and_done_event(monkeypatch):
         def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
             captured["prompt"] = prompt
             captured["timeout_seconds"] = timeout_seconds
-            yield LLMTextResponse(content="Supervisor welcome streamed from the LLM.", used_live_provider=True, provider="openai")
+            yield LLMTextResponse(content="Dhruv, supervisor welcome streamed from the LLM.", used_live_provider=True, provider="openai")
 
     monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
     with client.stream(
@@ -1437,8 +1449,10 @@ def test_neo_welcome_streams_llm_context_and_done_event(monkeypatch):
 
     assert captured["timeout_seconds"] == 15.0
     assert "Supervisor Attention" in captured["prompt"]
+    assert "User: Dhruv (maintenance_supervisor)" in captured["prompt"]
+    assert "Address the user by the name Dhruv; do not address them by role." in captured["prompt"]
     assert '"type": "meta"' in body
-    assert "Supervisor welcome streamed from the LLM." in body
+    assert "Dhruv, supervisor welcome streamed from the LLM." in body
     assert '"type": "done"' in body
     assert '"title": "Supervisor Attention"' in body
     assert '"provider": "openai"' in body
