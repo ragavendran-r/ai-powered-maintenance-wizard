@@ -88,6 +88,30 @@ const routeCases: RouteCase[] = [
     visible: async (page) => {
       await expect(page.getByRole('heading', { name: 'Learning and Tuning' })).toBeVisible()
       await expect(page.getByText('RAG vector DB')).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Approved Controls' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Model and Prompt Versions' })).toBeVisible()
+      const learningPanelOverlapArea = await page.evaluate(() => {
+        const panels = Array.from(document.querySelectorAll('.learningGrid .learningPanel')).slice(0, 2)
+        if (panels.length < 2) return 0
+        const [leftPanel, rightPanel] = panels.map((panel) => panel.getBoundingClientRect())
+        const overlapWidth = Math.max(0, Math.min(leftPanel.right, rightPanel.right) - Math.max(leftPanel.left, rightPanel.left))
+        const overlapHeight = Math.max(0, Math.min(leftPanel.bottom, rightPanel.bottom) - Math.max(leftPanel.top, rightPanel.top))
+        return overlapWidth * overlapHeight
+      })
+      expect(learningPanelOverlapArea).toBe(0)
+      const maxExampleCardOverflow = await page.evaluate(() => {
+        return Math.max(
+          0,
+          ...Array.from(document.querySelectorAll('.learningExample')).map((example) => {
+            const panel = example.closest('.learningPanel')
+            if (!panel) return 0
+            const exampleBounds = example.getBoundingClientRect()
+            const panelBounds = panel.getBoundingClientRect()
+            return Math.max(0, exampleBounds.right - panelBounds.right, panelBounds.left - exampleBounds.left)
+          }),
+        )
+      })
+      expect(maxExampleCardOverflow).toBeLessThanOrEqual(1)
     },
   },
 ]
