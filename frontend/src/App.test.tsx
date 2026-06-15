@@ -2966,6 +2966,8 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create JSONL snapshot' }))
     expect(await screen.findByText('Created dataset snapshot with 1 approved example')).toBeInTheDocument()
+    expect(screen.getByText('Latest dataset snapshot')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Download JSONL' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'JSONL' }).length).toBeGreaterThan(0)
 
     fireEvent.change(screen.getByLabelText('Adapter path'), { target: { value: 'file:///models/qwen2.5-lora' } })

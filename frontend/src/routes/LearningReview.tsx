@@ -155,6 +155,7 @@ export function LearningReviewRoute({
   const vectorStore = learningSummary?.vector_store
   const vectorProfile = vectorStore?.embedding_profile
   const ragMigrationNeeded = Boolean(vectorStore?.migration_required || (selectedEmbeddingProfile && activeEmbeddingProfile && selectedEmbeddingProfile.id !== activeEmbeddingProfile.id))
+  const latestDatasetSnapshot = learningDatasets[0] ?? learningSummary?.recent_snapshots?.[0]
 
   return (
     <section className="detailPanel learningView">
@@ -184,6 +185,18 @@ export function LearningReviewRoute({
         </button>
       </div>
       {learningMessage && <p className="inlineStatus learningToolbarStatus">{learningMessage}</p>}
+      {latestDatasetSnapshot && (
+        <div className="latestDatasetDownload">
+          <span>
+            <strong>Latest dataset snapshot</strong>
+            <small>{latestDatasetSnapshot.example_count} examples · {formatDate(latestDatasetSnapshot.created_at)}</small>
+          </span>
+          <button className="iconTextButton" onClick={() => downloadLearningSnapshot(latestDatasetSnapshot)}>
+            <Download size={16} />
+            Download JSONL
+          </button>
+        </div>
+      )}
       <div className="learningStats">
         {(['interactions', 'examples', 'approved_examples', 'snapshots', 'artifacts', 'promotions', 'deployments'] as const).map((key) => (
           <span className="learningStat" key={key}>
