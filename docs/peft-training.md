@@ -2,6 +2,29 @@
 
 Maintenance Wizard can queue PEFT tuning jobs through Learning Review and the NATS-backed learning worker. The worker prepares an immutable approved JSONL dataset plus `training_manifest.json`, then optionally invokes a trainer command. The bundled template at `scripts/peft/train_qwen_lora.py` provides a concrete local Qwen/SLM LoRA or QLoRA path without adding heavy dependencies to normal backend or frontend tests.
 
+## Learning Review Workflow
+
+Use this sequence in the Learning and Tuning view when preparing an adapter from approved Maintenance Wizard examples:
+
+1. **Refresh examples**: Scan accepted feedback, usable maintenance labels, completed work orders, closed learning-approved RCA cases, ingested documents, and approved assistant interactions into learning examples.
+2. **Review generated examples**: Inspect each example's instruction, expected output, judge score, and rationale before deciding whether it is useful for training.
+3. **Judge examples when needed**: Re-run the LLM-as-a-Judge scorer for examples that need a fresh quality score or fallback/live-provider rationale.
+4. **Approve examples**: Mark only specific, safe, outcome-backed examples for training; approved examples below the configured judge threshold are excluded from snapshots.
+5. **Create JSONL snapshot**: Freeze the approved, judge-qualified examples into an immutable JSONL dataset snapshot for audit and PEFT training.
+6. **Download JSONL if desired**: Use the latest snapshot's `Download JSONL` action to inspect or archive the exact training data outside the app.
+7. **Confirm PEFT trainer status**: Check that the PEFT trainer card says `external_command · configured` if you expect real adapter training, or `prepared_artifacts · not configured` if you only want dataset and manifest artifacts.
+8. **Enter PEFT adapter job name**: Provide the adapter/job name that the worker passes to the trainer as `MW_PEFT_ADAPTER_NAME`.
+9. **Queue PEFT tuning job**: Create the async `peft_tuning` job; the backend stores the dataset and training manifest and publishes the job for the learning worker when async learning is enabled.
+10. **Monitor Async Learning Jobs**: Watch the job move through queued, published, running, completed, or failed states so you know whether the worker processed it.
+11. **Review Learning Artifacts**: Confirm dataset, manifest, trainer log, adapter manifest, adapter registry, and adapter artifact records were created for the job.
+12. **Confirm candidate registration**: After successful trainer output, verify that the worker registered a candidate model version with the adapter path from `adapter_manifest.json`.
+13. **Deploy adapter**: Queue a runtime deployment check so the configured serving runtime, such as LM Studio, Ollama, or vLLM, proves it can answer using the candidate model name.
+14. **Run dataset evaluation**: Run the evaluation gate against the dataset, candidate model, and prompt version to confirm the candidate passes quality thresholds.
+15. **Promote adapter**: Promote only a candidate with a registered adapter path, verified runtime deployment, and passing evaluation so live LLM calls can resolve the active learning model.
+16. **Rollback if needed**: Use rollback controls to return serving to a previous active model version if the promoted adapter performs poorly.
+
+Click-only operation requires the local stack to already be running with NATS, the backend, and the learning worker. Actual adapter training also requires `LEARNING_PEFT_TRAINER_COMMAND` and trainer dependencies to be configured before the job is queued; otherwise the worker prepares dataset and manifest artifacts but does not train an adapter.
+
 ## Worker Contract
 
 The learning worker invokes `LEARNING_PEFT_TRAINER_COMMAND` without a shell and passes these environment variables:
