@@ -1,5 +1,9 @@
 # Maintenance Wizard Architecture
 
+## Visual Architecture Diagram
+
+![AI-Powered Maintenance Wizard visual architecture](diagrams/application-architecture.svg)
+
 ## System Diagram
 
 ```mermaid
