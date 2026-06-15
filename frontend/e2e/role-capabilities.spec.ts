@@ -123,6 +123,7 @@ test.describe('role capability rendering', () => {
     await primaryNavButton(page, 'Reports').click()
 
     await expect(page.getByRole('heading', { name: 'Structured Maintenance Insights and Reports' })).toBeVisible()
+    await expect(page.getByText(/LLM-dependent report content is limited to recommendation Markdown exports/)).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Structured Maintenance Reports' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Abnormal Alert Reports' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Engineer Maintenance Decision Summary' })).toBeVisible()

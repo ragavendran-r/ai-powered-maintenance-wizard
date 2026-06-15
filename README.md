@@ -4,27 +4,6 @@ Working prototype for an AI-powered maintenance decision-support system for stee
 
 The app helps maintenance engineers review plant health, diagnose equipment issues, inspect evidence, prioritize actions, ingest new maintenance context, export structured reports, and capture feedback that improves future recommendations.
 
-## Tech Stack
-
-| Layer | Technology |
-| --- | --- |
-| Backend API | Python 3, FastAPI, Pydantic, Uvicorn |
-| Backend persistence | SQLite for local/demo operational data, auth state, work orders, learning records, and lightweight startup migrations |
-| Frontend | React, TypeScript, Vite, CSS modules via `frontend/src/styles.css`, lucide-react icons |
-| Auth | Local SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI role guards, React session storage |
-| AI provider adapters | Mock deterministic provider, OpenAI-compatible chat completions, Ollama-compatible chat completions |
-| Local LLM runtime | LM Studio OpenAI-compatible server with Qwen2.5 7B Instruct GGUF as the recommended local setup |
-| Assistants | Neo for dashboard/work execution, Morpheus for diagnosis/RCA/PM planning, Smith for reliability prediction and technician-ready planning |
-| RAG/vector search | Qdrant for production-like document and approved-learning retrieval, deterministic hashed embeddings, SQLite/local-vector fallback |
-| Streaming and async jobs | NATS JetStream for IoT ingestion and learning jobs, durable consumers, explicit acknowledgments, DLQ handling |
-| Learning and tuning | LLM-as-a-Judge scoring, reviewer approval gates, JSONL dataset snapshots, PEFT/LoRA and QLoRA worker hooks, artifact registry |
-| Optional PEFT trainer | Hugging Face Transformers, PEFT, TRL, bitsandbytes, Accelerate, Datasets, PyTorch, Safetensors |
-| Document parsing | Text/Markdown/CSV/log/JSON decoding and embedded-text PDF extraction with `pypdf` |
-| Reports | Typed maintenance insight reports and Markdown export |
-| Tests | Pytest for backend, Vitest and Testing Library for frontend, Playwright for E2E/browser validation |
-| Local orchestration | Bash stack scripts, Docker containers for NATS and Qdrant, disposable Kind Kubernetes runner |
-| Tooling and docs | `.env.example`, architecture/demo/hardening docs, progress and goal ledgers |
-
 ## AI Capabilities
 
 The AI layer is an audited maintenance copilot layered after deterministic backend controls. Raw IoT ingestion, anomaly scoring, risk calculation, role permissions, and persisted work-order updates stay in deterministic flows; AI explains, retrieves evidence, guides role-specific work, and helps turn reviewed outcomes into reusable learning material.
@@ -50,6 +29,27 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 - Learning gates: Learning Review combines human approval with an LLM-as-a-Judge rubric before feedback, labels, work-order outcomes, documents, or assistant interactions can be reused for RAG or tuning. Reviewer controls also cover embedding profiles, Qdrant reindexing, and migration checks.
 - PEFT tuning path: Approved, judge-qualified examples can become JSONL snapshots for parameter-efficient fine-tuning. NATS-backed learning jobs write dataset and manifest artifacts with hashes, can invoke the optional bundled Qwen/SLM LoRA or QLoRA trainer template or another external trainer, and register adapter candidates only after training artifacts exist.
 - Practical impact: RAG improves recommendations immediately by grounding answers in current plant evidence. PEFT can later specialize a smaller local model on steel-maintenance terminology, status transitions, failure modes, and approved action patterns, with evaluation, deployment verification, promotion, and rollback remaining reviewer-controlled.
+
+## Tech Stack
+
+| Layer | Technology |
+| --- | --- |
+| Backend API | Python 3, FastAPI, Pydantic, Uvicorn |
+| Backend persistence | SQLite for local/demo operational data, auth state, work orders, learning records, and lightweight startup migrations |
+| Frontend | React, TypeScript, Vite, CSS modules via `frontend/src/styles.css`, lucide-react icons |
+| Auth | Local SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI role guards, React session storage |
+| AI provider adapters | Mock deterministic provider, OpenAI-compatible chat completions, Ollama-compatible chat completions |
+| Local LLM runtime | LM Studio OpenAI-compatible server with Qwen2.5 7B Instruct GGUF as the recommended local setup |
+| Assistants | Neo for dashboard/work execution, Morpheus for diagnosis/RCA/PM planning, Smith for reliability prediction and technician-ready planning |
+| RAG/vector search | Qdrant for production-like document and approved-learning retrieval, deterministic hashed embeddings, SQLite/local-vector fallback |
+| Streaming and async jobs | NATS JetStream for IoT ingestion and learning jobs, durable consumers, explicit acknowledgments, DLQ handling |
+| Learning and tuning | LLM-as-a-Judge scoring, reviewer approval gates, JSONL dataset snapshots, PEFT/LoRA and QLoRA worker hooks, artifact registry |
+| Optional PEFT trainer | Hugging Face Transformers, PEFT, TRL, bitsandbytes, Accelerate, Datasets, PyTorch, Safetensors |
+| Document parsing | Text/Markdown/CSV/log/JSON decoding and embedded-text PDF extraction with `pypdf` |
+| Reports | Typed maintenance insight reports and Markdown export |
+| Tests | Pytest for backend, Vitest and Testing Library for frontend, Playwright for E2E/browser validation |
+| Local orchestration | Bash stack scripts, Docker containers for NATS and Qdrant, disposable Kind Kubernetes runner |
+| Tooling and docs | `.env.example`, architecture/demo/hardening docs, progress and goal ledgers |
 
 ## Current Capabilities
 

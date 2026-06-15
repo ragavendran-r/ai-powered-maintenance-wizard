@@ -69,13 +69,15 @@ const routeCases: RouteCase[] = [
     },
   },
   {
-    name: 'ingestion',
+    name: 'admin ingestion',
     open: async (page) => {
-      await primaryNavButton(page, 'Ingestion').click()
+      await primaryNavButton(page, 'Admin').click()
     },
     visible: async (page) => {
       await expect(page.getByRole('heading', { name: 'Ingestion' })).toBeVisible()
       await expect(page.getByLabel('Ingestion JSON')).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Upload' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Import JSON' })).toBeVisible()
     },
   },
   {
