@@ -60,6 +60,7 @@ let neoResponseDelayMs = 0
 let assistantResponseDelayMs = 0
 let logoutResponseDelayMs = 0
 let maintenanceInsightsDelayMs = 0
+let ingestionResponseDelayMs = 0
 let learningJudgeDelayMs = 0
 let supervisorAssistantRequests: Array<{ work_order_id?: string; queue_name?: string; question?: string }> = []
 
@@ -1350,6 +1351,7 @@ beforeEach(() => {
   assistantResponseDelayMs = 0
   logoutResponseDelayMs = 0
   maintenanceInsightsDelayMs = 0
+  ingestionResponseDelayMs = 0
   learningJudgeDelayMs = 0
   apiWorkOrders = workOrders as WorkOrder[]
   apiPmPlans = []
@@ -2040,15 +2042,16 @@ beforeEach(() => {
         return Promise.resolve(new Response(JSON.stringify(recommendation), { status: 200 }))
       }
       if (url.endsWith('/api/ingest/document-file')) {
-        return Promise.resolve(new Response(JSON.stringify({ status: 'stored', documents: 1 }), { status: 200 }))
+        const response = new Response(JSON.stringify({ status: 'stored', documents: 1 }), { status: 200 })
+        return ingestionResponseDelayMs > 0 ? delayedResponse(response, init, ingestionResponseDelayMs) : Promise.resolve(response)
       }
       if (url.endsWith('/api/ingest/documents')) {
-        return Promise.resolve(new Response(JSON.stringify({ status: 'stored', documents: 1 }), { status: 200 }))
+        const response = new Response(JSON.stringify({ status: 'stored', documents: 1 }), { status: 200 })
+        return ingestionResponseDelayMs > 0 ? delayedResponse(response, init, ingestionResponseDelayMs) : Promise.resolve(response)
       }
       if (url.endsWith('/api/ingest/records')) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ status: 'stored', counts: { alerts: 1, equipment: 0 } }), { status: 200 }),
-        )
+        const response = new Response(JSON.stringify({ status: 'stored', counts: { alerts: 1, equipment: 0 } }), { status: 200 })
+        return ingestionResponseDelayMs > 0 ? delayedResponse(response, init, ingestionResponseDelayMs) : Promise.resolve(response)
       }
       if (url.endsWith('/feedback')) {
         return Promise.resolve(new Response(JSON.stringify({ stored: true }), { status: 200 }))
@@ -2247,6 +2250,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       ]),
     )
     expect(await screen.findByRole('heading', { name: 'Structured Maintenance Insights and Reports' })).toBeInTheDocument()
+    expect(screen.getByText(/LLM-dependent report content is limited to recommendation Markdown exports/)).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Structured Maintenance Reports' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Abnormal Alert Reports' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Engineer Maintenance Decision Summary' })).toBeInTheDocument()
@@ -2809,6 +2813,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('uploads document files from the ingestion panel', async () => {
+    ingestionResponseDelayMs = 100
     render(<App />)
     await signIn()
 
@@ -2818,6 +2823,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     const file = new File(['Inspect bearing housing when vibration increases.'], 'uploaded_sop.txt', { type: 'text/plain' })
     fireEvent.change(await screen.findByLabelText('Ingestion file'), { target: { files: [file] } })
     fireEvent.click(screen.getByRole('button', { name: /upload/i }))
+    expect(screen.getByRole('button', { name: /uploading/i })).toBeDisabled()
 
     await waitFor(() => {
       expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()
@@ -2863,6 +2869,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('imports document JSON from the ingestion panel', async () => {
+    ingestionResponseDelayMs = 100
     render(<App />)
     await signIn()
 
@@ -2874,6 +2881,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       },
     })
     fireEvent.click(screen.getByRole('button', { name: /import json/i }))
+    expect(screen.getByRole('button', { name: /importing/i })).toBeDisabled()
 
     await waitFor(() => {
       expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()

@@ -15,10 +15,12 @@ Purpose: prevent direct work on `main` and require changes to reach `main` throu
 
 Required behavior:
 
+- Run Git operations outside the sandbox/elevated host context by default in this macOS workspace so repository locks, hooks, GitHub CLI calls, and branch operations use the real host environment.
 - Before committing, confirm the current branch is not `main` or `master`.
 - If on `main` or `master`, create or switch to a feature branch before committing.
 - Do not push directly to `main` or `master`.
 - Push the feature branch and open a pull request targeting `main`.
+- After requested changes or fixes pass the relevant verification, merge the pull request when GitHub reports it mergeable unless the user explicitly asks to leave it open.
 - Keep pull request descriptions concise: include summary, linked task or issue IDs if any, and configuration/migration/follow-up notes if relevant.
 - Do not add verification steps, test commands, screenshots, logs, local file paths, or local image paths to pull request descriptions.
 
@@ -62,6 +64,7 @@ Before backend changes:
 
 - Inspect whether the change affects API routes, Pydantic schemas, SQLite schema, repository methods, retrieval, or frontend API types.
 - If SQLite schema changes, update `backend/app/data/database.py`, tests, `docs/architecture.md`, and reset/status guidance.
+- For small or tightly scoped backend changes, run focused backend tests that cover the touched behavior first. Use the full backend suite for broad, shared, risky, or release-level changes.
 
 After backend changes:
 
@@ -74,6 +77,7 @@ Before frontend changes:
 
 - Inspect `frontend/src/services/api.ts` for API type impact.
 - Check whether the workflow needs UI test coverage in `frontend/src/App.test.tsx`.
+- For small or tightly scoped frontend changes, run focused frontend tests or specs that cover the touched behavior first. Use the full frontend suite for broad, shared, risky, or release-level changes.
 
 After frontend changes:
 

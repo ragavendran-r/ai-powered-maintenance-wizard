@@ -24,6 +24,12 @@ Implement a working AI-powered Maintenance Wizard prototype in `/Users/ragaven/w
 
 ## Latest Session Update
 
+- Persisted the workflow rule that tested changes and fixes should be raised as pull requests and merged when mergeable, unless the user explicitly asks to leave the PR open.
+
+- Added focused ingestion action loading states on `codex/ingestion-spinner-report-docs`: Upload and Import JSON now show a spinner and disabled in-progress label while their respective requests run. Added explicit Reports-screen copy clarifying that LLM-dependent report content is limited to recommendation Markdown exports generated from live-provider recommendations, while structured insight reports, abnormal alert reports, decision summaries, and digital log entries come from deterministic plant data and persisted learning context. Moved the README AI Capabilities section above Tech Stack. Focused React coverage passed for ingestion upload/import and Reports copy. Focused Playwright validation passed for Admin-hosted Ingestion responsiveness and planner Reports visibility after updating the stale responsive route spec to open Admin for Ingestion.
+
+- Updated the repository operating instructions so future sessions run Git operations and Playwright validation outside the sandbox by default in this macOS workspace. The guidance now also says to use focused relevant test suites for small scoped changes instead of full-suite verification.
+
 - Added the hackathon objective traceability slide to the expanded AI capabilities PowerPoint deck, mapping each theme objective to concrete Maintenance Wizard mechanisms and proof outputs. Moved the updated 12-slide deck into `docs/decks/maintenance-wizard-ai-capabilities-hackathon-objectives.pptx`.
 - Verification for the hackathon-objectives deck passed with artifact-tool import/export, full 12-slide PNG render/contact-sheet review, package inspection confirming 12 slide XML parts and non-empty media assets, and `check_layout_quality.mjs` returning 0 errors. Remaining layout warnings were accepted for compact inherited text boxes and the dense executive traceability matrix after visual inspection.
 

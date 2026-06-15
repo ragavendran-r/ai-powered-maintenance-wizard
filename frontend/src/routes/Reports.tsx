@@ -75,6 +75,12 @@ export function ReportsRoute({
             <small>Structured reports, abnormal alerts, decision summaries, and generated log entries.</small>
           </div>
         </div>
+        <p className="emptyState">
+          LLM-dependent report content is limited to recommendation Markdown exports that include Morpheus diagnosis,
+          root-cause, reasoning, and learning-note fields when those recommendations were generated with a live provider.
+          Structured insight reports, abnormal alert reports, decision summaries, and digital log entries are generated
+          from deterministic plant data and persisted learning context.
+        </p>
         <div className="reportToolbar" aria-label="Report actions">
           <button className="outlineButton" type="button" onClick={() => refreshMaintenanceInsights()}>
             <RefreshCw size={16} />

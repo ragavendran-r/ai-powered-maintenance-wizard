@@ -422,6 +422,8 @@ export function App() {
   const [jsonMode, setJsonMode] = useState<'documents' | 'records'>('documents')
   const [jsonPayload, setJsonPayload] = useState('')
   const [ingestionMessage, setIngestionMessage] = useState('')
+  const [fileIngestionLoading, setFileIngestionLoading] = useState(false)
+  const [jsonIngestionLoading, setJsonIngestionLoading] = useState(false)
   const [streamingStatus, setStreamingStatus] = useState<StreamingStatus | null>(null)
   const [feedbackMessage, setFeedbackMessage] = useState('')
   const [feedbackRootCause, setFeedbackRootCause] = useState('')
@@ -2510,6 +2512,7 @@ export function App() {
       setIngestionMessage('Select a file before upload')
       return
     }
+    setFileIngestionLoading(true)
     try {
       const result = await api.ingestDocumentFile({
         file: ingestFile,
@@ -2526,10 +2529,13 @@ export function App() {
       await loadDashboard()
     } catch {
       setIngestionMessage('File ingestion failed')
+    } finally {
+      setFileIngestionLoading(false)
     }
   }
 
   async function ingestJsonPayload() {
+    setJsonIngestionLoading(true)
     try {
       const parsed = JSON.parse(jsonPayload)
       if (jsonMode === 'documents') {
@@ -2549,6 +2555,8 @@ export function App() {
       await loadDashboard()
     } catch {
       setIngestionMessage('JSON ingestion failed')
+    } finally {
+      setJsonIngestionLoading(false)
     }
   }
 
@@ -2931,7 +2939,9 @@ export function App() {
             ingestSelectedFile={ingestSelectedFile}
             ingestSourceType={ingestSourceType}
             ingestTitle={ingestTitle}
+            fileIngestionLoading={fileIngestionLoading}
             ingestionMessage={ingestionMessage}
+            jsonIngestionLoading={jsonIngestionLoading}
             jsonMode={jsonMode}
             jsonPayload={jsonPayload}
             selectedEquipment={selectedEquipment}

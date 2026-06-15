@@ -2,11 +2,13 @@ import { Activity, FileJson, Upload } from 'lucide-react'
 import type { HealthSummary, StreamingStatus } from '../services/api'
 
 export function IngestionRoute({
+  fileIngestionLoading,
   ingestJsonPayload,
   ingestSelectedFile,
   ingestSourceType,
   ingestTitle,
   ingestionMessage,
+  jsonIngestionLoading,
   jsonMode,
   jsonPayload,
   selectedEquipment,
@@ -18,11 +20,13 @@ export function IngestionRoute({
   setJsonPayload,
   streamingStatus,
 }: {
+  fileIngestionLoading: boolean
   ingestJsonPayload: () => void
   ingestSelectedFile: () => void
   ingestSourceType: string
   ingestTitle: string
   ingestionMessage: string
+  jsonIngestionLoading: boolean
   jsonMode: 'documents' | 'records'
   jsonPayload: string
   selectedEquipment: string
@@ -93,9 +97,9 @@ export function IngestionRoute({
             onChange={(event) => setIngestFile(event.target.files?.[0] ?? null)}
           />
         </label>
-        <button onClick={ingestSelectedFile} title="Upload maintenance document">
-          <Upload size={16} />
-          Upload
+        <button onClick={ingestSelectedFile} disabled={fileIngestionLoading} title="Upload maintenance document">
+          {fileIngestionLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Upload size={16} />}
+          {fileIngestionLoading ? 'Uploading...' : 'Upload'}
         </button>
       </div>
       <div className="jsonIngest">
@@ -112,9 +116,9 @@ export function IngestionRoute({
           onChange={(event) => setJsonPayload(event.target.value)}
           placeholder={jsonMode === 'documents' ? '{"documents":[...]}' : '{"alerts":[...],"sensor_readings":[...]}'}
         />
-        <button className="textButton" onClick={ingestJsonPayload}>
-          <FileJson size={16} />
-          Import JSON
+        <button className="textButton" onClick={ingestJsonPayload} disabled={jsonIngestionLoading}>
+          {jsonIngestionLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <FileJson size={16} />}
+          {jsonIngestionLoading ? 'Importing...' : 'Import JSON'}
         </button>
       </div>
       {ingestionMessage && <p className="inlineStatus">{ingestionMessage}</p>}

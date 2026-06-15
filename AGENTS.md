@@ -59,6 +59,8 @@ Add tests with new behavior. Place tests under `tests/` or beside source files u
 
 Cover parsing, validation, API boundaries, and error handling first. Add regression tests when practical.
 
+For small or tightly scoped changes, run only the relevant focused test suites or specs that cover the touched behavior. Reserve full frontend/backend test suites for broad, shared, risky, or release-level changes.
+
 ## Commit & Pull Request Guidelines
 
 Git history is not available in this workspace, so no existing convention can be inferred. Use concise, imperative commit messages, for example `Add work order parser` or `Fix retry handling`.
@@ -81,7 +83,9 @@ Keep `docs/progress.md` updated at the end of each implementation session. Recor
 
 ## Project Rules And Hooks
 
-Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/hooks.md` for branch, pull request, verification, notification, UI validation, and demo handoff guardrails. In particular, do not commit or push directly to `main`; use a feature branch and raise a pull request targeting `main`. For UI layout, streaming, navigation, role visibility, or interaction changes, use the Playwright validation flow documented in `docs/hooks.md`. Send desktop and mobile notifications whenever a requested task is complete; if either notification channel is unavailable, not configured, or fails, mention that in the final response. Include remaining active-goal tasks and ETA ranges whenever a task is completed. Spawn subagents for cleanly parallelizable work when appropriate, and close them as soon as their result has been consumed.
+Follow `docs/rules.md` for durable engineering and product rules. Follow `docs/hooks.md` for branch, pull request, verification, notification, UI validation, and demo handoff guardrails. In particular, do not commit or push directly to `main`; use a feature branch and raise a pull request targeting `main`. After requested changes or fixes pass the relevant verification, raise a pull request and merge it when it is mergeable unless the user explicitly asks to leave it open. For UI layout, streaming, navigation, role visibility, or interaction changes, use the Playwright validation flow documented in `docs/hooks.md`. Send desktop and mobile notifications whenever a requested task is complete; if either notification channel is unavailable, not configured, or fails, mention that in the final response. Include remaining active-goal tasks and ETA ranges whenever a task is completed. Spawn subagents for cleanly parallelizable work when appropriate, and close them as soon as their result has been consumed.
+
+Run Git operations and Playwright validation outside the sandbox/elevated host context by default in this macOS workspace. Do not spend an initial run on sandboxed Git or sandboxed Chromium unless the host setup changes.
 
 ## Latest Session Progress
 
