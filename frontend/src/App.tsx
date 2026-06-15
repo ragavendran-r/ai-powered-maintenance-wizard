@@ -457,6 +457,7 @@ export function App() {
   const [artifactCleanupResult, setArtifactCleanupResult] = useState<LearningArtifactCleanupResult | null>(null)
   const [learningMessage, setLearningMessage] = useState('')
   const [learningLoading, setLearningLoading] = useState(false)
+  const [learningJudgingExampleId, setLearningJudgingExampleId] = useState<string | null>(null)
   const [learningDatasetName, setLearningDatasetName] = useState('maintenance-wizard-learning-snapshot')
   const [learningDatasetDescription, setLearningDatasetDescription] = useState('Approved examples for local LLM adapter tuning and evaluation.')
   const [adapterProvider, setAdapterProvider] = useState('openai')
@@ -799,7 +800,11 @@ export function App() {
       const summary = await api.learningSummary()
       setLearningExamples(examples)
       setLearningSummary(summary)
-      setLearningMessage(`Refreshed ${examples.length} learning example${examples.length === 1 ? '' : 's'}`)
+      setLearningMessage(
+        examples.length > 0
+          ? `Refreshed ${examples.length} learning example${examples.length === 1 ? '' : 's'}`
+          : 'Refresh completed, but no learning examples were found. Add accepted feedback, usable maintenance labels, completed work orders, closed RCA cases, ingested documents, or approved assistant interactions, then refresh again.',
+      )
       setApiState('connected')
     } catch {
       setLearningMessage('Learning examples could not be refreshed')
@@ -822,6 +827,8 @@ export function App() {
   }
 
   async function judgeLearningExample(example: LearningExample) {
+    setLearningJudgingExampleId(example.id)
+    setLearningMessage(`Judging ${example.source_type.replace(/_/g, ' ')} example. Live LM Studio checks can take up to 15 seconds before falling back.`)
     try {
       const updated = await api.judgeLearningExample(example.id)
       setLearningExamples((items) => items.map((item) => (item.id === updated.id ? updated : item)))
@@ -830,6 +837,8 @@ export function App() {
       setLearningMessage(`Judge scored ${updated.source_type} at ${Math.round(updated.judge_score * 100)}%`)
     } catch {
       setLearningMessage('Learning judge could not score the example')
+    } finally {
+      setLearningJudgingExampleId(null)
     }
   }
 
@@ -2872,6 +2881,7 @@ export function App() {
         learningDeployments={learningDeployments}
         learningEmbeddingProfiles={learningEmbeddingProfiles}
         learningExamples={learningExamples}
+        learningJudgingExampleId={learningJudgingExampleId}
         learningLoading={learningLoading}
         learningMessage={learningMessage}
         learningSummary={learningSummary}

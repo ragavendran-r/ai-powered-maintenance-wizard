@@ -60,6 +60,7 @@ let neoResponseDelayMs = 0
 let assistantResponseDelayMs = 0
 let logoutResponseDelayMs = 0
 let maintenanceInsightsDelayMs = 0
+let learningJudgeDelayMs = 0
 let supervisorAssistantRequests: Array<{ work_order_id?: string; queue_name?: string; question?: string }> = []
 
 it('shows waiting for material before in progress in the work order workflow', () => {
@@ -1076,6 +1077,8 @@ const learningDeployment = {
 
 let learningDeploymentResponses = [learningDeployment]
 let learningArtifactCleanupRequests: unknown[] = []
+let learningSummaryExamples = [learningExample]
+let learningRefreshExamples = [learningExample]
 
 const learningArtifactCleanupResult = {
   dry_run: true,
@@ -1347,10 +1350,13 @@ beforeEach(() => {
   assistantResponseDelayMs = 0
   logoutResponseDelayMs = 0
   maintenanceInsightsDelayMs = 0
+  learningJudgeDelayMs = 0
   apiWorkOrders = workOrders as WorkOrder[]
   apiPmPlans = []
   learningDeploymentResponses = [learningDeployment]
   learningArtifactCleanupRequests = []
+  learningSummaryExamples = [learningExample]
+  learningRefreshExamples = [learningExample]
   supervisorAssistantRequests = []
   window.sessionStorage.clear()
   api.setSession(null)
@@ -1476,22 +1482,21 @@ beforeEach(() => {
         )
       }
       if (url.endsWith('/api/learning/summary')) {
-        return Promise.resolve(new Response(JSON.stringify(learningSummaryPayload()), { status: 200 }))
+        return Promise.resolve(new Response(JSON.stringify(learningSummaryPayload(learningSummaryExamples)), { status: 200 }))
       }
       if (url.endsWith('/api/learning/examples/refresh')) {
-        return Promise.resolve(new Response(JSON.stringify([learningExample]), { status: 200 }))
+        return Promise.resolve(new Response(JSON.stringify(learningRefreshExamples), { status: 200 }))
       }
       if (url.includes('/api/learning/examples/') && url.endsWith('/judge')) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              ...learningExample,
-              judge_score: 0.91,
-              judge_rationale: 'Live LLM judge confirmed the example is specific, safe, and outcome-backed.',
-            }),
-            { status: 200 },
-          ),
+        const response = new Response(
+          JSON.stringify({
+            ...learningExample,
+            judge_score: 0.91,
+            judge_rationale: 'Live LLM judge confirmed the example is specific, safe, and outcome-backed.',
+          }),
+          { status: 200 },
         )
+        return learningJudgeDelayMs > 0 ? delayedResponse(response, init, learningJudgeDelayMs) : Promise.resolve(response)
       }
       if (url.includes('/api/learning/examples/')) {
         const body = JSON.parse((init?.body as string) ?? '{}')
@@ -3001,6 +3006,41 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Promote adapter' }))
     expect(await screen.findByText('Promoted adapter qwen2.5-7b-instruct-lora-candidate with audit record LPROMO-NEW')).toBeInTheDocument()
   }, 10_000)
+
+  it('explains when refreshing learning examples finds no training sources', async () => {
+    learningSummaryExamples = []
+    learningRefreshExamples = []
+
+    render(<App />)
+    await signIn('reliability@plant.local')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Learning and Tuning' }))
+    expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh examples' }))
+
+    expect(
+      await screen.findByText(
+        'Refresh completed, but no learning examples were found. Add accepted feedback, usable maintenance labels, completed work orders, closed RCA cases, ingested documents, or approved assistant interactions, then refresh again.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('shows progress while a learning example is being judged', async () => {
+    learningJudgeDelayMs = 250
+
+    render(<App />)
+    await signIn('reliability@plant.local')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Learning and Tuning' }))
+    expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Judge' }))
+
+    expect(await screen.findByRole('button', { name: 'Judging...' })).toBeDisabled()
+    expect(screen.getByText('Judging feedback example. Live LM Studio checks can take up to 15 seconds before falling back.')).toBeInTheDocument()
+    expect(await screen.findByText('Judge scored feedback at 91%')).toBeInTheDocument()
+  })
 
   it('hides restricted actions for operators', async () => {
     render(<App />)

@@ -51,6 +51,7 @@ export function LearningReviewRoute({
   learningDeployments,
   learningEmbeddingProfiles,
   learningExamples,
+  learningJudgingExampleId,
   learningLoading,
   learningMessage,
   learningSummary,
@@ -101,6 +102,7 @@ export function LearningReviewRoute({
   learningDeployments: LearningModelDeployment[]
   learningEmbeddingProfiles: LearningEmbeddingProfile[]
   learningExamples: LearningExample[]
+  learningJudgingExampleId: string | null
   learningLoading: boolean
   learningMessage: string
   learningSummary: LearningSummary | null
@@ -181,6 +183,7 @@ export function LearningReviewRoute({
           Create JSONL snapshot
         </button>
       </div>
+      {learningMessage && <p className="inlineStatus learningToolbarStatus">{learningMessage}</p>}
       <div className="learningStats">
         {(['interactions', 'examples', 'approved_examples', 'snapshots', 'artifacts', 'promotions', 'deployments'] as const).map((key) => (
           <span className="learningStat" key={key}>
@@ -455,8 +458,9 @@ export function LearningReviewRoute({
                 <blockquote>{clipText(example.expected_output, 220)}</blockquote>
                 {example.judge_rationale && <p className="judgeRationale">{clipText(example.judge_rationale, 220)}</p>}
                 <div className="learningExampleActions">
-                  <button className="outlineButton" onClick={() => judgeLearningExample(example)}>
-                    Judge
+                  <button className="outlineButton" onClick={() => judgeLearningExample(example)} disabled={learningJudgingExampleId === example.id}>
+                    {learningJudgingExampleId === example.id ? <span className="loadingSpinner" aria-hidden="true" /> : null}
+                    {learningJudgingExampleId === example.id ? 'Judging...' : 'Judge'}
                   </button>
                   <button className={example.approved ? 'outlineButton' : 'textButton'} onClick={() => toggleLearningApproval(example)}>
                     {example.approved ? 'Remove approval' : 'Approve'}
@@ -695,7 +699,6 @@ export function LearningReviewRoute({
           </div>
         </section>
       </div>
-      {learningMessage && <p className="inlineStatus">{learningMessage}</p>}
     </section>
   )
 }
