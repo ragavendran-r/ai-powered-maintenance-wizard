@@ -101,6 +101,7 @@ Important docs:
 - `docs/auth-authorization-plan.md`: local login, roles, permissions, and test strategy.
 - `docs/goal-tracker.md`: durable goal ledger from project start.
 - `docs/progress.md`: session-level progress notes and verification history.
+- `docs/setup-and-running.md`: local setup, stack startup, demo login, LM Studio, verification, and troubleshooting instructions.
 - `docs/demo_script.md`: suggested demo walkthrough.
 - `docs/local-llm-lm-studio.md`: LM Studio setup for local OpenAI-compatible LLM inference.
 - `docs/peft-training.md`: optional Qwen/SLM LoRA or QLoRA trainer template setup and worker contract.
