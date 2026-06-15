@@ -6,6 +6,7 @@ import type {
   AuthUser,
   DashboardSummary,
   LearningEmbeddingProfile,
+  LearningExample,
   MaintenanceInsightReportBundle,
   LearningSummary,
   PmPlan,
@@ -714,6 +715,28 @@ const learningSummary: LearningSummary = {
   },
 }
 
+const learningExamples: LearningExample[] = [
+  {
+    id: 'learn-maintenance-label-long',
+    source_id: 'LABEL-CC-PUMP-03',
+    source_type: 'maintenance_label',
+    equipment_id: 'CC-PUMP-03',
+    instruction: 'Map maintenance evidence to failure mode, component, root cause, action class, and outcome.',
+    input_text: 'Seal flush strainer restriction reduced pump margin with standby auto-start and increased shift checks.',
+    expected_output:
+      'Root cause: Seal flush strainer restriction reduced pump margin Action class: Cleaned seal flush strainer, verified standby pump auto-start, and increased shift flow checks Outcome: Resolved with partial downtime',
+    metadata: {},
+    judge_score: 0.86,
+    judge_label: 'training_worthy',
+    judge_rationale:
+      'Deterministic judge fallback used because OpenAI call failed or returned invalid JSON. Source=maintenance_label; score reflects specificity, outcome evidence, and safety context.',
+    judge_used_live_provider: false,
+    judge_provider: 'openai',
+    approved: true,
+    created_at: '2026-06-15T05:18:00+00:00',
+  },
+]
+
 const streamingStatus: StreamingStatus = {
   enabled: true,
   state: 'connected',
@@ -1073,7 +1096,11 @@ export async function installMaintenanceApi(page: Page, initialUser: AuthUser = 
       await route.fulfill(json(learningSummary))
       return
     }
-    if (path === '/api/learning/examples' || path === '/api/learning/datasets' || path === '/api/learning/model-deployments') {
+    if (path === '/api/learning/examples') {
+      await route.fulfill(json(learningExamples))
+      return
+    }
+    if (path === '/api/learning/datasets' || path === '/api/learning/model-deployments') {
       await route.fulfill(json([]))
       return
     }
