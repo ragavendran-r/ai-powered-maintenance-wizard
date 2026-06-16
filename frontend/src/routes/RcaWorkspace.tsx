@@ -39,11 +39,20 @@ export function RcaWorkspace({
   setSelectedWorkOrderId: (workOrderId: string) => void
   workOrders: WorkOrder[]
 }) {
-  const selectedCase = rcaCases.find((item) => item.id === selectedRcaCaseId) ?? rcaCases[0]
+  const selectedCase = selectedRcaCaseId ? rcaCases.find((item) => item.id === selectedRcaCaseId) : undefined
   const selectedWorkOrder = workOrders.find((item) => item.id === selectedWorkOrderId) ?? workOrders[0]
+  const existingCaseForSelectedWorkOrder = selectedWorkOrder
+    ? rcaCases.find((item) => item.work_order_id === selectedWorkOrder.id)
+    : undefined
   const selectedCaseWorkOrder = selectedCase
     ? workOrders.find((item) => item.id === selectedCase.work_order_id)
     : selectedWorkOrder
+  const selectedWorkOrderCaseIsActive = Boolean(existingCaseForSelectedWorkOrder && selectedCase?.id === existingCaseForSelectedWorkOrder.id)
+  const workOrderCaseActionLabel = selectedWorkOrderCaseIsActive
+    ? 'RCA case selected'
+    : existingCaseForSelectedWorkOrder
+    ? 'Use existing RCA for work order'
+    : 'Create RCA for work order'
   const fishboneEntries: [string, string[]][] = selectedCase ? Object.entries(selectedCase.fishbone) : []
   const visibleFishboneEntries: [string, string[]][] = fishboneEntries.length
     ? fishboneEntries
@@ -59,46 +68,97 @@ export function RcaWorkspace({
     streamEndRef.current?.scrollIntoView({ block: 'end' })
   }, [rcaDraftStreamText])
 
+  useEffect(() => {
+    if (!selectedCase?.work_order_id || selectedWorkOrderId === selectedCase.work_order_id) return
+    if (!workOrders.some((item) => item.id === selectedCase.work_order_id)) return
+    setSelectedWorkOrderId(selectedCase.work_order_id)
+  }, [selectedCase?.work_order_id, selectedWorkOrderId, setSelectedWorkOrderId, workOrders])
+
+  function selectRcaCase(caseId: string) {
+    setSelectedRcaCaseId(caseId)
+    const nextCase = rcaCases.find((item) => item.id === caseId)
+    if (nextCase?.work_order_id) {
+      setSelectedWorkOrderId(nextCase.work_order_id)
+    }
+  }
+
+  function selectWorkOrder(workOrderId: string) {
+    setSelectedWorkOrderId(workOrderId)
+    const linkedCase = rcaCases.find((item) => item.work_order_id === workOrderId)
+    setSelectedRcaCaseId(linkedCase?.id ?? '')
+  }
+
+  function useOrCreateRcaForSelectedWorkOrder() {
+    if (existingCaseForSelectedWorkOrder) {
+      setSelectedRcaCaseId(existingCaseForSelectedWorkOrder.id)
+      return
+    }
+    createRcaCase()
+  }
+
   return (
     <section className="rcaWorkspace" aria-label="RCA workspace">
       <div className="sectionHeader">
         <SearchCheck size={18} />
         <h2>RCA Workspace</h2>
       </div>
-      <div className="rcaToolbar">
-        <label className="field compactField">
-          <span>RCA case</span>
-          <select value={selectedCase?.id ?? ''} onChange={(event) => setSelectedRcaCaseId(event.target.value)}>
-            {rcaCases.length === 0 && <option value="">No RCA cases</option>}
-            {rcaCases.map((item) => (
-              <option value={item.id} key={item.id}>
-                {item.id} · {item.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field compactField">
-          <span>Work order context</span>
-          <select value={selectedWorkOrder?.id ?? ''} onChange={(event) => setSelectedWorkOrderId(event.target.value)}>
-            {workOrders.map((item) => (
-              <option value={item.id} key={item.id}>
-                {item.id} · {item.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="outlineButton" onClick={createRcaCase} disabled={rcaLoading || !selectedWorkOrder}>
-          <GitBranch size={16} />
-          New RCA
-        </button>
-        <button className="textButton" onClick={() => draftRcaCase(selectedCase?.id)} disabled={rcaLoading || (!selectedCase && !selectedWorkOrder)}>
-          {rcaLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
-          Morpheus draft
-        </button>
-        <button className="outlineButton" onClick={() => selectedCase && closeRcaCase(selectedCase.id)} disabled={rcaLoading || !selectedCase || selectedCase.status === 'closed'}>
-          <CheckCircle2 size={16} />
-          Close and learn
-        </button>
+      <div className="rcaToolbar" aria-label="RCA workflow controls">
+        <section className="rcaControlGroup">
+          <div className="miniHeader">
+            <span className="stepBadge">1</span>
+            <h3>Work order context</h3>
+          </div>
+          <label className="field compactField">
+            <span>Work order</span>
+            <select value={selectedWorkOrder?.id ?? ''} onChange={(event) => selectWorkOrder(event.target.value)}>
+              {workOrders.map((item) => (
+                <option value={item.id} key={item.id}>
+                  {item.id} · {item.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="rcaControlHint">RCA starts from the selected work order. Keep one active RCA per work order; capture multiple causes as hypotheses inside the case.</p>
+        </section>
+        <section className="rcaControlGroup">
+          <div className="miniHeader">
+            <span className="stepBadge">2</span>
+            <h3>RCA case</h3>
+          </div>
+          <label className="field compactField">
+            <span>Selected RCA case</span>
+            <select value={selectedCase?.id ?? ''} onChange={(event) => selectRcaCase(event.target.value)}>
+              <option value="">No selected RCA case</option>
+              {rcaCases.map((item) => (
+                <option value={item.id} key={item.id}>
+                  {item.id} · {item.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="outlineButton rcaWideButton"
+            onClick={useOrCreateRcaForSelectedWorkOrder}
+            disabled={rcaLoading || !selectedWorkOrder || selectedWorkOrderCaseIsActive}
+          >
+            <GitBranch size={16} />
+            {workOrderCaseActionLabel}
+          </button>
+        </section>
+        <section className="rcaControlGroup rcaActionGroup">
+          <div className="miniHeader">
+            <span className="stepBadge">3</span>
+            <h3>Review actions</h3>
+          </div>
+          <button className="textButton rcaWideButton" onClick={() => selectedCase && draftRcaCase(selectedCase.id)} disabled={rcaLoading || !selectedCase}>
+            {rcaLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
+            Morpheus draft selected RCA
+          </button>
+          <button className="outlineButton rcaWideButton" onClick={() => selectedCase && closeRcaCase(selectedCase.id)} disabled={rcaLoading || !selectedCase || selectedCase.status === 'closed'}>
+            <CheckCircle2 size={16} />
+            Close selected RCA and learn
+          </button>
+        </section>
       </div>
       {(rcaLoading || rcaDraftStreamText) && (
         <article className="dataPanel rcaDraftStream" aria-label="Morpheus RCA draft stream">
