@@ -2239,11 +2239,12 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) => url.toString().includes('/api/assets/RM-DRIVE-01?sections=summary')),
     ).toBe(true)
-    const assetReliabilityTab = screen
-      .getAllByRole('button', { name: 'Reliability' })
-      .find((button) => button.className === '')
-    if (!assetReliabilityTab) throw new Error('Missing asset Reliability tab')
+    const assetTabs = screen.getByRole('tablist', { name: 'Asset detail tabs' })
+    expect(within(assetTabs).getByRole('tab', { name: 'Summary' })).toHaveAttribute('aria-selected', 'true')
+    const assetReliabilityTab = within(assetTabs).getByRole('tab', { name: 'Reliability' })
+    expect(assetReliabilityTab).toHaveAttribute('aria-selected', 'false')
     fireEvent.click(assetReliabilityTab)
+    expect(assetReliabilityTab).toHaveAttribute('aria-selected', 'true')
     expect(await screen.findByText('MTBF')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Smith' })).toBeInTheDocument()
     expect(screen.getByText('Predictive failure assistant')).toBeInTheDocument()
@@ -2265,7 +2266,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) => url.toString().includes('/api/assets/RM-DRIVE-01/reliability/stream')),
     ).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: 'Documents' }))
+    const assetDocumentsTab = within(assetTabs).getByRole('tab', { name: 'Documents' })
+    fireEvent.click(assetDocumentsTab)
+    expect(assetDocumentsTab).toHaveAttribute('aria-selected', 'true')
     expect(await screen.findByText('Knowledge Retrieval')).toBeInTheDocument()
     expect(screen.getAllByText('Hot Strip Mill Main Drive Vibration SOP').length).toBeGreaterThan(0)
     expect(screen.getByText('Main Drive Vibration Shift Log')).toBeInTheDocument()

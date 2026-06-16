@@ -2689,8 +2689,7 @@ h3 {
   text-align: left;
 }
 
-.linkButton:not(:disabled):hover,
-.tabRow button:not(:disabled):hover {
+.linkButton:not(:disabled):hover {
   color: var(--color-link-hover);
   text-decoration: underline;
 }
@@ -2718,26 +2717,16 @@ h3 {
   margin-bottom: 8px;
 }
 
-.tabRow {
-  border-bottom: 1px solid var(--color-border-panel);
-  display: flex;
-  gap: 8px;
+.assetTabsShell {
   grid-column: 1 / -1;
 }
 
-.tabRow button {
-  background: transparent;
-  border: 0;
-  border-bottom: 3px solid transparent;
-  color: var(--color-text-muted);
-  min-height: 42px;
-  padding: 0 12px;
+.assetTabsShell .planningTabRow {
+  align-self: start;
 }
 
-.tabRow button.selected {
-  border-bottom-color: var(--color-link);
-  color: var(--color-text-heading);
-  font-weight: 800;
+.assetTabPanel {
+  display: contents;
 }
 
 .performanceInsights {
@@ -4359,15 +4348,6 @@ h3 {
 
   .pageHeader h1 {
     overflow-wrap: anywhere;
-  }
-
-  .tabRow {
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-
-  .tabRow button {
-    flex: 1 1 120px;
   }
 
   .planningTabRow {
