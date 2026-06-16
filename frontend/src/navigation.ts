@@ -127,12 +127,8 @@ export const jobNavigationItems: JobNavigationItem[] = [
     label: 'Learning and Tuning',
     icon: 'learning',
     purpose: 'RAG health, approved examples, PEFT tuning, evaluation, and model promotion.',
-    roles: ['admin', 'maintenance_engineer', 'reliability_engineer'],
-    rolePriority: {
-      reliability_engineer: 2,
-      maintenance_engineer: 3,
-      admin: 7,
-    },
+    roles: [],
+    rolePriority: {},
   },
   {
     id: 'admin',

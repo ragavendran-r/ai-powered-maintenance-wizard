@@ -29,7 +29,6 @@ export const permissionsByRole: Record<UserRole, readonly Permission[]> = {
     'createWorkOrders',
     'decisionSupport',
     'feedback',
-    'learningReview',
   ],
   maintenance_technician: [
     'createWorkOrders',
@@ -46,7 +45,6 @@ export const permissionsByRole: Record<UserRole, readonly Permission[]> = {
     'decisionSupport',
     'feedback',
     'ingestion',
-    'learningReview',
     'streaming',
   ],
   planner: [

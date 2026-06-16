@@ -114,6 +114,22 @@ type ToastNotification = {
   variant: ToastVariant
 }
 
+type AdminTab = 'ingestion' | 'users' | 'learning'
+
+function toDatetimeLocalValue(value: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return localDate.toISOString().slice(0, 16)
+}
+
+function fromDatetimeLocalValue(value: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString()
+}
+
 const emptyMaintenanceInsightLoading: MaintenanceInsightLoading = {
   summary: false,
   structuredReports: false,
@@ -176,6 +192,118 @@ function ToastStack({
           </article>
         )
       })}
+    </div>
+  )
+}
+
+function WorkOrderReviewDialog({
+  draft,
+  onCancel,
+  onChange,
+  onSubmit,
+  submitting,
+}: {
+  draft: WorkOrderCreateRequest
+  onCancel: () => void
+  onChange: (updates: Partial<WorkOrderCreateRequest>) => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  submitting: boolean
+}) {
+  return (
+    <div className="modalOverlay" role="presentation">
+      <form className="modalPanel workOrderReviewDialog" role="dialog" aria-modal="true" aria-labelledby="work-order-review-title" onSubmit={onSubmit}>
+        <div className="sectionHeader compactHeader">
+          <Briefcase size={18} />
+          <h2 id="work-order-review-title">Review Work Order</h2>
+        </div>
+        <p className="modalContext">
+          Verify the prefilled details before submitting.
+          <small>{draft.equipment_id} · Priority {draft.priority} · {draft.work_type}</small>
+        </p>
+        <div className="workOrderReviewGrid">
+          <label className="field">
+            <span>Equipment</span>
+            <input value={draft.equipment_id} onChange={(event) => onChange({ equipment_id: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Priority</span>
+            <input
+              min="1"
+              max="5"
+              type="number"
+              value={draft.priority}
+              onChange={(event) => onChange({ priority: Number(event.target.value) || 1 })}
+              required
+            />
+          </label>
+          <label className="field workOrderWideField">
+            <span>Work order title</span>
+            <input value={draft.title} onChange={(event) => onChange({ title: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Work type</span>
+            <input value={draft.work_type} onChange={(event) => onChange({ work_type: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Failure class</span>
+            <input value={draft.failure_class} onChange={(event) => onChange({ failure_class: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Problem code</span>
+            <input value={draft.problem_code} onChange={(event) => onChange({ problem_code: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Due date</span>
+            <input
+              type="datetime-local"
+              value={toDatetimeLocalValue(draft.due_date)}
+              onChange={(event) => onChange({ due_date: fromDatetimeLocalValue(event.target.value) })}
+              required
+            />
+          </label>
+          <label className="field">
+            <span>Assigned to</span>
+            <input value={draft.assigned_to} onChange={(event) => onChange({ assigned_to: event.target.value })} required />
+          </label>
+          <label className="field">
+            <span>Supervisor</span>
+            <input value={draft.supervisor} onChange={(event) => onChange({ supervisor: event.target.value })} required />
+          </label>
+          <label className="field workOrderWideField">
+            <span>Classification</span>
+            <input value={draft.classification} onChange={(event) => onChange({ classification: event.target.value })} required />
+          </label>
+          <label className="field workOrderWideField">
+            <span>Description</span>
+            <textarea value={draft.description} onChange={(event) => onChange({ description: event.target.value })} required />
+          </label>
+          <label className="field workOrderWideField">
+            <span>Recommended action</span>
+            <textarea value={draft.recommended_action} onChange={(event) => onChange({ recommended_action: event.target.value })} required />
+          </label>
+          <label className="field workOrderWideField">
+            <span>AI summary</span>
+            <textarea value={draft.ai_summary ?? ''} onChange={(event) => onChange({ ai_summary: event.target.value })} />
+          </label>
+          <label className="checkboxField workOrderWideField">
+            <input
+              checked={Boolean(draft.follow_up_required)}
+              type="checkbox"
+              onChange={(event) => onChange({ follow_up_required: event.target.checked })}
+            />
+            <span>Follow-up required</span>
+          </label>
+        </div>
+        <div className="modalActions">
+          <button className="outlineButton" type="button" onClick={onCancel} disabled={submitting}>
+            Cancel
+          </button>
+          <button className="iconTextButton" type="submit" disabled={submitting}>
+            {submitting ? <span className="loadingSpinner" aria-hidden="true" /> : <Briefcase size={16} />}
+            {submitting ? 'Creating...' : 'Confirm and submit'}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }
@@ -452,6 +580,7 @@ export function App() {
   const [assetReliabilityStreamAsset, setAssetReliabilityStreamAsset] = useState('')
   const [assetMessage, setAssetMessage] = useState('')
   const [activeView, setActiveView] = useState<AppView>('commandCenter')
+  const [activeAdminTab, setActiveAdminTab] = useState<AdminTab>('ingestion')
   const [selectedEquipment, setSelectedEquipment] = useState('RM-DRIVE-01')
   const [assetTab, setAssetTab] = useState<AssetTab>('summary')
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null)
@@ -464,6 +593,8 @@ export function App() {
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>(fallbackWorkOrders)
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState('WO-8304')
   const [workOrderMessage, setWorkOrderMessage] = useState('')
+  const [workOrderDraft, setWorkOrderDraft] = useState<WorkOrderCreateRequest | null>(null)
+  const [workOrderSubmitting, setWorkOrderSubmitting] = useState(false)
   const [pmTemplates, setPmTemplates] = useState<PmTemplate[]>([])
   const [pmPlans, setPmPlans] = useState<PmPlan[]>([])
   const [pmPlanLoading, setPmPlanLoading] = useState(false)
@@ -1343,12 +1474,12 @@ export function App() {
       setActiveView(homeViewForRole(currentUser.role))
       return
     }
-    if (activeView === 'admin' && canStreaming) loadStreamingStatus()
-  }, [activeView, canStreaming, currentUser?.role])
+    if (activeView === 'admin' && activeAdminTab === 'ingestion' && canStreaming) loadStreamingStatus()
+  }, [activeAdminTab, activeView, canStreaming, currentUser?.role])
 
   useEffect(() => {
-    if (activeView === 'admin' && canAdminUsers) loadUsers()
-  }, [activeView, canAdminUsers])
+    if (activeView === 'admin' && activeAdminTab === 'users' && canAdminUsers) loadUsers()
+  }, [activeAdminTab, activeView, canAdminUsers])
 
   useEffect(() => {
     if (activeView === 'planning' && canAssignWorkOrders) {
@@ -1369,10 +1500,13 @@ export function App() {
   }, [activeView])
 
   useEffect(() => {
-    if (activeView === 'learningReview' && canReviewLearning) {
+    if (
+      (activeView === 'learningReview' || (activeView === 'admin' && activeAdminTab === 'learning')) &&
+      canReviewLearning
+    ) {
       void loadLearning()
     }
-  }, [activeView, canReviewLearning])
+  }, [activeAdminTab, activeView, canReviewLearning])
 
   useEffect(() => {
     if (!authReady || !session || activeView !== 'asset') return
@@ -1825,14 +1959,47 @@ export function App() {
       setWorkOrderMessage('You do not have permission to create work orders')
       return
     }
+    setWorkOrderDraft(draftWorkOrderPayload(source))
+  }
+
+  function updateWorkOrderDraft(updates: Partial<WorkOrderCreateRequest>) {
+    setWorkOrderDraft((current) => current ? { ...current, ...updates } : current)
+  }
+
+  function cancelWorkOrderDraft() {
+    if (workOrderSubmitting) return
+    setWorkOrderDraft(null)
+  }
+
+  async function submitWorkOrderDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!workOrderDraft) return
+    if (!canCreateWorkOrders) {
+      setWorkOrderMessage('You do not have permission to create work orders')
+      return
+    }
+    if (!workOrderDraft.title.trim() || !workOrderDraft.equipment_id.trim() || !workOrderDraft.due_date) {
+      setWorkOrderMessage('Verify work order title, equipment, and due date before submitting')
+      return
+    }
+    setWorkOrderSubmitting(true)
     try {
-      const created = await api.createWorkOrder(draftWorkOrderPayload(source))
+      const created = await api.createWorkOrder({
+        ...workOrderDraft,
+        title: workOrderDraft.title.trim(),
+        equipment_id: workOrderDraft.equipment_id.trim(),
+        description: workOrderDraft.description.trim(),
+        recommended_action: workOrderDraft.recommended_action.trim(),
+      })
       setWorkOrders((items) => [created, ...items.filter((item) => item.id !== created.id)])
       setSelectedWorkOrderId(created.id)
       setActiveView('workExecution')
+      setWorkOrderDraft(null)
       setWorkOrderMessage(`Created ${created.id}`)
     } catch {
       setWorkOrderMessage('Work order could not be created')
+    } finally {
+      setWorkOrderSubmitting(false)
     }
   }
 
@@ -2843,6 +3010,60 @@ export function App() {
     setActiveView('workExecution')
   }
 
+  const learningReviewRoute = canReviewLearning ? (
+    <LearningReviewRoute
+      activateSelectedEmbeddingProfile={activateSelectedEmbeddingProfile}
+      adapterBaseModel={adapterBaseModel}
+      adapterModelName={adapterModelName}
+      adapterNotes={adapterNotes}
+      adapterPath={adapterPath}
+      adapterProvider={adapterProvider}
+      artifactCleanupResult={artifactCleanupResult}
+      createLearningSnapshot={createLearningSnapshot}
+      deployLearningAdapter={deployLearningAdapter}
+      deploymentBaseUrl={deploymentBaseUrl}
+      deploymentRuntimeProvider={deploymentRuntimeProvider}
+      downloadLearningSnapshot={downloadLearningSnapshot}
+      judgeLearningExample={judgeLearningExample}
+      learningDatasetDescription={learningDatasetDescription}
+      learningDatasetName={learningDatasetName}
+      learningDatasets={learningDatasets}
+      learningDeployments={learningDeployments}
+      learningEmbeddingProfiles={learningEmbeddingProfiles}
+      learningExamples={learningExamples}
+      learningJudgingExampleId={learningJudgingExampleId}
+      learningLoading={learningLoading}
+      learningSummary={learningSummary}
+      peftAdapterName={peftAdapterName}
+      previewLearningArtifactCleanup={previewLearningArtifactCleanup}
+      previewLearningRagMigration={previewLearningRagMigration}
+      promoteLearningAdapter={promoteLearningAdapter}
+      queuePeftTuningJob={queuePeftTuningJob}
+      ragMigrationPreview={ragMigrationPreview}
+      ragTargetCollection={ragTargetCollection}
+      refreshLearningExamples={refreshLearningExamples}
+      registerLearningAdapter={registerLearningAdapter}
+      reindexLearningRag={reindexLearningRag}
+      rollbackLearningAdapter={rollbackLearningAdapter}
+      runLearningEvaluation={runLearningEvaluation}
+      runLearningRagMigration={runLearningRagMigration}
+      selectedEmbeddingProfileId={selectedEmbeddingProfileId}
+      setAdapterBaseModel={setAdapterBaseModel}
+      setAdapterModelName={setAdapterModelName}
+      setAdapterNotes={setAdapterNotes}
+      setAdapterPath={setAdapterPath}
+      setAdapterProvider={setAdapterProvider}
+      setDeploymentBaseUrl={setDeploymentBaseUrl}
+      setDeploymentRuntimeProvider={setDeploymentRuntimeProvider}
+      setLearningDatasetDescription={setLearningDatasetDescription}
+      setLearningDatasetName={setLearningDatasetName}
+      setPeftAdapterName={setPeftAdapterName}
+      setRagTargetCollection={setRagTargetCollection}
+      setSelectedEmbeddingProfileId={setSelectedEmbeddingProfileId}
+      toggleLearningApproval={toggleLearningApproval}
+    />
+  ) : null
+
   const activeRoute =
     activeView === 'commandCenter' ? (
       <DashboardRoute
@@ -2986,108 +3207,107 @@ export function App() {
         />
       </section>
     ) : activeView === 'learningReview' && canReviewLearning ? (
-      <LearningReviewRoute
-        activateSelectedEmbeddingProfile={activateSelectedEmbeddingProfile}
-        adapterBaseModel={adapterBaseModel}
-        adapterModelName={adapterModelName}
-        adapterNotes={adapterNotes}
-        adapterPath={adapterPath}
-        adapterProvider={adapterProvider}
-        artifactCleanupResult={artifactCleanupResult}
-        createLearningSnapshot={createLearningSnapshot}
-        deployLearningAdapter={deployLearningAdapter}
-        deploymentBaseUrl={deploymentBaseUrl}
-        deploymentRuntimeProvider={deploymentRuntimeProvider}
-        downloadLearningSnapshot={downloadLearningSnapshot}
-        judgeLearningExample={judgeLearningExample}
-        learningDatasetDescription={learningDatasetDescription}
-        learningDatasetName={learningDatasetName}
-        learningDatasets={learningDatasets}
-        learningDeployments={learningDeployments}
-        learningEmbeddingProfiles={learningEmbeddingProfiles}
-        learningExamples={learningExamples}
-        learningJudgingExampleId={learningJudgingExampleId}
-        learningLoading={learningLoading}
-        learningSummary={learningSummary}
-        peftAdapterName={peftAdapterName}
-        previewLearningArtifactCleanup={previewLearningArtifactCleanup}
-        previewLearningRagMigration={previewLearningRagMigration}
-        promoteLearningAdapter={promoteLearningAdapter}
-        queuePeftTuningJob={queuePeftTuningJob}
-        ragMigrationPreview={ragMigrationPreview}
-        ragTargetCollection={ragTargetCollection}
-        refreshLearningExamples={refreshLearningExamples}
-        registerLearningAdapter={registerLearningAdapter}
-        reindexLearningRag={reindexLearningRag}
-        rollbackLearningAdapter={rollbackLearningAdapter}
-        runLearningEvaluation={runLearningEvaluation}
-        runLearningRagMigration={runLearningRagMigration}
-        selectedEmbeddingProfileId={selectedEmbeddingProfileId}
-        setAdapterBaseModel={setAdapterBaseModel}
-        setAdapterModelName={setAdapterModelName}
-        setAdapterNotes={setAdapterNotes}
-        setAdapterPath={setAdapterPath}
-        setAdapterProvider={setAdapterProvider}
-        setDeploymentBaseUrl={setDeploymentBaseUrl}
-        setDeploymentRuntimeProvider={setDeploymentRuntimeProvider}
-        setLearningDatasetDescription={setLearningDatasetDescription}
-        setLearningDatasetName={setLearningDatasetName}
-        setPeftAdapterName={setPeftAdapterName}
-        setRagTargetCollection={setRagTargetCollection}
-        setSelectedEmbeddingProfileId={setSelectedEmbeddingProfileId}
-        toggleLearningApproval={toggleLearningApproval}
-      />
+      learningReviewRoute
     ) : activeView === 'admin' && canAdminUsers ? (
       <section className="adminRouteStack" aria-label="Admin workspace">
-        <section className="detailPanel pageIntroPanel">
-          <div className="sectionHeader">
-            <Users size={18} />
-            <div>
-              <h2>Admin</h2>
-              <small>Users, ingestion, and system status</small>
-            </div>
+        <div className="planningTabsShell adminTabsShell">
+          <div className="planningTabRow" role="tablist" aria-label="Admin workspace tabs">
+            <button
+              aria-controls="admin-tab-ingestion"
+              aria-selected={activeAdminTab === 'ingestion'}
+              className={activeAdminTab === 'ingestion' ? 'selected' : ''}
+              id="admin-tab-trigger-ingestion"
+              onClick={() => setActiveAdminTab('ingestion')}
+              role="tab"
+              type="button"
+            >
+              Ingestion
+            </button>
+            <button
+              aria-controls="admin-tab-users"
+              aria-selected={activeAdminTab === 'users'}
+              className={activeAdminTab === 'users' ? 'selected' : ''}
+              id="admin-tab-trigger-users"
+              onClick={() => setActiveAdminTab('users')}
+              role="tab"
+              type="button"
+            >
+              User management
+            </button>
+            <button
+              aria-controls="admin-tab-learning"
+              aria-selected={activeAdminTab === 'learning'}
+              className={activeAdminTab === 'learning' ? 'selected' : ''}
+              id="admin-tab-trigger-learning"
+              onClick={() => setActiveAdminTab('learning')}
+              role="tab"
+              type="button"
+            >
+              Learning and Tuning
+            </button>
           </div>
-          <p className="emptyState">Admin controls are isolated from every non-admin role.</p>
-        </section>
-        {canIngest && (
-          <IngestionRoute
-            ingestJsonPayload={ingestJsonPayload}
-            ingestSelectedFile={ingestSelectedFile}
-            ingestSourceType={ingestSourceType}
-            ingestTitle={ingestTitle}
-            fileIngestionLoading={fileIngestionLoading}
-            jsonIngestionLoading={jsonIngestionLoading}
-            jsonMode={jsonMode}
-            jsonPayload={jsonPayload}
-            selectedEquipment={selectedEquipment}
-            selectedHealth={selectedHealth}
-            setIngestFile={setIngestFile}
-            setIngestSourceType={setIngestSourceType}
-            setIngestTitle={setIngestTitle}
-            setJsonMode={setJsonMode}
-            setJsonPayload={setJsonPayload}
-            streamingStatus={streamingStatus}
-          />
-        )}
-        <UsersRoute
-          closeResetPassword={closeResetPassword}
-          createNewUser={createNewUser}
-          newUserEmail={newUserEmail}
-          newUserName={newUserName}
-          newUserPassword={newUserPassword}
-          newUserRole={newUserRole}
-          openResetPassword={openResetPassword}
-          resetPassword={resetPassword}
-          resetPasswordValue={resetPasswordValue}
-          resetUser={resetUser}
-          setNewUserEmail={setNewUserEmail}
-          setNewUserName={setNewUserName}
-          setNewUserPassword={setNewUserPassword}
-          setNewUserRole={setNewUserRole}
-          setResetPasswordValue={setResetPasswordValue}
-          toggleUserActive={toggleUserActive}
-          users={users}
-        />
+          <div
+            aria-labelledby="admin-tab-trigger-ingestion"
+            hidden={activeAdminTab !== 'ingestion'}
+            id="admin-tab-ingestion"
+            role="tabpanel"
+          >
+            {canIngest && (
+              <IngestionRoute
+                ingestJsonPayload={ingestJsonPayload}
+                ingestSelectedFile={ingestSelectedFile}
+                ingestSourceType={ingestSourceType}
+                ingestTitle={ingestTitle}
+                fileIngestionLoading={fileIngestionLoading}
+                jsonIngestionLoading={jsonIngestionLoading}
+                jsonMode={jsonMode}
+                jsonPayload={jsonPayload}
+                selectedEquipment={selectedEquipment}
+                selectedHealth={selectedHealth}
+                setIngestFile={setIngestFile}
+                setIngestSourceType={setIngestSourceType}
+                setIngestTitle={setIngestTitle}
+                setJsonMode={setJsonMode}
+                setJsonPayload={setJsonPayload}
+                streamingStatus={streamingStatus}
+              />
+            )}
+          </div>
+          <div
+            aria-labelledby="admin-tab-trigger-users"
+            hidden={activeAdminTab !== 'users'}
+            id="admin-tab-users"
+            role="tabpanel"
+          >
+            <UsersRoute
+              closeResetPassword={closeResetPassword}
+              createNewUser={createNewUser}
+              newUserEmail={newUserEmail}
+              newUserName={newUserName}
+              newUserPassword={newUserPassword}
+              newUserRole={newUserRole}
+              openResetPassword={openResetPassword}
+              resetPassword={resetPassword}
+              resetPasswordValue={resetPasswordValue}
+              resetUser={resetUser}
+              setNewUserEmail={setNewUserEmail}
+              setNewUserName={setNewUserName}
+              setNewUserPassword={setNewUserPassword}
+              setNewUserRole={setNewUserRole}
+              setResetPasswordValue={setResetPasswordValue}
+              toggleUserActive={toggleUserActive}
+              users={users}
+            />
+          </div>
+          <div
+            aria-labelledby="admin-tab-trigger-learning"
+            hidden={activeAdminTab !== 'learning'}
+            id="admin-tab-learning"
+            role="tabpanel"
+          >
+            {learningReviewRoute}
+          </div>
+        </div>
       </section>
     ) : (
       <DashboardRoute
@@ -3134,6 +3354,15 @@ export function App() {
   return (
     <main className="appShell">
       <ToastStack dismissToast={dismissToast} toasts={toasts} />
+      {workOrderDraft && (
+        <WorkOrderReviewDialog
+          draft={workOrderDraft}
+          onCancel={cancelWorkOrderDraft}
+          onChange={updateWorkOrderDraft}
+          onSubmit={submitWorkOrderDraft}
+          submitting={workOrderSubmitting}
+        />
+      )}
       <header className="topBar">
         <div>
           <p className="eyebrow">Steel Plant Maintenance</p>

@@ -2188,6 +2188,40 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.queryByLabelText('Ingestion file')).not.toBeInTheDocument()
   })
 
+  it('opens a prefilled work order review dialog before submitting creation', async () => {
+    render(<App />)
+    await signIn()
+
+    const quickActions = within(screen.getByLabelText('Maintenance navigation')).getByLabelText('Quick actions')
+    fireEvent.click(within(quickActions).getByRole('button', { name: /create work order/i }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Review Work Order' })
+    expect(within(dialog).getByLabelText('Equipment')).toHaveValue('RM-DRIVE-01')
+    expect(within(dialog).getByLabelText('Work order title')).toHaveValue('Inspect Hot Strip Mill Main Drive Motor')
+    expect(within(dialog).getByLabelText('Recommended action')).toHaveValue(
+      'Critical vibration alert and unavailable bearing spare require intervention planning.',
+    )
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url, init]) => url.toString().endsWith('/api/work-orders') && init?.method === 'POST'),
+    ).toBe(false)
+
+    fireEvent.change(within(dialog).getByLabelText('Work order title'), {
+      target: { value: 'Inspect drive bearing after vibration alert' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm and submit' }))
+
+    expect(await screen.findByText('Created WO-9001')).toBeInTheDocument()
+    const createCall = vi.mocked(fetch).mock.calls.find(([url, init]) => (
+      url.toString().endsWith('/api/work-orders') && init?.method === 'POST'
+    ))
+    expect(JSON.parse((createCall?.[1]?.body as string) ?? '{}')).toMatchObject({
+      equipment_id: 'RM-DRIVE-01',
+      title: 'Inspect drive bearing after vibration alert',
+      work_type: 'CM',
+      problem_code: 'INVESTIGATE',
+    })
+  })
+
   it('opens an Assets page with a company asset table and data-backed asset detail', async () => {
     render(<App />)
     await signIn()
@@ -2928,7 +2962,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     Element.prototype.scrollIntoView = scrollIntoView
 
     render(<App />)
-    await signIn('reliability@plant.local')
+    await signIn()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Reliability' }))
 
@@ -2950,7 +2984,8 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close and learn' }))
     expect(await screen.findByText('RCA-9001 closed and accepted for learning')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Learning and Tuning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Admin' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
     expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
     expect(screen.getByText(/Review approved human feedback/)).toBeInTheDocument()
     expect(screen.getByText('RAG vector DB')).toBeInTheDocument()
@@ -3053,9 +3088,10 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     learningRefreshExamples = []
 
     render(<App />)
-    await signIn('reliability@plant.local')
+    await signIn()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Learning and Tuning' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
     expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh examples' }))
@@ -3071,9 +3107,10 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     learningJudgeDelayMs = 250
 
     render(<App />)
-    await signIn('reliability@plant.local')
+    await signIn()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Learning and Tuning' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
     expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Judge' }))
@@ -3081,6 +3118,15 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(await screen.findByRole('button', { name: 'Judging...' })).toBeDisabled()
     expect(screen.getByText('Judging feedback example. Live LM Studio checks can take up to 15 seconds before falling back.')).toBeInTheDocument()
     expect(await screen.findByText('Judge scored feedback at 91%')).toBeInTheDocument()
+  })
+
+  it('keeps Learning and Tuning inside Admin instead of reliability navigation', async () => {
+    render(<App />)
+    await signIn('reliability@plant.local')
+
+    expect(await screen.findByRole('button', { name: 'Reliability' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Learning and Tuning' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Admin' })).not.toBeInTheDocument()
   })
 
   it('hides restricted actions for operators', async () => {
@@ -3112,6 +3158,12 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     await signIn()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
+    expect(await screen.findByRole('tab', { name: 'Ingestion' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'User management' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'Learning and Tuning' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('heading', { name: 'Ingestion' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'User management' }))
+    expect(screen.getByRole('tab', { name: 'User management' })).toHaveAttribute('aria-selected', 'true')
     expect(await screen.findByText('Jan')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new.operator@plant.local' } })
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Operator' } })
@@ -3128,6 +3180,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     await signIn()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'User management' }))
     expect(await screen.findByText('Jan')).toBeInTheDocument()
 
     expect(screen.queryByLabelText('New Password')).not.toBeInTheDocument()
