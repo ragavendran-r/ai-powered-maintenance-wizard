@@ -2660,10 +2660,13 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(within(pmPanel).getAllByText('drive_end_vibration >= 7.1 mm/s').length).toBeGreaterThanOrEqual(2)
     expect(within(pmPanel).getByText('Confirm LOTO and permits.')).toBeInTheDocument()
     const pmPlanTable = within(pmPanel).getByLabelText('Preventive maintenance plans')
+    expect(within(pmPlanTable).getByRole('columnheader', { name: 'Work order' })).toBeInTheDocument()
+    expect(within(pmPlanTable).getAllByText('Not created').length).toBeGreaterThan(0)
     fireEvent.click(within(pmPlanTable).getByRole('button', { name: 'Select' }))
     expect(within(pmPanel).getByLabelText('Active preventive maintenance plan')).toHaveTextContent('Existing blower PM plan')
     fireEvent.click(within(pmPanel).getByRole('button', { name: 'Convert to planned work' }))
     await within(pmPanel).findByText(/Created WO-/)
+    expect(await within(pmPlanTable).findByText('WO-9100')).toBeInTheDocument()
 
     fireEvent.click(dispatchTab)
     expect(preventiveTab).toHaveAttribute('aria-selected', 'false')
