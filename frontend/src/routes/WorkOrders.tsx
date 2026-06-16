@@ -670,6 +670,7 @@ function PreventiveMaintenancePanel({
               <th scope="col">Asset</th>
               <th scope="col">Next due</th>
               <th scope="col">Status</th>
+              <th scope="col">Work order</th>
               <th scope="col">Action</th>
             </tr>
           </thead>
@@ -688,6 +689,7 @@ function PreventiveMaintenancePanel({
                       {pmPlanStatusLabel(plan.status)}
                     </span>
                   </td>
+                  <td>{plan.converted_work_order_id ?? 'Not created'}</td>
                   <td>
                     <button
                       aria-pressed={plan.id === activePlan?.id}
@@ -702,7 +704,7 @@ function PreventiveMaintenancePanel({
               ))
             ) : (
               <tr>
-                <td className="pmPlanEmptyCell" colSpan={5}>
+                <td className="pmPlanEmptyCell" colSpan={6}>
                   No PM plans generated yet. Draft one from asset risk prediction and a PM template.
                 </td>
               </tr>
