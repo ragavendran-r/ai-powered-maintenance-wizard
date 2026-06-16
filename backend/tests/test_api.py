@@ -3,15 +3,20 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+TEST_DATABASE_PATH = Path(__file__).resolve().parents[1] / "data" / "test_maintenance_wizard.db"
+
+os.environ["DATABASE_PATH"] = str(TEST_DATABASE_PATH)
 os.environ["LLM_PROVIDER"] = "mock"
 os.environ["LEARNING_ASYNC_ENABLED"] = "false"
 os.environ["RAG_VECTOR_STORE"] = "sqlite"
 
+from app.core.config import get_settings
 from app.data import repository
 from app.data.database import database_status, reset_database
 from app.main import app
@@ -72,6 +77,8 @@ class _FakeJetStream:
 
 @pytest.fixture(autouse=True)
 def reset_db():
+    if get_settings().database_path != TEST_DATABASE_PATH:
+        raise RuntimeError(f"Refusing to reset non-test database: {get_settings().database_path}")
     reset_database()
 
 
@@ -83,6 +90,7 @@ def test_health_check():
 
 def test_database_status_reports_seeded_tables():
     status = database_status()
+    assert Path(status["database_path"]) == TEST_DATABASE_PATH
     assert status["schema_version"] == "19"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["asset_profiles"] == 5
