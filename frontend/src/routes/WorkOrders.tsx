@@ -30,6 +30,7 @@ import {
 import { formatDate } from '../appModel'
 
 const TECHNICIAN_WAITING_MESSAGE_DELAY_MS = 7_000
+type PlanningTab = 'preventive' | 'dispatch'
 
 export function WorkOrdersRoute({
   approveWorkOrder,
@@ -116,6 +117,7 @@ export function WorkOrdersRoute({
   const supervisorTranscriptRef = useRef<HTMLDivElement | null>(null)
   const isPlanningMode = mode === 'planning'
   const canUseAssistant = canTechnicianAssistant || canSupervisorAssistant
+  const [planningTab, setPlanningTab] = useState<PlanningTab>('preventive')
 
   usePinnedStreamScroll(
     technicianTranscriptRef,
@@ -139,26 +141,64 @@ export function WorkOrdersRoute({
     <section className={`workOrderLayout${isPlanningMode ? ' planningMode' : ''}`}>
       <section className="workOrderCenterColumn" aria-label="Work order center pane">
         {isPlanningMode && canAssignWorkOrders && (
-          <>
-            <PreventiveMaintenancePanel
-              assets={assets}
-              convertPmPlanToWorkOrder={convertPmPlanToWorkOrder}
-              draftPreventivePlan={draftPreventivePlan}
-              isLoading={pmPlanLoading}
-              message={pmPlanMessage}
-              streamText={pmPlanStreamText}
-              plans={pmPlans}
-              templates={pmTemplates}
-            />
-            <PlannerDispatchBoard
-              onDispatch={dispatchWorkOrder}
-              onOpen={setSelectedWorkOrderId}
-              onPlan={planWorkOrder}
-              selectedWorkOrderId={selectedWorkOrder?.id}
-              technicians={technicians}
-              workOrders={workOrders}
-            />
-          </>
+          <div className="planningTabsShell">
+            <div className="planningTabRow" role="tablist" aria-label="Planning workflows">
+              <button
+                aria-controls="planning-tab-preventive"
+                aria-selected={planningTab === 'preventive'}
+                className={planningTab === 'preventive' ? 'selected' : ''}
+                id="planning-tab-trigger-preventive"
+                onClick={() => setPlanningTab('preventive')}
+                role="tab"
+                type="button"
+              >
+                Preventive plans
+              </button>
+              <button
+                aria-controls="planning-tab-dispatch"
+                aria-selected={planningTab === 'dispatch'}
+                className={planningTab === 'dispatch' ? 'selected' : ''}
+                id="planning-tab-trigger-dispatch"
+                onClick={() => setPlanningTab('dispatch')}
+                role="tab"
+                type="button"
+              >
+                Schedule & dispatch
+              </button>
+            </div>
+            <div
+              aria-labelledby="planning-tab-trigger-preventive"
+              hidden={planningTab !== 'preventive'}
+              id="planning-tab-preventive"
+              role="tabpanel"
+            >
+              <PreventiveMaintenancePanel
+                assets={assets}
+                convertPmPlanToWorkOrder={convertPmPlanToWorkOrder}
+                draftPreventivePlan={draftPreventivePlan}
+                isLoading={pmPlanLoading}
+                message={pmPlanMessage}
+                streamText={pmPlanStreamText}
+                plans={pmPlans}
+                templates={pmTemplates}
+              />
+            </div>
+            <div
+              aria-labelledby="planning-tab-trigger-dispatch"
+              hidden={planningTab !== 'dispatch'}
+              id="planning-tab-dispatch"
+              role="tabpanel"
+            >
+              <PlannerDispatchBoard
+                onDispatch={dispatchWorkOrder}
+                onOpen={setSelectedWorkOrderId}
+                onPlan={planWorkOrder}
+                selectedWorkOrderId={selectedWorkOrder?.id}
+                technicians={technicians}
+                workOrders={workOrders}
+              />
+            </div>
+          </div>
         )}
         {!isPlanningMode && canUseAssistant && (
           <section className="detailPanel workOrderAssistantPanel">
