@@ -62,6 +62,7 @@ let logoutResponseDelayMs = 0
 let maintenanceInsightsDelayMs = 0
 let ingestionResponseDelayMs = 0
 let learningJudgeDelayMs = 0
+let learningRefreshDelayMs = 0
 let supervisorAssistantRequests: Array<{ work_order_id?: string; queue_name?: string; question?: string }> = []
 
 it('shows waiting for material before in progress in the work order workflow', () => {
@@ -1369,6 +1370,7 @@ beforeEach(() => {
   maintenanceInsightsDelayMs = 0
   ingestionResponseDelayMs = 0
   learningJudgeDelayMs = 0
+  learningRefreshDelayMs = 0
   apiWorkOrders = workOrders as WorkOrder[]
   apiPmPlans = [existingPmPlan]
   learningDeploymentResponses = [learningDeployment]
@@ -1503,7 +1505,8 @@ beforeEach(() => {
         return Promise.resolve(new Response(JSON.stringify(learningSummaryPayload(learningSummaryExamples)), { status: 200 }))
       }
       if (url.endsWith('/api/learning/examples/refresh')) {
-        return Promise.resolve(new Response(JSON.stringify(learningRefreshExamples), { status: 200 }))
+        const response = new Response(JSON.stringify(learningRefreshExamples), { status: 200 })
+        return learningRefreshDelayMs > 0 ? delayedResponse(response, init, learningRefreshDelayMs) : Promise.resolve(response)
       }
       if (url.includes('/api/learning/examples/') && url.endsWith('/judge')) {
         const response = new Response(
@@ -2179,7 +2182,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.queryByText('Maintenance history')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Run Morpheus' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Morpheus' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Performance' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Performance' }))
     expect(await screen.findByRole('heading', { name: 'Performance metrics' })).toBeInTheDocument()
     expect(screen.getByText('Signal time')).toBeInTheDocument()
     expect(screen.getByText('Value (mm/s)')).toBeInTheDocument()
@@ -3135,6 +3138,25 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
         'Refresh completed, but no learning examples were found. Add accepted feedback, usable maintenance labels, completed work orders, closed RCA cases, ingested documents, or approved assistant interactions, then refresh again.',
       ),
     ).toBeInTheDocument()
+  })
+
+  it('does not show Qdrant migration progress while refreshing learning examples', async () => {
+    learningRefreshDelayMs = 250
+
+    render(<App />)
+    await signIn()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
+    expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh examples' }))
+
+    expect(screen.getByRole('button', { name: 'Refresh examples' })).toBeDisabled()
+    const migrationButton = screen.getByRole('button', { name: 'Run Qdrant migration' })
+    expect(migrationButton).toBeEnabled()
+    expect(migrationButton.querySelector('.loadingSpinner')).toBeNull()
+    expect(await screen.findByText('Refreshed 1 learning example')).toBeInTheDocument()
   })
 
   it('shows progress while a learning example is being judged', async () => {

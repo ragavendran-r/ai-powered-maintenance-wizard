@@ -31,6 +31,23 @@ import {
   metricValue,
 } from '../appModel'
 
+type LearningLoadingState = Partial<Record<
+  | 'activateEmbeddingProfile'
+  | 'createSnapshot'
+  | 'deployAdapter'
+  | 'previewArtifactCleanup'
+  | 'previewRagMigration'
+  | 'promoteAdapter'
+  | 'queuePeftTuning'
+  | 'refreshExamples'
+  | 'registerAdapter'
+  | 'reindexRag'
+  | 'rollbackAdapter'
+  | 'runEvaluation'
+  | 'runRagMigration',
+  boolean
+>>
+
 export function LearningReviewRoute({
   activateSelectedEmbeddingProfile,
   adapterBaseModel,
@@ -102,7 +119,7 @@ export function LearningReviewRoute({
   learningEmbeddingProfiles: LearningEmbeddingProfile[]
   learningExamples: LearningExample[]
   learningJudgingExampleId: string | null
-  learningLoading: boolean
+  learningLoading: LearningLoadingState
   learningSummary: LearningSummary | null
   peftAdapterName: string
   previewLearningArtifactCleanup: () => void
@@ -165,8 +182,8 @@ export function LearningReviewRoute({
         Review approved human feedback, maintenance labels, work-order outcomes, ingested documents, and assistant interactions before exporting a local tuning dataset.
       </p>
       <div className="learningToolbar">
-        <button className="textButton" onClick={refreshLearningExamples} disabled={learningLoading}>
-          {learningLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
+        <button className="textButton" onClick={refreshLearningExamples} disabled={learningLoading.refreshExamples}>
+          {learningLoading.refreshExamples ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
           Refresh examples
         </button>
         <label className="field">
@@ -177,8 +194,8 @@ export function LearningReviewRoute({
           <span>Description</span>
           <input value={learningDatasetDescription} onChange={(event) => setLearningDatasetDescription(event.target.value)} />
         </label>
-        <button className="textButton" onClick={createLearningSnapshot} disabled={learningLoading}>
-          <FileJson size={16} />
+        <button className="textButton" onClick={createLearningSnapshot} disabled={learningLoading.createSnapshot}>
+          {learningLoading.createSnapshot ? <span className="loadingSpinner" aria-hidden="true" /> : <FileJson size={16} />}
           Create JSONL snapshot
         </button>
       </div>
@@ -264,17 +281,20 @@ export function LearningReviewRoute({
             <span>Target collection</span>
             <input value={ragTargetCollection} onChange={(event) => setRagTargetCollection(event.target.value)} />
           </label>
-          <button className="outlineButton" onClick={activateSelectedEmbeddingProfile} disabled={learningLoading || !selectedEmbeddingProfileId || selectedEmbeddingProfileId === activeEmbeddingProfile?.id}>
+          <button className="outlineButton" onClick={activateSelectedEmbeddingProfile} disabled={learningLoading.activateEmbeddingProfile || !selectedEmbeddingProfileId || selectedEmbeddingProfileId === activeEmbeddingProfile?.id}>
+            {learningLoading.activateEmbeddingProfile ? <span className="loadingSpinner" aria-hidden="true" /> : null}
             Activate profile
           </button>
-          <button className="outlineButton" onClick={previewLearningRagMigration} disabled={learningLoading || !selectedEmbeddingProfileId}>
+          <button className="outlineButton" onClick={previewLearningRagMigration} disabled={learningLoading.previewRagMigration || !selectedEmbeddingProfileId}>
+            {learningLoading.previewRagMigration ? <span className="loadingSpinner" aria-hidden="true" /> : null}
             Preview migration
           </button>
-          <button className="textButton" onClick={runLearningRagMigration} disabled={learningLoading || !selectedEmbeddingProfileId}>
-            {learningLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Database size={16} />}
+          <button className="textButton" onClick={runLearningRagMigration} disabled={learningLoading.runRagMigration || !selectedEmbeddingProfileId}>
+            {learningLoading.runRagMigration ? <span className="loadingSpinner" aria-hidden="true" /> : <Database size={16} />}
             Run Qdrant migration
           </button>
-          <button className="subtleButton" onClick={reindexLearningRag} disabled={learningLoading || ragMigrationNeeded}>
+          <button className="subtleButton" onClick={reindexLearningRag} disabled={learningLoading.reindexRag || ragMigrationNeeded}>
+            {learningLoading.reindexRag ? <span className="loadingSpinner" aria-hidden="true" /> : null}
             Reindex current profile
           </button>
         </div>
@@ -377,8 +397,8 @@ export function LearningReviewRoute({
           <small>Retention</small>
           <strong>{artifactRetentionState} · {artifactRetentionDays} days</strong>
         </span>
-        <button className="outlineButton" onClick={previewLearningArtifactCleanup} disabled={learningLoading}>
-          {learningLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Trash2 size={16} />}
+        <button className="outlineButton" onClick={previewLearningArtifactCleanup} disabled={learningLoading.previewArtifactCleanup}>
+          {learningLoading.previewArtifactCleanup ? <span className="loadingSpinner" aria-hidden="true" /> : <Trash2 size={16} />}
           Preview cleanup
         </button>
       </div>
@@ -520,19 +540,19 @@ export function LearningReviewRoute({
                   {(canPromoteModel || canRollbackModel || canDeployModel) && (
                     <div className="versionActions">
                       {canDeployModel && (
-                        <button className="textButton" onClick={() => deployLearningAdapter(model)} disabled={learningLoading}>
+                        <button className="textButton" onClick={() => deployLearningAdapter(model)} disabled={learningLoading.deployAdapter}>
                           <Upload size={16} />
                           Deploy adapter
                         </button>
                       )}
                       {canPromoteModel && (
-                        <button className="textButton" onClick={() => promoteLearningAdapter(model)} disabled={learningLoading}>
+                        <button className="textButton" onClick={() => promoteLearningAdapter(model)} disabled={learningLoading.promoteAdapter}>
                           <CheckCircle2 size={16} />
                           Promote adapter
                         </button>
                       )}
                       {canRollbackModel && (
-                        <button className="outlineButton" onClick={() => rollbackLearningAdapter(model)} disabled={learningLoading}>
+                        <button className="outlineButton" onClick={() => rollbackLearningAdapter(model)} disabled={learningLoading.rollbackAdapter}>
                           Roll back to this model
                         </button>
                       )}
@@ -621,8 +641,8 @@ export function LearningReviewRoute({
               <span>Notes</span>
               <textarea value={adapterNotes} onChange={(event) => setAdapterNotes(event.target.value)} />
             </label>
-            <button className="textButton" onClick={registerLearningAdapter} disabled={learningLoading || !adapterModelName.trim()}>
-              <Sparkles size={16} />
+            <button className="textButton" onClick={registerLearningAdapter} disabled={learningLoading.registerAdapter || !adapterModelName.trim()}>
+              {learningLoading.registerAdapter ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
               Register adapter
             </button>
           </div>
@@ -644,8 +664,8 @@ export function LearningReviewRoute({
             )}
           </div>
           <h3>Evaluation Runs</h3>
-          <button className="textButton fullWidthAction" onClick={runLearningEvaluation} disabled={learningLoading}>
-            <CheckCircle2 size={16} />
+          <button className="textButton fullWidthAction" onClick={runLearningEvaluation} disabled={learningLoading.runEvaluation}>
+            {learningLoading.runEvaluation ? <span className="loadingSpinner" aria-hidden="true" /> : <CheckCircle2 size={16} />}
             Run dataset evaluation
           </button>
           <div className="evaluationList">
@@ -673,8 +693,8 @@ export function LearningReviewRoute({
               <span>PEFT adapter job name</span>
               <input value={peftAdapterName} onChange={(event) => setPeftAdapterName(event.target.value)} />
             </label>
-            <button className="textButton fullWidthAction" onClick={queuePeftTuningJob} disabled={learningLoading}>
-              <Sparkles size={16} />
+            <button className="textButton fullWidthAction" onClick={queuePeftTuningJob} disabled={learningLoading.queuePeftTuning}>
+              {learningLoading.queuePeftTuning ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
               Queue PEFT tuning job
             </button>
           </div>
