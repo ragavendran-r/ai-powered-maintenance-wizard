@@ -338,19 +338,35 @@ export function AssetDetailRoute({
         <h1>{assetProfile?.name ?? selectedEquipment}</h1>
         <span>{assetProfile ? `Last updated ${formatDate(assetProfile.last_updated)}` : 'Loading live asset data'}</span>
       </div>
-      <div className="tabRow" aria-label="Asset detail tabs">
+      <div className="planningTabsShell assetTabsShell">
+        <div className="planningTabRow" role="tablist" aria-label="Asset detail tabs">
         {(['summary', 'maintenance', 'performance', 'reliability', 'documents', 'workOrders'] as AssetTab[]).map((tab) => (
-          <button className={assetTab === tab ? 'selected' : ''} onClick={() => setAssetTab(tab)} key={tab}>
+          <button
+            aria-controls={`asset-tab-${tab}`}
+            aria-selected={assetTab === tab}
+            className={assetTab === tab ? 'selected' : ''}
+            id={`asset-tab-trigger-${tab}`}
+            key={tab}
+            onClick={() => setAssetTab(tab)}
+            role="tab"
+            type="button"
+          >
             {tab === 'workOrders' ? 'Work Orders' : tab[0].toUpperCase() + tab.slice(1)}
           </button>
         ))}
+        </div>
       </div>
       {assetDetailLoading && <section className="detailPanel widePanel"><p className="emptyState">Loading asset detail data...</p></section>}
       {!assetDetailLoading && assetMessage && <section className="detailPanel widePanel"><p className="inlineStatus errorText">{assetMessage}</p></section>}
       {assetDetail && (
-        <>
+        <div
+          aria-labelledby={`asset-tab-trigger-${assetTab}`}
+          className="assetTabPanel"
+          id={`asset-tab-${assetTab}`}
+          role="tabpanel"
+        >
           {assetTabContent}
-        </>
+        </div>
       )}
     </section>
   )
