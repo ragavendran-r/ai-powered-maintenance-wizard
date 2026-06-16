@@ -19,7 +19,6 @@ export function UsersRoute({
   setNewUserRole,
   setResetPasswordValue,
   toggleUserActive,
-  userMessage,
   users,
 }: {
   closeResetPassword: () => void
@@ -38,7 +37,6 @@ export function UsersRoute({
   setNewUserRole: (value: UserRole) => void
   setResetPasswordValue: (value: string) => void
   toggleUserActive: (user: AuthUser) => void
-  userMessage: string
   users: AuthUser[]
 }) {
   return (
@@ -96,7 +94,6 @@ export function UsersRoute({
           </div>
         ))}
       </div>
-      {userMessage && <p className="inlineStatus">{userMessage}</p>}
       {resetUser && (
         <div className="modalOverlay" role="presentation">
           <section className="modalPanel" role="dialog" aria-modal="true" aria-labelledby="reset-password-title">

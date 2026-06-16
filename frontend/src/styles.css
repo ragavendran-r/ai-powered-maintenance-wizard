@@ -989,6 +989,68 @@ h3 {
   padding: 10px;
 }
 
+.toastStack {
+  display: grid;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 32px));
+  position: fixed;
+  right: 16px;
+  top: 16px;
+  z-index: 50;
+}
+
+.toastMessage {
+  align-items: start;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-panel);
+  border-left: 4px solid var(--color-brand-border-strong);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 14px 34px rgba(23, 33, 43, 0.16);
+  color: var(--color-text-note);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 10px 10px 10px 12px;
+}
+
+.toastMessage.success {
+  border-left-color: var(--state-success-border-strong);
+}
+
+.toastMessage.info {
+  border-left-color: var(--state-info-border);
+}
+
+.toastMessage.error {
+  border-left-color: var(--state-danger-border);
+}
+
+.toastMessage p {
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.toastMessage svg {
+  margin-top: 1px;
+}
+
+.toastMessage button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+
+.toastMessage button:not(:disabled):hover {
+  color: var(--color-text-heading);
+}
+
 .evidence strong {
   color: var(--color-text-strong);
   display: block;

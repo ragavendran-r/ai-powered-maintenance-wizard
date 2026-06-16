@@ -44,7 +44,6 @@ export function WorkOrdersRoute({
   dispatchWorkOrder,
   planWorkOrder,
   pmPlanLoading,
-  pmPlanMessage,
   pmPlanStreamText,
   pmPlans,
   pmTemplates,
@@ -68,7 +67,6 @@ export function WorkOrdersRoute({
   technicianStreaming,
   technicians,
   mode,
-  workOrderMessage,
   workOrders,
 }: {
   approveWorkOrder: (workOrderId: string) => void
@@ -82,7 +80,6 @@ export function WorkOrdersRoute({
   dispatchWorkOrder: (workOrderId: string) => void
   planWorkOrder: (workOrderId: string, payload: WorkOrderPlanningUpdate) => void
   pmPlanLoading: boolean
-  pmPlanMessage: string
   pmPlanStreamText: string
   pmPlans: PmPlan[]
   pmTemplates: PmTemplate[]
@@ -107,7 +104,6 @@ export function WorkOrdersRoute({
   technicianStreaming: boolean
   technicians: AuthUser[]
   mode: 'execution' | 'planning'
-  workOrderMessage: string
   workOrders: WorkOrder[]
 }) {
   const selectedEffectiveStatus = selectedWorkOrder ? effectiveWorkOrderStatus(selectedWorkOrder) : undefined
@@ -177,7 +173,6 @@ export function WorkOrdersRoute({
                 convertPmPlanToWorkOrder={convertPmPlanToWorkOrder}
                 draftPreventivePlan={draftPreventivePlan}
                 isLoading={pmPlanLoading}
-                message={pmPlanMessage}
                 streamText={pmPlanStreamText}
                 plans={pmPlans}
                 templates={pmTemplates}
@@ -331,7 +326,6 @@ export function WorkOrdersRoute({
             onApprove={approveWorkOrder}
             onStart={startWorkOrder}
           />
-          {workOrderMessage && <p className="inlineStatus">{workOrderMessage}</p>}
         </section>
       </section>
       {!isPlanningMode && (
@@ -473,7 +467,6 @@ function PreventiveMaintenancePanel({
   convertPmPlanToWorkOrder,
   draftPreventivePlan,
   isLoading,
-  message,
   plans,
   streamText,
   templates,
@@ -482,7 +475,6 @@ function PreventiveMaintenancePanel({
   convertPmPlanToWorkOrder: (planId: string) => void
   draftPreventivePlan: (equipmentId: string, templateId?: string) => void
   isLoading: boolean
-  message: string
   plans: PmPlan[]
   streamText: string
   templates: PmTemplate[]
@@ -631,7 +623,6 @@ function PreventiveMaintenancePanel({
       ) : (
         <p className="plannerHint">No PM plans generated yet. Draft one from asset risk prediction and a PM template.</p>
       )}
-      {message && <p className="inlineStatus">{message}</p>}
     </section>
   )
 }

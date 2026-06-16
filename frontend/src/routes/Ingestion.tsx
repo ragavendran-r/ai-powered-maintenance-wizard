@@ -7,7 +7,6 @@ export function IngestionRoute({
   ingestSelectedFile,
   ingestSourceType,
   ingestTitle,
-  ingestionMessage,
   jsonIngestionLoading,
   jsonMode,
   jsonPayload,
@@ -25,7 +24,6 @@ export function IngestionRoute({
   ingestSelectedFile: () => void
   ingestSourceType: string
   ingestTitle: string
-  ingestionMessage: string
   jsonIngestionLoading: boolean
   jsonMode: 'documents' | 'records'
   jsonPayload: string
@@ -121,7 +119,6 @@ export function IngestionRoute({
           {jsonIngestionLoading ? 'Importing...' : 'Import JSON'}
         </button>
       </div>
-      {ingestionMessage && <p className="inlineStatus">{ingestionMessage}</p>}
     </section>
   )
 }
