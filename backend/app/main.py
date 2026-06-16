@@ -161,8 +161,8 @@ from app.services.work_order_assistant import (
 )
 
 
-LEARNING_REVIEW_ROLES = ("admin", "maintenance_engineer", "reliability_engineer")
-LEARNING_ARTIFACT_CLEANUP_ROLES = {"admin", "reliability_engineer"}
+LEARNING_REVIEW_ROLES = ("admin",)
+LEARNING_ARTIFACT_CLEANUP_ROLES = {"admin"}
 RCA_WORKSPACE_ROLES = ("admin", "maintenance_engineer", "reliability_engineer", "maintenance_supervisor")
 MAINTENANCE_REPORT_ROLES = ("admin", "maintenance_engineer", "maintenance_supervisor", "reliability_engineer", "planner")
 MATERIAL_BLOCKER_STATUSES = {"blocked", "waiting_procurement", "reorder_requested"}

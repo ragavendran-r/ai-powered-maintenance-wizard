@@ -164,7 +164,7 @@ def test_rca_workspace_drafts_closes_and_feeds_learning():
     assert closed["closure_review"]["accepted_for_learning"] is True
     assert closed["closed_at"]
 
-    examples_response = client.get("/api/learning/examples?approved_only=true", headers=headers)
+    examples_response = client.get("/api/learning/examples?approved_only=true", headers=auth_headers())
     assert examples_response.status_code == 200
     examples = examples_response.json()
     assert any(example["source_type"] == "rca_case" and example["source_id"] == "RCA-9001" for example in examples)
@@ -1840,7 +1840,7 @@ def test_retrieval_uses_qdrant_learning_example_hits(monkeypatch):
 
 
 def test_learning_model_registration_rejects_active_status():
-    headers = auth_headers("reliability@plant.local")
+    headers = auth_headers()
     response = client.post(
         "/api/learning/model-versions",
         json={
@@ -1863,7 +1863,7 @@ def test_rag_embedding_profile_and_migration_controls_are_audited():
     )
     assert operator_response.status_code == 403
 
-    headers = auth_headers("reliability@plant.local")
+    headers = auth_headers()
     profiles_response = client.get("/api/learning/rag/embedding-profiles", headers=headers)
     assert profiles_response.status_code == 200
     active_profile = next(profile for profile in profiles_response.json() if profile["status"] == "active")
@@ -1981,7 +1981,7 @@ def test_rag_reindex_syncs_approved_learning_examples(monkeypatch):
     response = client.post(
         "/api/learning/rag/reindex",
         json={"target_collection": "maintenance_wizard_documents_learning", "recreate_collection": False},
-        headers=auth_headers("reliability@plant.local"),
+        headers=auth_headers(),
     )
 
     assert response.status_code == 200
@@ -1999,8 +1999,10 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
     monkeypatch.setenv("LEARNING_ARTIFACT_CLEANUP_ENABLED", "false")
     operator_response = client.get("/api/learning/summary", headers=auth_headers("operator@plant.local"))
     assert operator_response.status_code == 403
+    reliability_response = client.get("/api/learning/summary", headers=auth_headers("reliability@plant.local"))
+    assert reliability_response.status_code == 403
 
-    headers = auth_headers("reliability@plant.local")
+    headers = auth_headers()
     refresh_response = client.post("/api/learning/examples/refresh", headers=headers)
     assert refresh_response.status_code == 200
     assert any(example["approved"] for example in refresh_response.json())
@@ -2120,7 +2122,7 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
             "schema_version": "1",
             "job_id": deployment_job["id"],
             "job_type": "adapter_deployment",
-            "requested_by": "reliability@plant.local",
+            "requested_by": "admin@plant.local",
             "correlation_id": deployment_job["correlation_id"],
             "input_refs": deployment_job["input_refs"],
         },
@@ -2221,7 +2223,7 @@ def test_learning_review_can_reindex_rag_vectors():
     operator_response = client.post("/api/learning/rag/reindex", headers=auth_headers("operator@plant.local"))
     assert operator_response.status_code == 403
 
-    headers = auth_headers("reliability@plant.local")
+    headers = auth_headers()
     response = client.post("/api/learning/rag/reindex", headers=headers)
     assert response.status_code == 200
     job = response.json()
@@ -2259,7 +2261,7 @@ def test_embedding_profile_reports_unsupported_provider_and_dimension_mismatch()
 
 
 def test_peft_learning_job_publishes_when_async_learning_is_enabled(monkeypatch):
-    headers = auth_headers("reliability@plant.local")
+    headers = auth_headers()
     client.post("/api/learning/examples/refresh", headers=headers)
     dataset = client.post(
         "/api/learning/datasets",
@@ -2312,7 +2314,7 @@ def test_peft_learning_job_publishes_when_async_learning_is_enabled(monkeypatch)
 
 
 def test_learning_worker_prepares_peft_artifacts(monkeypatch, tmp_path):
-    headers = auth_headers("reliability@plant.local")
+    headers = auth_headers()
     client.post("/api/learning/examples/refresh", headers=headers)
     dataset = client.post(
         "/api/learning/datasets",
@@ -2351,7 +2353,7 @@ def test_learning_worker_prepares_peft_artifacts(monkeypatch, tmp_path):
             "schema_version": "1",
             "job_id": peft_job["id"],
             "job_type": "peft_tuning",
-            "requested_by": "reliability@plant.local",
+            "requested_by": "admin@plant.local",
             "correlation_id": peft_job["correlation_id"],
             "input_refs": peft_job["input_refs"],
         },
@@ -2375,7 +2377,7 @@ def test_learning_worker_prepares_peft_artifacts(monkeypatch, tmp_path):
 
 
 def test_learning_worker_runs_configured_peft_trainer_and_registers_candidate(monkeypatch, tmp_path):
-    headers = auth_headers("reliability@plant.local")
+    headers = auth_headers()
     client.post("/api/learning/examples/refresh", headers=headers)
     dataset = client.post(
         "/api/learning/datasets",
@@ -2447,7 +2449,7 @@ def test_learning_worker_runs_configured_peft_trainer_and_registers_candidate(mo
             "schema_version": "1",
             "job_id": peft_job["id"],
             "job_type": "peft_tuning",
-            "requested_by": "reliability@plant.local",
+            "requested_by": "admin@plant.local",
             "correlation_id": peft_job["correlation_id"],
             "input_refs": peft_job["input_refs"],
         },
@@ -2654,14 +2656,14 @@ def test_learning_artifact_cleanup_api_is_db_backed_audited_and_role_guarded(mon
     )
     assert forbidden.status_code == 403
 
-    artifacts_response = client.get("/api/learning/artifacts", headers=auth_headers("reliability@plant.local"))
+    artifacts_response = client.get("/api/learning/artifacts", headers=auth_headers())
     assert artifacts_response.status_code == 200
     assert any(item["id"] == expired_artifact["id"] for item in artifacts_response.json())
 
     preview = client.post(
         "/api/learning/artifacts/cleanup",
         json={"dry_run": True, "notes": "preview cleanup"},
-        headers=auth_headers("reliability@plant.local"),
+        headers=auth_headers(),
     )
     assert preview.status_code == 200
     preview_payload = preview.json()
@@ -2685,7 +2687,7 @@ def test_learning_artifact_cleanup_api_is_db_backed_audited_and_role_guarded(mon
     disabled_apply = client.post(
         "/api/learning/artifacts/cleanup",
         json={"dry_run": False},
-        headers=auth_headers("reliability@plant.local"),
+        headers=auth_headers(),
     )
     assert disabled_apply.status_code == 200
     assert disabled_apply.json()["deletion_allowed"] is False
@@ -2705,7 +2707,7 @@ def test_learning_artifact_cleanup_api_is_db_backed_audited_and_role_guarded(mon
     assert not expired_file.exists()
     assert protected_file.exists()
     assert fresh_file.exists()
-    jobs = client.get("/api/learning/jobs", headers=auth_headers("reliability@plant.local")).json()
+    jobs = client.get("/api/learning/jobs", headers=auth_headers()).json()
     cleanup_jobs = [job for job in jobs if job["job_type"] == "artifact_cleanup"]
     assert cleanup_jobs
     assert any(job["output_refs"].get("deleted_count") == 1 for job in cleanup_jobs)
@@ -2722,7 +2724,7 @@ def test_learning_artifact_cleanup_api_reports_invalid_and_unsupported_store(mon
     invalid = client.post(
         "/api/learning/artifacts/cleanup",
         json={"dry_run": True},
-        headers=auth_headers("reliability@plant.local"),
+        headers=auth_headers(),
     )
     assert invalid.status_code == 400
     assert "Invalid learning artifact lifecycle config" in invalid.json()["detail"]
@@ -2737,7 +2739,7 @@ def test_learning_artifact_cleanup_api_reports_invalid_and_unsupported_store(mon
     unsupported = client.post(
         "/api/learning/artifacts/cleanup",
         json={"dry_run": True},
-        headers=auth_headers("reliability@plant.local"),
+        headers=auth_headers(),
     )
     assert unsupported.status_code == 200
     assert unsupported.json()["store"] == "s3"
@@ -2745,7 +2747,7 @@ def test_learning_artifact_cleanup_api_reports_invalid_and_unsupported_store(mon
 
 
 def test_adapter_deployment_rejects_mismatched_artifact_hash(tmp_path):
-    headers = auth_headers("reliability@plant.local")
+    headers = auth_headers()
     artifact_path = tmp_path / "adapter.bin"
     artifact_path.write_text("adapter", encoding="utf-8")
     repository.save_learning_artifact(
@@ -2785,7 +2787,7 @@ def test_adapter_deployment_rejects_mismatched_artifact_hash(tmp_path):
 
 
 def test_learning_example_can_be_scored_by_judge_endpoint():
-    headers = auth_headers("reliability@plant.local")
+    headers = auth_headers()
     refresh_response = client.post("/api/learning/examples/refresh", headers=headers)
     example = refresh_response.json()[0]
 
@@ -2798,8 +2800,8 @@ def test_learning_example_can_be_scored_by_judge_endpoint():
     assert payload["judge_rationale"]
 
 
-def test_learning_example_approval_can_be_changed_by_engineer():
-    headers = auth_headers("reliability@plant.local")
+def test_learning_example_approval_can_be_changed_by_admin():
+    headers = auth_headers()
     refresh_response = client.post("/api/learning/examples/refresh", headers=headers)
     example = next(item for item in refresh_response.json() if item["source_type"] == "document")
 
