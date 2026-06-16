@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { KeyRound, UserPlus, Users } from 'lucide-react'
 import type { AuthUser, UserRole } from '../services/api'
 import { roleLabels, roleOptions } from '../appModel'
@@ -22,7 +23,7 @@ export function UsersRoute({
   users,
 }: {
   closeResetPassword: () => void
-  createNewUser: () => void
+  createNewUser: () => Promise<boolean>
   newUserEmail: string
   newUserName: string
   newUserPassword: string
@@ -39,38 +40,31 @@ export function UsersRoute({
   toggleUserActive: (user: AuthUser) => void
   users: AuthUser[]
 }) {
+  const [isCreateUserOpen, setIsCreateUserOpen] = useState(false)
+
+  function closeCreateUser() {
+    setIsCreateUserOpen(false)
+    setNewUserEmail('')
+    setNewUserName('')
+    setNewUserRole('operator')
+    setNewUserPassword('')
+  }
+
+  async function submitCreateUser() {
+    const created = await createNewUser()
+    if (created) setIsCreateUserOpen(false)
+  }
+
   return (
     <section className="detailPanel usersView">
-      <div className="sectionHeader">
-        <Users size={18} />
-        <h2>Users</h2>
-      </div>
-      <div className="userCreateGrid">
-        <label className="field">
-          <span>Email</span>
-          <input value={newUserEmail} onChange={(event) => setNewUserEmail(event.target.value)} />
-        </label>
-        <label className="field">
-          <span>Name</span>
-          <input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} />
-        </label>
-        <label className="field">
-          <span>Role</span>
-          <select value={newUserRole} onChange={(event) => setNewUserRole(event.target.value as UserRole)}>
-            {roleOptions.map((role) => (
-              <option value={role} key={role}>
-                {roleLabels[role]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Password</span>
-          <input type="password" value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} />
-        </label>
-        <button onClick={createNewUser} title="Create user">
+      <div className="sectionHeader userManagementHeader">
+        <span className="sectionTitleGroup">
+          <Users size={18} />
+          <h2>Users</h2>
+        </span>
+        <button className="iconTextButton" onClick={() => setIsCreateUserOpen(true)} title="Create user">
           <UserPlus size={16} />
-          Create
+          Create User
         </button>
       </div>
       <div className="userList" aria-label="Application users">
@@ -94,6 +88,57 @@ export function UsersRoute({
           </div>
         ))}
       </div>
+      {isCreateUserOpen && (
+        <div className="modalOverlay" role="presentation">
+          <section className="modalPanel" role="dialog" aria-modal="true" aria-labelledby="create-user-title">
+            <div className="sectionHeader compactHeader">
+              <UserPlus size={18} />
+              <h2 id="create-user-title">Create User</h2>
+            </div>
+            <div className="userDialogGrid">
+              <label className="field">
+                <span>Email</span>
+                <input
+                  autoFocus
+                  value={newUserEmail}
+                  onChange={(event) => setNewUserEmail(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>Name</span>
+                <input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} />
+              </label>
+              <label className="field">
+                <span>Role</span>
+                <select value={newUserRole} onChange={(event) => setNewUserRole(event.target.value as UserRole)}>
+                  {roleOptions.map((role) => (
+                    <option value={role} key={role}>
+                      {roleLabels[role]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={newUserPassword}
+                  onChange={(event) => setNewUserPassword(event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="modalActions">
+              <button className="outlineButton" onClick={closeCreateUser}>
+                Cancel
+              </button>
+              <button className="iconTextButton" onClick={submitCreateUser}>
+                <UserPlus size={16} />
+                Create
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {resetUser && (
         <div className="modalOverlay" role="presentation">
           <section className="modalPanel" role="dialog" aria-modal="true" aria-labelledby="reset-password-title">
