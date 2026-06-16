@@ -643,6 +643,12 @@ h3 {
   margin-bottom: 14px;
 }
 
+.sectionTitleGroup {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
 .compactHeader {
   margin-bottom: 10px;
 }
@@ -1905,12 +1911,21 @@ h3 {
   align-content: start;
 }
 
+.userManagementHeader {
+  justify-content: space-between;
+}
+
 .userCreateGrid {
   align-items: end;
   display: grid;
   gap: 10px;
   grid-template-columns: 1fr 1fr 180px 180px auto;
   margin-bottom: 14px;
+}
+
+.userDialogGrid {
+  display: grid;
+  gap: 10px;
 }
 
 .userList {
@@ -3387,6 +3402,12 @@ h3 {
 
 .pmPlanTable tr.selected td {
   background: var(--color-brand-soft);
+}
+
+.pmPlanEmptyCell {
+  color: var(--color-text-muted);
+  font-weight: 700;
+  text-align: center;
 }
 
 .pmPlanTable tr:last-child td {

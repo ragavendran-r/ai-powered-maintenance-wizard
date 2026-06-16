@@ -2864,8 +2864,10 @@ export function App() {
       setNewUserRole('operator')
       setNewUserPassword('')
       setUserMessage('User created')
+      return true
     } catch {
       setUserMessage('User could not be created')
+      return false
     }
   }
 

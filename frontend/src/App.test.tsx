@@ -2727,8 +2727,24 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       .mock.calls.find(([url, init]) => {
         if (!url.toString().includes('/api/work-orders/WO-8304') || init?.method !== 'PATCH') return false
         return JSON.parse((init.body as string) ?? '{}').planning_status === 'dispatched'
-      })
+    })
     expect(JSON.parse((dispatchCall?.[1] as RequestInit).body as string)).toEqual({ planning_status: 'dispatched' })
+  })
+
+  it('keeps the PM plans table visible when no plans are loaded', async () => {
+    apiPmPlans = []
+    render(<App />)
+    await signIn('planner@plant.local')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Planning' }))
+    const centerPane = screen.getByLabelText('Work order center pane')
+    const pmPanel = await within(centerPane).findByLabelText('Preventive maintenance planning')
+    const pmPlanTable = within(pmPanel).getByLabelText('Preventive maintenance plans')
+
+    expect(within(pmPanel).queryByLabelText('Active preventive maintenance plan')).not.toBeInTheDocument()
+    expect(within(pmPanel).getByText('0 plans')).toBeInTheDocument()
+    expect(within(pmPlanTable).getByRole('columnheader', { name: 'Plan' })).toBeInTheDocument()
+    expect(within(pmPlanTable).getByText('No PM plans generated yet. Draft one from asset risk prediction and a PM template.')).toBeInTheDocument()
   })
 
   it('shows only the technician LLM assistant to technician users', async () => {
@@ -3165,14 +3181,24 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'User management' }))
     expect(screen.getByRole('tab', { name: 'User management' })).toHaveAttribute('aria-selected', 'true')
     expect(await screen.findByText('Jan')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new.operator@plant.local' } })
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Operator' } })
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'NewOperator123!' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    expect(screen.queryByRole('dialog', { name: 'Create User' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create User' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Create User' })
+    fireEvent.change(within(dialog).getByLabelText('Email'), { target: { value: 'new.operator@plant.local' } })
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'New Operator' } })
+    fireEvent.change(within(dialog).getByLabelText('Password'), { target: { value: 'NewOperator123!' } })
+
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url, init]) => url.toString().endsWith('/api/users') && init?.method === 'POST'),
+    ).toBe(false)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }))
 
     await waitFor(() => {
       expect(screen.getByText('User created')).toBeInTheDocument()
     })
+    expect(screen.queryByRole('dialog', { name: 'Create User' })).not.toBeInTheDocument()
   })
 
   it('opens password reset in a dialog instead of inline user rows', async () => {

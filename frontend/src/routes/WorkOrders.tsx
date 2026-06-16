@@ -625,89 +625,91 @@ function PreventiveMaintenancePanel({
           </div>
         </article>
       )}
-      {displayedPlans.length ? (
-        <>
-          {activePlan && (
-            <article className={`pmPlanCard active ${activePlan.status}`} aria-label="Active preventive maintenance plan">
-              <div className="plannerCardHeader">
-                <div>
-                  <small>Active plan</small>
-                  <strong>{activePlan.title}</strong>
-                  <small>{activePlan.id} · {activePlan.equipment_id} · next due {formatDate(activePlan.next_due_date)}</small>
-                </div>
-                <span className={`planningBadge ${pmPlanStatusBadgeClass(activePlan.status)}`}>
-                  {pmPlanStatusLabel(activePlan.status)}
-                </span>
-              </div>
-              <p>{activePlan.trigger.description}</p>
-              <div className="pmPlanColumns">
-                <PmList title="Monitoring thresholds" items={activePlan.thresholds} />
-                <PmList title="Generated task list" items={activePlan.tasks.map((task) => task.task)} />
-                <PmList title="Smith steps" items={activePlan.smith_steps} />
-              </div>
-              {activePlan.adjustment_notes.length > 0 && <PmList title="LLM adjustment notes" items={activePlan.adjustment_notes} />}
-              {activePlan.spares_strategy.length > 0 && <PmList title="Spares strategy" items={activePlan.spares_strategy} />}
-              <div className="plannerActions">
-                <button
-                  className="outlineButton"
-                  type="button"
-                  disabled={isLoading || activePlan.status === 'converted'}
-                  onClick={() => convertPmPlanToWorkOrder(activePlan.id)}
-                >
-                  Convert to planned work
-                </button>
-                {activePlan.converted_work_order_id && <span className="plannerHint">Created {activePlan.converted_work_order_id}</span>}
-              </div>
-            </article>
-          )}
-          <div className="pmPlanTablePanel" aria-label="Preventive maintenance plan table">
-            <div className="miniHeader">
-              <h3>All PM plans</h3>
-              <small>{displayedPlans.length} plan{displayedPlans.length === 1 ? '' : 's'}</small>
+      {activePlan && (
+        <article className={`pmPlanCard active ${activePlan.status}`} aria-label="Active preventive maintenance plan">
+          <div className="plannerCardHeader">
+            <div>
+              <small>Active plan</small>
+              <strong>{activePlan.title}</strong>
+              <small>{activePlan.id} · {activePlan.equipment_id} · next due {formatDate(activePlan.next_due_date)}</small>
             </div>
-            <table className="pmPlanTable" aria-label="Preventive maintenance plans">
-              <thead>
-                <tr>
-                  <th scope="col">Plan</th>
-                  <th scope="col">Asset</th>
-                  <th scope="col">Next due</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayedPlans.map((plan) => (
-                  <tr className={plan.id === activePlan?.id ? 'selected' : ''} key={plan.id}>
-                    <td>
-                      <strong>{plan.id}</strong>
-                      <small>{plan.title}</small>
-                    </td>
-                    <td>{plan.equipment_id}</td>
-                    <td>{formatDate(plan.next_due_date)}</td>
-                    <td>
-                      <span className={`planningBadge ${pmPlanStatusBadgeClass(plan.status)}`}>
-                        {pmPlanStatusLabel(plan.status)}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        aria-pressed={plan.id === activePlan?.id}
-                        className="outlineButton compactButton"
-                        onClick={() => setActivePlanId(plan.id)}
-                        type="button"
-                      >
-                        {plan.id === activePlan?.id ? 'Active' : 'Select'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <span className={`planningBadge ${pmPlanStatusBadgeClass(activePlan.status)}`}>
+              {pmPlanStatusLabel(activePlan.status)}
+            </span>
           </div>
-        </>
-      ) : (
-        <p className="plannerHint">No PM plans generated yet. Draft one from asset risk prediction and a PM template.</p>
+          <p>{activePlan.trigger.description}</p>
+          <div className="pmPlanColumns">
+            <PmList title="Monitoring thresholds" items={activePlan.thresholds} />
+            <PmList title="Generated task list" items={activePlan.tasks.map((task) => task.task)} />
+            <PmList title="Smith steps" items={activePlan.smith_steps} />
+          </div>
+          {activePlan.adjustment_notes.length > 0 && <PmList title="LLM adjustment notes" items={activePlan.adjustment_notes} />}
+          {activePlan.spares_strategy.length > 0 && <PmList title="Spares strategy" items={activePlan.spares_strategy} />}
+          <div className="plannerActions">
+            <button
+              className="outlineButton"
+              type="button"
+              disabled={isLoading || activePlan.status === 'converted'}
+              onClick={() => convertPmPlanToWorkOrder(activePlan.id)}
+            >
+              Convert to planned work
+            </button>
+            {activePlan.converted_work_order_id && <span className="plannerHint">Created {activePlan.converted_work_order_id}</span>}
+          </div>
+        </article>
       )}
+      <div className="pmPlanTablePanel" aria-label="Preventive maintenance plan table">
+        <div className="miniHeader">
+          <h3>All PM plans</h3>
+          <small>{displayedPlans.length} plan{displayedPlans.length === 1 ? '' : 's'}</small>
+        </div>
+        <table className="pmPlanTable" aria-label="Preventive maintenance plans">
+          <thead>
+            <tr>
+              <th scope="col">Plan</th>
+              <th scope="col">Asset</th>
+              <th scope="col">Next due</th>
+              <th scope="col">Status</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayedPlans.length ? (
+              displayedPlans.map((plan) => (
+                <tr className={plan.id === activePlan?.id ? 'selected' : ''} key={plan.id}>
+                  <td>
+                    <strong>{plan.id}</strong>
+                    <small>{plan.title}</small>
+                  </td>
+                  <td>{plan.equipment_id}</td>
+                  <td>{formatDate(plan.next_due_date)}</td>
+                  <td>
+                    <span className={`planningBadge ${pmPlanStatusBadgeClass(plan.status)}`}>
+                      {pmPlanStatusLabel(plan.status)}
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      aria-pressed={plan.id === activePlan?.id}
+                      className="outlineButton compactButton"
+                      onClick={() => setActivePlanId(plan.id)}
+                      type="button"
+                    >
+                      {plan.id === activePlan?.id ? 'Active' : 'Select'}
+                    </button>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td className="pmPlanEmptyCell" colSpan={5}>
+                  No PM plans generated yet. Draft one from asset risk prediction and a PM template.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }
