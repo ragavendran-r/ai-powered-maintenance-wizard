@@ -3234,8 +3234,11 @@ h3 {
 }
 
 .planningTabsShell {
+  align-content: start;
+  align-items: start;
   display: grid;
   gap: 12px;
+  grid-auto-rows: max-content;
   min-width: 0;
 }
 
