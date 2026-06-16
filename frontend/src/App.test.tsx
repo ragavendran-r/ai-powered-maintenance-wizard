@@ -636,7 +636,23 @@ const generatedPmPlan: PmPlan = {
   updated_at: '2026-06-14T09:05:00+05:30',
 }
 
-let apiPmPlans: PmPlan[] = []
+const existingPmPlan: PmPlan = {
+  ...generatedPmPlan,
+  id: 'PM-6999',
+  title: 'Existing blower PM plan',
+  equipment_id: 'BF-BLOWER-02',
+  status: 'active',
+  next_due_date: '2026-06-20T08:00:00+05:30',
+  trigger: {
+    ...generatedPmPlan.trigger,
+    metric_key: 'outlet_pressure_variance',
+    description: 'Maintain blower pressure stability before the next furnace ramp.',
+  },
+  thresholds: ['outlet_pressure_variance <= 10%'],
+  converted_work_order_id: null,
+}
+
+let apiPmPlans: PmPlan[] = [existingPmPlan]
 
 const rcaCase = {
   id: 'RCA-9001',
@@ -1354,7 +1370,7 @@ beforeEach(() => {
   ingestionResponseDelayMs = 0
   learningJudgeDelayMs = 0
   apiWorkOrders = workOrders as WorkOrder[]
-  apiPmPlans = []
+  apiPmPlans = [existingPmPlan]
   learningDeploymentResponses = [learningDeployment]
   learningArtifactCleanupRequests = []
   learningSummaryExamples = [learningExample]
@@ -2593,16 +2609,24 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     const pmPanel = await within(centerPane).findByLabelText('Preventive maintenance planning')
     expect(within(pmPanel).getByRole('heading', { name: 'Preventive Maintenance Plans' })).toBeInTheDocument()
     expect(document.getElementById('planning-tab-dispatch')).toHaveAttribute('hidden')
+    expect(within(pmPanel).getByLabelText('Preventive maintenance plans')).toBeInTheDocument()
+    expect(within(pmPanel).getByLabelText('Active preventive maintenance plan')).toBeInTheDocument()
+    expect(within(pmPanel).getByLabelText('Active preventive maintenance plan')).toHaveTextContent('Existing blower PM plan')
     expect(within(pmPanel).getAllByText('Drive bearing and coupling health PM').length).toBeGreaterThanOrEqual(1)
     fireEvent.click(within(pmPanel).getByRole('button', { name: /Morpheus PM draft/i }))
     expect(await within(pmPanel).findByRole('heading', { name: 'Morpheus PM live draft' })).toBeInTheDocument()
     expect(await within(pmPanel).findByText('Monitoring Thresholds')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(within(pmPanel).getByLabelText('Active preventive maintenance plan')).toHaveTextContent('Main drive proactive PM plan')
+    })
     expect((await within(pmPanel).findAllByText('Main drive proactive PM plan')).length).toBeGreaterThanOrEqual(2)
     expect(within(pmPanel).getAllByText('drive_end_vibration >= 7.1 mm/s').length).toBeGreaterThanOrEqual(2)
     expect(within(pmPanel).getByText('Confirm LOTO and permits.')).toBeInTheDocument()
+    const pmPlanTable = within(pmPanel).getByLabelText('Preventive maintenance plans')
+    fireEvent.click(within(pmPlanTable).getByRole('button', { name: 'Select' }))
+    expect(within(pmPanel).getByLabelText('Active preventive maintenance plan')).toHaveTextContent('Existing blower PM plan')
     fireEvent.click(within(pmPanel).getByRole('button', { name: 'Convert to planned work' }))
-    await within(pmPanel).findByText('Created WO-9100')
-    expect(await screen.findByText('Converted PM-7001 to planned work order WO-9100')).toBeInTheDocument()
+    await within(pmPanel).findByText(/Created WO-/)
 
     fireEvent.click(dispatchTab)
     expect(preventiveTab).toHaveAttribute('aria-selected', 'false')

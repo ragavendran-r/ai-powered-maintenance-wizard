@@ -6,6 +6,7 @@ import type {
   MaterialBlockerStatus,
   MaterialReadiness,
   PmPlan,
+  PmPlanStatus,
   PmTemplate,
   ProcurementStatus,
   SupervisorAssistantResponse,
@@ -462,6 +463,24 @@ const procurementStatusLabels: Record<ProcurementStatus, string> = {
 
 const procurementStatusOptions: ProcurementStatus[] = ['not_required', 'not_requested', 'requested', 'ordered', 'received']
 
+const pmPlanStatusLabels: Record<PmPlanStatus, string> = {
+  active: 'Active',
+  converted: 'Converted',
+  draft: 'Draft',
+  paused: 'Paused',
+}
+
+function pmPlanStatusLabel(status: PmPlanStatus) {
+  return pmPlanStatusLabels[status]
+}
+
+function pmPlanStatusBadgeClass(status: PmPlanStatus) {
+  if (status === 'converted') return 'dispatched'
+  if (status === 'active') return 'planned'
+  if (status === 'paused') return 'unscheduled'
+  return 'unscheduled'
+}
+
 function PreventiveMaintenancePanel({
   assets,
   convertPmPlanToWorkOrder,
@@ -480,6 +499,7 @@ function PreventiveMaintenancePanel({
   templates: PmTemplate[]
 }) {
   const streamEndRef = useRef<HTMLDivElement | null>(null)
+  const previousPlanIdsRef = useRef<string[]>(plans.map((plan) => plan.id))
   const assetOptions = useMemo(() => {
     const ids = new Set<string>()
     const options = [
@@ -496,6 +516,7 @@ function PreventiveMaintenancePanel({
   const [selectedEquipmentId, setSelectedEquipmentId] = useState(assetOptions[0]?.id ?? 'RM-DRIVE-01')
   const applicableTemplates = templates.filter((template) => !template.equipment_id || template.equipment_id === selectedEquipmentId)
   const [selectedTemplateId, setSelectedTemplateId] = useState(applicableTemplates[0]?.id ?? '')
+  const [activePlanId, setActivePlanId] = useState(plans[0]?.id ?? '')
 
   useEffect(() => {
     if (!assetOptions.some((asset) => asset.id === selectedEquipmentId)) {
@@ -510,7 +531,26 @@ function PreventiveMaintenancePanel({
     }
   }, [selectedEquipmentId, selectedTemplateId, templates])
 
-  const displayedPlans = plans.length ? plans : []
+  const displayedPlans = plans
+  const activePlan = displayedPlans.find((plan) => plan.id === activePlanId) ?? displayedPlans[0]
+
+  useEffect(() => {
+    const previousPlanIds = previousPlanIdsRef.current
+    const nextPlanIds = displayedPlans.map((plan) => plan.id)
+    const newlyAddedPlan = displayedPlans.find((plan) => !previousPlanIds.includes(plan.id))
+    previousPlanIdsRef.current = nextPlanIds
+    if (!displayedPlans.length) {
+      setActivePlanId('')
+      return
+    }
+    if (newlyAddedPlan) {
+      setActivePlanId(newlyAddedPlan.id)
+      return
+    }
+    if (!displayedPlans.some((plan) => plan.id === activePlanId)) {
+      setActivePlanId(displayedPlans[0].id)
+    }
+  }, [activePlanId, displayedPlans])
 
   useEffect(() => {
     if (streamText) {
@@ -586,40 +626,85 @@ function PreventiveMaintenancePanel({
         </article>
       )}
       {displayedPlans.length ? (
-        <div className="pmPlanGrid">
-          {displayedPlans.map((plan) => (
-            <article className={`pmPlanCard ${plan.status}`} key={plan.id}>
+        <>
+          {activePlan && (
+            <article className={`pmPlanCard active ${activePlan.status}`} aria-label="Active preventive maintenance plan">
               <div className="plannerCardHeader">
                 <div>
-                  <strong>{plan.title}</strong>
-                  <small>{plan.id} · {plan.equipment_id} · next due {formatDate(plan.next_due_date)}</small>
+                  <small>Active plan</small>
+                  <strong>{activePlan.title}</strong>
+                  <small>{activePlan.id} · {activePlan.equipment_id} · next due {formatDate(activePlan.next_due_date)}</small>
                 </div>
-                <span className={`planningBadge ${plan.status === 'converted' ? 'dispatched' : plan.status === 'draft' ? 'unscheduled' : 'planned'}`}>
-                  {plan.status}
+                <span className={`planningBadge ${pmPlanStatusBadgeClass(activePlan.status)}`}>
+                  {pmPlanStatusLabel(activePlan.status)}
                 </span>
               </div>
-              <p>{plan.trigger.description}</p>
+              <p>{activePlan.trigger.description}</p>
               <div className="pmPlanColumns">
-                <PmList title="Monitoring thresholds" items={plan.thresholds} />
-                <PmList title="Generated task list" items={plan.tasks.map((task) => task.task)} />
-                <PmList title="Smith steps" items={plan.smith_steps} />
+                <PmList title="Monitoring thresholds" items={activePlan.thresholds} />
+                <PmList title="Generated task list" items={activePlan.tasks.map((task) => task.task)} />
+                <PmList title="Smith steps" items={activePlan.smith_steps} />
               </div>
-              {plan.adjustment_notes.length > 0 && <PmList title="LLM adjustment notes" items={plan.adjustment_notes} />}
-              {plan.spares_strategy.length > 0 && <PmList title="Spares strategy" items={plan.spares_strategy} />}
+              {activePlan.adjustment_notes.length > 0 && <PmList title="LLM adjustment notes" items={activePlan.adjustment_notes} />}
+              {activePlan.spares_strategy.length > 0 && <PmList title="Spares strategy" items={activePlan.spares_strategy} />}
               <div className="plannerActions">
                 <button
                   className="outlineButton"
                   type="button"
-                  disabled={isLoading || plan.status === 'converted'}
-                  onClick={() => convertPmPlanToWorkOrder(plan.id)}
+                  disabled={isLoading || activePlan.status === 'converted'}
+                  onClick={() => convertPmPlanToWorkOrder(activePlan.id)}
                 >
                   Convert to planned work
                 </button>
-                {plan.converted_work_order_id && <span className="plannerHint">Created {plan.converted_work_order_id}</span>}
+                {activePlan.converted_work_order_id && <span className="plannerHint">Created {activePlan.converted_work_order_id}</span>}
               </div>
             </article>
-          ))}
-        </div>
+          )}
+          <div className="pmPlanTablePanel" aria-label="Preventive maintenance plan table">
+            <div className="miniHeader">
+              <h3>All PM plans</h3>
+              <small>{displayedPlans.length} plan{displayedPlans.length === 1 ? '' : 's'}</small>
+            </div>
+            <table className="pmPlanTable" aria-label="Preventive maintenance plans">
+              <thead>
+                <tr>
+                  <th scope="col">Plan</th>
+                  <th scope="col">Asset</th>
+                  <th scope="col">Next due</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayedPlans.map((plan) => (
+                  <tr className={plan.id === activePlan?.id ? 'selected' : ''} key={plan.id}>
+                    <td>
+                      <strong>{plan.id}</strong>
+                      <small>{plan.title}</small>
+                    </td>
+                    <td>{plan.equipment_id}</td>
+                    <td>{formatDate(plan.next_due_date)}</td>
+                    <td>
+                      <span className={`planningBadge ${pmPlanStatusBadgeClass(plan.status)}`}>
+                        {pmPlanStatusLabel(plan.status)}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        aria-pressed={plan.id === activePlan?.id}
+                        className="outlineButton compactButton"
+                        onClick={() => setActivePlanId(plan.id)}
+                        type="button"
+                      >
+                        {plan.id === activePlan?.id ? 'Active' : 'Select'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       ) : (
         <p className="plannerHint">No PM plans generated yet. Draft one from asset risk prediction and a PM template.</p>
       )}
