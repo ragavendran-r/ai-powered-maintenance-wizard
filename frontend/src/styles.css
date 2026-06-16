@@ -1638,6 +1638,7 @@ h3 {
 }
 
 .learningGrid {
+  align-items: start;
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
@@ -1645,6 +1646,7 @@ h3 {
 }
 
 .learningPanel {
+  align-content: start;
   border: 1px solid var(--color-border-soft-alt);
   border-radius: 8px;
   display: grid;
@@ -1665,6 +1667,7 @@ h3 {
 .evaluationList,
 .jobList,
 .artifactList {
+  align-content: start;
   display: grid;
   gap: 10px;
   min-width: 0;
@@ -1678,6 +1681,7 @@ h3 {
 .evaluationRow,
 .jobRow,
 .artifactRow {
+  align-self: start;
   border: 1px solid var(--color-border-soft-alt);
   border-radius: 8px;
   display: grid;
@@ -1873,6 +1877,8 @@ h3 {
 }
 
 .fullWidthAction {
+  align-self: start;
+  min-height: 42px;
   width: 100%;
 }
 
