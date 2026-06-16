@@ -13,10 +13,10 @@ This guide explains how to set up and run the AI-Powered Maintenance Wizard loca
 ## 1. Open The Project
 
 ```bash
-cd /Users/ragaven/work/ai-powered-maintenance-wizard
+cd ai-powered-maintenance-wizard
 ```
 
-If you are running from an extracted submission package, use the extracted project folder instead.
+Run all commands from the cloned or extracted repository root unless a step says to change into `backend/` or `frontend/`.
 
 ## 2. Configure Environment
 
@@ -225,4 +225,3 @@ When the full local stack is running, NATS and Qdrant are managed by `scripts/ru
 - If ports are already in use, stop the local stack with `scripts/run-local-stack.sh stop` and retry.
 - If dependencies are stale, reinstall backend and frontend dependencies using the install steps above.
 - If Docker services fail, restart Docker Desktop and rerun the local stack script.
-

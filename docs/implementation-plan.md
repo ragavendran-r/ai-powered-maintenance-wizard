@@ -1,4 +1,6 @@
-# Maintenance Wizard Implementation Plan
+# Maintenance Wizard Implementation Plan (Historical)
+
+This document is the original implementation plan and remains useful for understanding how the project was scoped. It is not the canonical current API or feature inventory. For current behavior, use `README.md`, `docs/architecture.md`, `docs/setup-and-running.md`, and `docs/completion-audit.md`.
 
 ## Summary
 
@@ -16,7 +18,7 @@ The implemented system uses:
 - Auth: local SQLite users, bcrypt password hashes, JWT bearer tokens, role guards, and role-aware React navigation
 - Demo data: sample steel-plant equipment, sensor alerts, maintenance history, spares, SOPs, and manual excerpts
 
-The prototype supports ingestion, retrieval-augmented maintenance chat, diagnosis, root-cause analysis, preventive-maintenance planning, work execution, anomaly and risk scoring, prioritized recommendations, engineer feedback, dashboard views, structured report generation, and reviewer-controlled continuous-learning workflows.
+The implemented prototype now supports ingestion, retrieval-augmented maintenance chat, diagnosis, root-cause analysis, preventive-maintenance planning, work execution, anomaly and risk scoring, prioritized recommendations, engineer feedback, dashboard views, structured report generation, and reviewer-controlled continuous-learning workflows. Later iterations added local RBAC, NATS-backed IoT and learning jobs, Qdrant-backed RAG, RCA/PM workflows, Learning Review, PEFT handoff, artifact controls, and model promotion gates.
 
 ## Key Changes
 
@@ -27,7 +29,7 @@ The prototype supports ingestion, retrieval-augmented maintenance chat, diagnosi
   - `docs/` for architecture, setup, data flow, demo script, assumptions, and progress tracking.
   - Root `.env.example`, `README.md`, and stack helper scripts.
 
-- Implement backend APIs:
+- Original backend API targets:
   - `POST /api/auth/login`
   - `GET /api/auth/me`
   - `POST /api/ingest/documents`

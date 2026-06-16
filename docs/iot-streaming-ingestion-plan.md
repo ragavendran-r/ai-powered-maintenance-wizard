@@ -131,7 +131,13 @@ env STREAMING_ENABLED=true NATS_URL=nats://127.0.0.1:4222 \
 Confirm the backend has connected to NATS:
 
 ```bash
-curl http://127.0.0.1:8000/api/streaming/status
+TOKEN=$(curl -s http://127.0.0.1:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@plant.local","password":"DemoPass123!"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+curl http://127.0.0.1:8000/api/streaming/status \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Post A Sample NATS Alert Message
@@ -183,8 +189,10 @@ PY
 Verify the sample message:
 
 ```bash
-curl http://127.0.0.1:8000/api/streaming/status
-curl http://127.0.0.1:8000/api/equipment/CC-PUMP-03/health
+curl http://127.0.0.1:8000/api/streaming/status \
+  -H "Authorization: Bearer $TOKEN"
+curl http://127.0.0.1:8000/api/equipment/CC-PUMP-03/health \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 Expected result: `processed_count` increments and `CC-PUMP-03` health shows `Demo NATS message: cooling pump motor current above threshold`.
@@ -244,9 +252,12 @@ PY
 Verify the messages were consumed and persisted:
 
 ```bash
-curl http://127.0.0.1:8000/api/streaming/status
-curl http://127.0.0.1:8000/api/equipment/CC-PUMP-03/health
-curl http://127.0.0.1:8000/api/equipment/CC-PUMP-03/sensor-readings
+curl http://127.0.0.1:8000/api/streaming/status \
+  -H "Authorization: Bearer $TOKEN"
+curl http://127.0.0.1:8000/api/equipment/CC-PUMP-03/health \
+  -H "Authorization: Bearer $TOKEN"
+curl http://127.0.0.1:8000/api/equipment/CC-PUMP-03/sensor-readings \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 Expected result: `processed_count` increments, `failed_count` remains `0`, the streamed alert appears in `CC-PUMP-03` health, and the streamed sensor value appears in sensor readings.
