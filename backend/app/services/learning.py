@@ -60,6 +60,10 @@ LEARNING_JOB_SUBJECTS = {
 }
 
 
+def learning_stream_subjects(subject_prefix: str) -> list[str]:
+    return [f"{subject_prefix}.>"]
+
+
 def record_assistant_interaction(
     *,
     assistant: str,
@@ -1052,7 +1056,7 @@ async def _publish_learning_job(job: dict[str, Any]) -> None:
     nc = await nats.connect(**connect_kwargs)
     try:
         js = nc.jetstream()
-        subjects = [f"{settings.learning_nats_subject_prefix}.*", settings.learning_nats_dlq_subject]
+        subjects = learning_stream_subjects(settings.learning_nats_subject_prefix)
         stream_config = StreamConfig(name=settings.learning_nats_stream, subjects=subjects)
         try:
             await js.add_stream(config=stream_config)

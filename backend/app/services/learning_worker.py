@@ -11,6 +11,7 @@ from app.models.schemas import LearningDatasetCreateRequest, LearningEvaluationC
 from app.services.learning import (
     LEARNING_JOB_SUBJECTS,
     create_dataset_snapshot,
+    learning_stream_subjects,
     prepare_peft_artifacts,
     refresh_learning_examples,
     rejudge_learning_example,
@@ -184,7 +185,7 @@ class LearningJobWorkerService:
             self._js = self._nc.jetstream()
             await self._ensure_stream_and_consumer(StreamConfig, ConsumerConfig, AckPolicy)
             subscription = await self._js.pull_subscribe(
-                f"{self.settings.learning_nats_subject_prefix}.*",
+                learning_stream_subjects(self.settings.learning_nats_subject_prefix)[0],
                 durable=self.settings.learning_nats_consumer,
                 stream=self.settings.learning_nats_stream,
             )
@@ -205,10 +206,7 @@ class LearningJobWorkerService:
             self._last_error = str(exc)
 
     async def _ensure_stream_and_consumer(self, stream_config, consumer_config, ack_policy) -> None:
-        stream_subjects = [
-            f"{self.settings.learning_nats_subject_prefix}.*",
-            self.settings.learning_nats_dlq_subject,
-        ]
+        stream_subjects = learning_stream_subjects(self.settings.learning_nats_subject_prefix)
         config = stream_config(name=self.settings.learning_nats_stream, subjects=stream_subjects)
         try:
             await self._js.add_stream(config=config)
@@ -220,7 +218,7 @@ class LearningJobWorkerService:
         consumer = consumer_config(
             durable_name=self.settings.learning_nats_consumer,
             ack_policy=ack_policy.EXPLICIT,
-            filter_subject=f"{self.settings.learning_nats_subject_prefix}.*",
+            filter_subject=learning_stream_subjects(self.settings.learning_nats_subject_prefix)[0],
             ack_wait=float(self.settings.nats_ack_wait_seconds),
             max_deliver=self.settings.nats_max_deliver,
         )

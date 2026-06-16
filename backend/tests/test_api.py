@@ -40,6 +40,7 @@ from app.services.artifact_store import (
 from app.services.vector_store import VectorStoreHit, embedding_profile_status
 from app.services.embeddings import embedding_profile_id
 from app.services.learning_worker import process_learning_job_message
+from app.services.learning import learning_stream_subjects
 
 
 client = TestClient(app)
@@ -2319,6 +2320,13 @@ def test_peft_learning_job_publishes_when_async_learning_is_enabled(monkeypatch)
     assert job["subject"] == "maintenance.learning.peft.requested"
     assert job["output_refs"]["stream"] == "MW_LEARNING"
     assert published_jobs[0]["id"] == job["id"]
+
+
+def test_learning_stream_subjects_do_not_overlap_dlq_subject():
+    subjects = learning_stream_subjects("maintenance.learning")
+
+    assert subjects == ["maintenance.learning.>"]
+    assert "maintenance.learning.dlq" not in subjects
 
 
 def test_learning_worker_prepares_peft_artifacts(monkeypatch, tmp_path):
