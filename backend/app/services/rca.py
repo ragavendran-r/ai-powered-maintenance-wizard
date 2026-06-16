@@ -120,7 +120,13 @@ def draft_case(request: RcaMorpheusDraftRequest, current_user: UserPublic) -> Rc
     settings = get_settings()
     prompt = _build_prompt(context)
     if settings.llm_rca_draft_stream_enabled and llm.provider_name in {"openai", "ollama"}:
-        draft = _draft_with_streaming(llm, context, prompt, settings.llm_rca_draft_max_tokens)
+        draft = _draft_with_streaming(
+            llm,
+            context,
+            prompt,
+            settings.llm_rca_draft_max_tokens,
+            settings.llm_rca_draft_timeout_seconds,
+        )
     else:
         draft = llm.complete_model(
             prompt,
@@ -135,24 +141,31 @@ def draft_case(request: RcaMorpheusDraftRequest, current_user: UserPublic) -> Rc
 
 
 def stream_draft_case(request: RcaMorpheusDraftRequest, current_user: UserPublic) -> Iterator[dict[str, Any]]:
-    context = _resolve_context(request)
     llm = configured_llm_client()
     settings = get_settings()
+    provider = llm.provider_name
+    used_live_provider = provider in {"openai", "ollama"}
+    yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+    yield {
+        "type": "token",
+        "content": "Morpheus is collecting RCA context and retrieved evidence.\n\n",
+        "provider": provider,
+        "used_live_provider": False,
+    }
+    context = _resolve_context(request)
     prompt = _build_prompt(context)
-    yield {"type": "meta", "provider": llm.provider_name, "used_live_provider": llm.provider_name in {"openai", "ollama"}}
-    if not settings.llm_rca_draft_stream_enabled or llm.provider_name not in {"openai", "ollama"}:
+    if not settings.llm_rca_draft_stream_enabled or provider not in {"openai", "ollama"}:
         response = draft_case(request, current_user)
         yield {"type": "done", "response": response.model_dump(mode="json")}
         return
 
     chunks: list[str] = []
-    provider = llm.provider_name
-    used_live_provider = True
     for chunk in llm.stream_text(
         prompt,
         _stream_system_prompt(),
         lambda provider, reason: LLMTextResponse(content=reason, provider=provider),
         max_tokens=settings.llm_rca_draft_max_tokens,
+        timeout_seconds=settings.llm_rca_draft_timeout_seconds,
     ):
         provider = chunk.provider
         used_live_provider = chunk.used_live_provider
@@ -399,7 +412,13 @@ def _stream_system_prompt() -> str:
     )
 
 
-def _draft_with_streaming(llm: LLMClient, context: dict[str, Any], prompt: str, max_tokens: int) -> _RcaLlmDraft:
+def _draft_with_streaming(
+    llm: LLMClient,
+    context: dict[str, Any],
+    prompt: str,
+    max_tokens: int,
+    timeout_seconds: Optional[float] = None,
+) -> _RcaLlmDraft:
     chunks: list[str] = []
     provider = llm.provider_name
     for chunk in llm.stream_text(
@@ -407,6 +426,7 @@ def _draft_with_streaming(llm: LLMClient, context: dict[str, Any], prompt: str, 
         _system_prompt(),
         lambda provider, reason: LLMTextResponse(content=reason, provider=provider),
         max_tokens=max_tokens,
+        timeout_seconds=timeout_seconds,
     ):
         provider = chunk.provider
         if not chunk.used_live_provider:

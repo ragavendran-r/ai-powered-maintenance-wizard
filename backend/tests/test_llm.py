@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 import httpx
 
-from app.models.schemas import DocumentIntelligence
-from app.services.rca import _draft_with_streaming
+from app.models.schemas import DocumentIntelligence, RcaMorpheusDraftRequest, UserPublic
+from app.services import rca as rca_service
+from app.services.rca import _draft_with_streaming, stream_draft_case
 from app.services.llm import LLMContext, LLMTextResponse, MockLLMClient, OpenAIClient, OllamaClient
 
 
@@ -106,15 +109,95 @@ def test_rca_streaming_draft_accumulates_and_validates_json():
                 provider="openai",
             )
 
-    draft = _draft_with_streaming(FakeStreamingClient(), {"symptoms": []}, "prompt", 700)
+    draft = _draft_with_streaming(FakeStreamingClient(), {"symptoms": []}, "prompt", 700, 45)
 
     assert captured["max_tokens"] == 700
-    assert captured["timeout_seconds"] is None
+    assert captured["timeout_seconds"] == 45
     assert "Return JSON only" in captured["system_prompt"]
     assert draft.used_live_provider is True
     assert draft.provider == "openai"
     assert draft.probable_cause == "Bearing looseness"
     assert draft.hypotheses[0].cause == "Bearing looseness"
+
+
+def test_rca_streaming_draft_emits_progress_before_context_resolution(monkeypatch):
+    class FakeStreamingClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+    def fail_context_resolution(request):
+        raise AssertionError("context resolution should happen after initial stream feedback")
+
+    monkeypatch.setattr(rca_service, "configured_llm_client", lambda: FakeStreamingClient())
+    monkeypatch.setattr(
+        rca_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            llm_rca_draft_stream_enabled=True,
+            llm_rca_draft_max_tokens=700,
+            llm_rca_draft_timeout_seconds=45,
+        ),
+    )
+    monkeypatch.setattr(rca_service, "_resolve_context", fail_context_resolution)
+
+    events = stream_draft_case(
+        RcaMorpheusDraftRequest(case_id="RCA-9001"),
+        UserPublic(
+            id="user-1",
+            email="reliability@plant.local",
+            display_name="Reliability Engineer",
+            role="reliability_engineer",
+        ),
+    )
+
+    assert next(events)["type"] == "meta"
+    progress = next(events)
+    assert progress["type"] == "token"
+    assert "collecting RCA context" in progress["content"]
+
+
+def test_rca_streaming_draft_uses_scoped_timeout(monkeypatch):
+    captured = {}
+
+    class FakeStreamingClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["max_tokens"] = max_tokens
+            captured["timeout_seconds"] = timeout_seconds
+            yield LLMTextResponse(content="## Summary\nLive draft", used_live_provider=True, provider="openai")
+
+    monkeypatch.setattr(rca_service, "configured_llm_client", lambda: FakeStreamingClient())
+    monkeypatch.setattr(
+        rca_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            llm_rca_draft_stream_enabled=True,
+            llm_rca_draft_max_tokens=700,
+            llm_rca_draft_timeout_seconds=45,
+        ),
+    )
+    monkeypatch.setattr(rca_service, "_resolve_context", lambda request: {"symptoms": []})
+    monkeypatch.setattr(rca_service, "_build_prompt", lambda context: "prompt")
+
+    events = stream_draft_case(
+        RcaMorpheusDraftRequest(case_id="RCA-9001"),
+        UserPublic(
+            id="user-1",
+            email="reliability@plant.local",
+            display_name="Reliability Engineer",
+            role="reliability_engineer",
+        ),
+    )
+    next(events)
+    next(events)
+    assert next(events)["type"] == "token"
+
+    assert captured["max_tokens"] == 700
+    assert captured["timeout_seconds"] == 45
 
 
 def test_openai_text_completion_respects_local_token_cap(monkeypatch):
