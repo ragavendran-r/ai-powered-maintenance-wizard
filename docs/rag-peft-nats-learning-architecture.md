@@ -226,7 +226,7 @@ Production should track:
 
 ## Future Phases
 
-These phases remain part of the production roadmap but are outside current G-016 completion criteria because they require deployment choices beyond the local Mac setup:
+These phases remain part of the production roadmap but are outside the completed G-016 local-stack scope because they require deployment choices beyond the local Mac setup:
 
 1. **Postgres migration**: move learning, operational, and audit state from SQLite to Postgres for multi-worker and multi-instance deployment.
 2. **Object-store hardening**: add bucket-native lifecycle, retention, encryption, access-policy, audit, and recovery controls for S3-compatible learning artifacts.

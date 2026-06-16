@@ -8,9 +8,9 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 
 The AI layer is an audited maintenance copilot layered after deterministic backend controls. Raw IoT ingestion, anomaly scoring, risk calculation, role permissions, and persisted work-order updates stay in deterministic flows; AI explains, retrieves evidence, guides role-specific work, and helps turn reviewed outcomes into reusable learning material.
 
-- Provider options: The backend selects the model runtime with `LLM_PROVIDER`. Use `mock` for deterministic offline development and tests, `openai` for OpenAI or any OpenAI-compatible endpoint such as LM Studio, vLLM, or a hosted gateway, and `ollama` for a local Ollama server. All live providers share the same structured-output validation, token limits, timeouts, streaming support, and deterministic fallback path. With `LLM_USE_ACTIVE_LEARNING_MODEL=true`, approved Learning Review promotions can change the served model id for `openai` or `ollama` calls without changing feature code; the `mock` provider intentionally ignores active-model resolution so regression tests stay stable.
-- Role-aware assistants: Neo is the operational copilot for dashboard and work-order workflows. It gives role-specific welcomes, answers maintenance questions, renders asset/work-order/user tables, supports permission-checked commands such as asset summaries, work-order next steps, work-order creation/status actions, technician execution guidance, supervisor follow-up review, and admin user lookup/update flows. Morpheus is the diagnosis, RCA, and PM planning assistant: it combines asset health, alerts, work history, spares, retrieved evidence, feedback, risk, failure probability, and RUL context into probable root causes, immediate actions, planned actions, RCA/PM drafts, and confidence adjustments. Smith is the reliability, prediction, and execution-planning assistant: it explains degradation, risk, health score, remaining useful life, failure-probability drivers, cautions, recommended next steps, and technician-ready PM steps.
-- Local LLM runtime: The recommended low-latency setup runs LM Studio on the same machine as the app with Qwen2.5 7B Instruct GGUF, preferably the balanced 4-bit `Q4_K_M` quantization. LM Studio exposes an OpenAI-compatible API at `http://localhost:1234/v1`, so the backend uses its normal `openai` adapter instead of a separate LM Studio-specific code path:
+- Provider modes: `mock` for deterministic offline development/tests, `openai` for OpenAI-compatible runtimes such as LM Studio or vLLM, and `ollama` for local Ollama. Live providers share structured-output validation, token limits, timeouts, streaming support, and deterministic fallback behavior.
+- Role-aware assistants: Neo supports command-center and work-order workflows, Morpheus supports diagnosis/RCA/PM planning, and Smith explains reliability prediction and technician-ready preventive-maintenance steps.
+- Local LLM runtime: The recommended setup is LM Studio with Qwen2.5 7B Instruct GGUF served through the OpenAI-compatible endpoint at `http://localhost:1234/v1`:
 
   ```env
   LLM_PROVIDER=openai
@@ -23,12 +23,9 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
   LLM_TEXT_MAX_TOKENS=600
   ```
 
-  Load the model in LM Studio with a stable identifier such as `qwen2.5-7b-instruct`, high GPU offload such as `--gpu=max`, and a practical context length such as `4096`. The stable model id is important because it is the exact value the application sends as `OPENAI_MODEL`; if Learning Review later promotes an active model with `LLM_USE_ACTIVE_LEARNING_MODEL=true`, that promoted model id is sent to the same LM Studio OpenAI-compatible endpoint. Keeping the model local removes cloud round trips, while 4-bit quantization, GPU offload, short retrieved context, strict token caps, and streaming chat endpoints keep first-token and full-response latency low enough for the operational dashboard. Request/response JSON features use `LLM_TIMEOUT_SECONDS` because the backend must validate a complete structured object before merging it. Neo dashboard, technician, and supervisor chat also use the 15 second `LLM_TIMEOUT_SECONDS` as their interactive stream timeout while still rendering tokens live before the final app-owned structured event. Longer-running draft streams use their scoped draft or stream settings.
-- LLM-enhanced workflows: The application uses LLM/SLM calls where they add judgment, explanation, or language understanding around deterministic plant data. They enrich document ingestion into structured maintenance intelligence, normalize feedback and work history into reusable labels, rerank retrieved RAG evidence, classify anomaly context, explain prediction drivers, generate recommendation text, guide technician execution, help supervisors review follow-ups, create report learning notes, and score candidate learning examples with an LLM-as-a-Judge rubric. The backend still validates JSON schemas and keeps persisted actions, role permissions, risk scoring, IoT ingestion, and database writes deterministic.
-- Evidence-grounded RAG: Production retrieval uses Qdrant for document chunks and approved learning examples, with SQLite-local vector scoring only as a fallback. Prompts can include asset state, alerts, risk/RUL drivers, spares, work history, manuals, SOPs, logs, feedback, and approved assistant interactions.
-- Learning gates: Learning Review combines human approval with an LLM-as-a-Judge rubric before feedback, labels, work-order outcomes, documents, or assistant interactions can be reused for RAG or tuning. Reviewer controls also cover embedding profiles, Qdrant reindexing, and migration checks.
-- PEFT tuning path: Approved, judge-qualified examples can become JSONL snapshots for parameter-efficient fine-tuning. NATS-backed learning jobs write dataset and manifest artifacts with hashes, can invoke the optional bundled Qwen/SLM LoRA or QLoRA trainer template or another external trainer, and register adapter candidates only after training artifacts exist.
-- Practical impact: RAG improves recommendations immediately by grounding answers in current plant evidence. PEFT can later specialize a smaller local model on steel-maintenance terminology, status transitions, failure modes, and approved action patterns, with evaluation, deployment verification, promotion, and rollback remaining reviewer-controlled.
+  Load the model in LM Studio with a stable identifier such as `qwen2.5-7b-instruct`. See `docs/local-llm-lm-studio.md` for model loading, timeout, streaming, and smoke-test details.
+- Evidence-grounded RAG and learning: Qdrant stores document chunks and approved learning examples for production-like retrieval, while SQLite-local vector scoring remains a fallback. Learning Review requires both human approval and LLM-as-a-Judge quality scoring before examples can be reused for RAG or exported as JSONL snapshots for PEFT.
+- Tuning handoff: NATS-backed learning jobs can prepare audited dataset and manifest artifacts, optionally invoke the bundled Qwen LoRA/QLoRA trainer template, and register adapter candidates. Evaluation, deployment verification, promotion, and rollback remain reviewer-controlled. See `docs/rag-peft-nats-learning-architecture.md` and `docs/peft-training.md` for the full design.
 
 ## Tech Stack
 
@@ -312,17 +309,17 @@ npm run build
 ## Demo Flow
 
 1. Start the local stack with `scripts/run-local-stack.sh start`, or start the FastAPI backend and Vite frontend separately.
-3. Sign in as `admin@plant.local` with `DemoPass123!`.
-4. Open the dashboard and review high-risk assets.
-5. Select the hot strip mill main drive.
-6. Ask why the drive is vibrating or run diagnosis.
-7. Review sensor anomalies, cited evidence, root causes, immediate and planned actions, spares strategy, feedback controls, and Markdown report export.
-8. Open the Ingestion view from the left navigation and import an SOP/manual/log or paste JSON records/documents.
-9. Open Reports to review structured maintenance insights, abnormal alerts, decision summaries, digital log entries, and Markdown export.
-10. Open Work Execution and Planning to show role-aware work-order execution, PM planning, material blockers, and dispatch controls.
-11. Open Learning and Tuning to review judged examples, RAG status, PEFT jobs, artifacts, and model promotion gates.
-12. Open the Users view as admin to review role-based access.
-13. Submit detailed feedback with actual root cause, action taken, and outcome; run diagnosis again to see learning notes included.
+2. Sign in as `admin@plant.local` with `DemoPass123!`.
+3. Open the dashboard and review high-risk assets.
+4. Select the hot strip mill main drive.
+5. Ask why the drive is vibrating or run diagnosis.
+6. Review sensor anomalies, cited evidence, root causes, immediate and planned actions, spares strategy, feedback controls, and Markdown report export.
+7. Open the Ingestion view from the left navigation and import an SOP/manual/log or paste JSON records/documents.
+8. Open Reports to review structured maintenance insights, abnormal alerts, decision summaries, digital log entries, and Markdown export.
+9. Open Work Execution and Planning to show role-aware work-order execution, PM planning, material blockers, and dispatch controls.
+10. Open Learning and Tuning to review judged examples, RAG status, PEFT jobs, artifacts, and model promotion gates.
+11. Open the Users view as admin to review role-based access.
+12. Submit detailed feedback with actual root cause, action taken, and outcome; run diagnosis again to see learning notes included.
 
 ## Progress Tracking
 

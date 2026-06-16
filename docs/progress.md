@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement a working AI-powered Maintenance Wizard prototype in `/Users/ragaven/work/ai-powered-maintenance-wizard` using FastAPI, React, SQLite, local retrieval, provider-agnostic LLM adapters, sample steel-plant maintenance data, dashboard, chat, diagnosis, risk scoring, recommendations, feedback, tests, and documentation.
+Implement and maintain a working AI-powered Maintenance Wizard prototype using FastAPI, React, SQLite, Qdrant-backed RAG, NATS JetStream ingestion/jobs, provider-agnostic LLM adapters, sample steel-plant maintenance data, dashboard, role-aware assistants, diagnosis, risk scoring, recommendations, feedback, tests, and documentation.
 
 ## Milestones
 
@@ -23,6 +23,8 @@ Implement a working AI-powered Maintenance Wizard prototype in `/Users/ragaven/w
 - [x] Documentation and demo script
 
 ## Latest Session Update
+
+- Cleaned up active Markdown documentation for consistency and quality on `codex/docs-quality-cleanup`: refreshed the auth/RBAC plan for technician and supervisor roles, aligned G-016 status across the goal and progress docs, authenticated IoT streaming smoke-test examples, shortened duplicated README AI detail, marked the implementation plan historical, removed active hardcoded setup paths, and fixed README demo-flow numbering. `submission/` package copies were intentionally ignored because they are not promoted to the GitHub repository.
 
 - Persisted the workflow rule that tested changes and fixes should be raised as pull requests and merged when mergeable, unless the user explicitly asks to leave the PR open.
 
@@ -126,12 +128,12 @@ Checks run:
 - `git diff --check`
 - Completion notification attempted with both local and repository helpers; delivery failed because `ntfy.sh` could not be resolved in this environment.
 
-Next G-016 implementation items:
+Next production-extension items:
 
-- Add durable NATS learning workers for judge, dataset, evaluation, and PEFT jobs.
-- Add bundled PEFT trainer templates for local Qwen/SLM LoRA or QLoRA training.
-- Add production embedding model selection/versioning and Qdrant collection migration controls.
-- Track object-store bucket hardening, Postgres migration, and environment-specific LM Studio/Ollama loader integration as future production phases outside the current local-Mac-constrained G-016 scope.
+- Replace deterministic hash embeddings with a governed production embedding model.
+- Migrate operational, audit, and learning state from SQLite to Postgres or another managed database.
+- Add bucket-native lifecycle, encryption, access-policy, audit, and disaster-recovery controls for S3-compatible learning artifacts.
+- Configure environment-specific adapter loader integration for LM Studio, Ollama, or another serving runtime.
 
 ## Current Status
 
@@ -210,7 +212,7 @@ The active goal is complete for a working hackathon prototype. Remaining items a
 - `pwd`
 - `rg --files -uu`
 - `ls -la`
-- `file '/Users/ragaven/Downloads/AI Hackathon _ Round 2 - Agentic AI Challenge _ Problem Statement.docx (1)679a47f.pdf'`
+- Inspected the source problem-statement PDF.
 - PDF text extraction using bundled Python runtime and `pypdf`
 - `mkdir -p docs`
 - `python3 -m compileall backend/app` failed due sandboxed bytecode cache permissions.
