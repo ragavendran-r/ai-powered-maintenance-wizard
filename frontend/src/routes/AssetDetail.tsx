@@ -56,7 +56,6 @@ export function AssetDetailRoute({
   diagnosisUsedLive,
   downloadReport,
   feedbackActionTaken,
-  feedbackMessage,
   feedbackNotes,
   feedbackOutcome,
   feedbackRootCause,
@@ -64,7 +63,6 @@ export function AssetDetailRoute({
   onOpenWorkOrder,
   recommendation,
   reliabilityStreamRef,
-  reportMessage,
   runDiagnosis,
   selectedEquipment,
   sendFeedback,
@@ -103,7 +101,6 @@ export function AssetDetailRoute({
   diagnosisUsedLive: boolean
   downloadReport: () => void
   feedbackActionTaken: string
-  feedbackMessage: string
   feedbackNotes: string
   feedbackOutcome: string
   feedbackRootCause: string
@@ -111,7 +108,6 @@ export function AssetDetailRoute({
   onOpenWorkOrder: (workOrderId: string) => void
   recommendation: Recommendation | null
   reliabilityStreamRef: RefObject<HTMLDivElement | null>
-  reportMessage: string
   runDiagnosis: () => void
   selectedEquipment: string
   sendFeedback: (status: 'accepted' | 'rejected' | 'corrected') => void
@@ -146,13 +142,11 @@ export function AssetDetailRoute({
       diagnosisUsedLive={diagnosisUsedLive}
       downloadReport={downloadReport}
       feedbackActionTaken={feedbackActionTaken}
-      feedbackMessage={feedbackMessage}
       feedbackNotes={feedbackNotes}
       feedbackOutcome={feedbackOutcome}
       feedbackRootCause={feedbackRootCause}
       morpheusProgressRef={morpheusProgressRef}
       recommendation={recommendation}
-      reportMessage={reportMessage}
       sendFeedback={sendFeedback}
       setFeedbackActionTaken={setFeedbackActionTaken}
       setFeedbackNotes={setFeedbackNotes}
@@ -438,13 +432,11 @@ function RecommendationPanel({
   diagnosisUsedLive,
   downloadReport,
   feedbackActionTaken,
-  feedbackMessage,
   feedbackNotes,
   feedbackOutcome,
   feedbackRootCause,
   morpheusProgressRef,
   recommendation,
-  reportMessage,
   sendFeedback,
   setFeedbackActionTaken,
   setFeedbackNotes,
@@ -462,13 +454,11 @@ function RecommendationPanel({
   diagnosisUsedLive: boolean
   downloadReport: () => void
   feedbackActionTaken: string
-  feedbackMessage: string
   feedbackNotes: string
   feedbackOutcome: string
   feedbackRootCause: string
   morpheusProgressRef: RefObject<HTMLDivElement | null>
   recommendation: Recommendation | null
-  reportMessage: string
   sendFeedback: (status: 'accepted' | 'rejected' | 'corrected') => void
   setFeedbackActionTaken: (value: string) => void
   setFeedbackNotes: (value: string) => void
@@ -562,7 +552,6 @@ function RecommendationPanel({
                 <button onClick={() => sendFeedback('corrected')}>Correct</button>
                 <button onClick={() => sendFeedback('rejected')}>Reject</button>
               </div>
-              {feedbackMessage && <p className="inlineStatus">{feedbackMessage}</p>}
             </>
           )}
           <div className="buttonRow">
@@ -577,7 +566,6 @@ function RecommendationPanel({
               </button>
             )}
           </div>
-          {reportMessage && <p className="inlineStatus">{reportMessage}</p>}
         </>
       ) : (
         <p className="emptyState">

@@ -53,7 +53,6 @@ export function LearningReviewRoute({
   learningExamples,
   learningJudgingExampleId,
   learningLoading,
-  learningMessage,
   learningSummary,
   peftAdapterName,
   previewLearningArtifactCleanup,
@@ -104,7 +103,6 @@ export function LearningReviewRoute({
   learningExamples: LearningExample[]
   learningJudgingExampleId: string | null
   learningLoading: boolean
-  learningMessage: string
   learningSummary: LearningSummary | null
   peftAdapterName: string
   previewLearningArtifactCleanup: () => void
@@ -184,7 +182,6 @@ export function LearningReviewRoute({
           Create JSONL snapshot
         </button>
       </div>
-      {learningMessage && <p className="inlineStatus learningToolbarStatus">{learningMessage}</p>}
       {latestDatasetSnapshot && (
         <div className="latestDatasetDownload">
           <span>

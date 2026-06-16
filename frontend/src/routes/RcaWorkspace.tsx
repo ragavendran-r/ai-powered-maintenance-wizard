@@ -20,7 +20,6 @@ export function RcaWorkspace({
   rcaDraftCaseId,
   rcaDraftStreamText,
   rcaLoading,
-  rcaMessage,
   selectedRcaCaseId,
   selectedWorkOrderId,
   setSelectedRcaCaseId,
@@ -34,7 +33,6 @@ export function RcaWorkspace({
   rcaDraftCaseId: string
   rcaDraftStreamText: string
   rcaLoading: boolean
-  rcaMessage: string
   selectedRcaCaseId: string
   selectedWorkOrderId: string
   setSelectedRcaCaseId: (caseId: string) => void
@@ -102,7 +100,6 @@ export function RcaWorkspace({
           Close and learn
         </button>
       </div>
-      {rcaMessage && <p className="inlineStatus">{rcaMessage}</p>}
       {(rcaLoading || rcaDraftStreamText) && (
         <article className="dataPanel rcaDraftStream" aria-label="Morpheus RCA draft stream">
           <div className="miniHeader">

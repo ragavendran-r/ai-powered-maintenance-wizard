@@ -41,7 +41,6 @@ export function ReportsRoute({
   exportLoading,
   loading,
   logEntries,
-  message,
   refreshMaintenanceInsights,
   selectedEquipment,
   structuredReports,
@@ -53,7 +52,6 @@ export function ReportsRoute({
   exportLoading: boolean
   loading: ReportSectionLoading
   logEntries: DigitalMaintenanceLogEntry[]
-  message: string
   refreshMaintenanceInsights: (equipmentId?: string) => void
   selectedEquipment: string
   structuredReports: StructuredMaintenanceReport[]
@@ -100,7 +98,6 @@ export function ReportsRoute({
             {exportLoading ? 'Exporting...' : 'Export Markdown'}
           </button>
         </div>
-        {message && <p className="inlineStatus">{message}</p>}
         <SectionStatus loading={loading.summary} label="Loading report summary..." />
         {summary && (
           <p className="emptyState">

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   Activity,
@@ -6,14 +6,18 @@ import {
   Bot,
   Briefcase,
   CalendarClock,
+  CheckCircle2,
   ClipboardList,
   FileText,
   Gauge,
+  Info,
   LogOut,
   ShieldAlert,
   Sparkles,
   Users,
   Wrench,
+  X,
+  XCircle,
 } from 'lucide-react'
 import {
   api,
@@ -96,10 +100,19 @@ import { UsersRoute } from './routes/Users'
 import { ReportsRoute } from './routes/Reports'
 
 const WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS = 60_000
+const TOAST_TIMEOUT_MS = 4_500
 
 type MaintenanceInsightSectionKey = 'summary' | 'structuredReports' | 'abnormalAlerts' | 'decisionSummaries' | 'logEntries'
 
 type MaintenanceInsightLoading = Record<MaintenanceInsightSectionKey, boolean>
+
+type ToastVariant = 'success' | 'error' | 'info'
+
+type ToastNotification = {
+  id: string
+  message: string
+  variant: ToastVariant
+}
 
 const emptyMaintenanceInsightLoading: MaintenanceInsightLoading = {
   summary: false,
@@ -107,6 +120,64 @@ const emptyMaintenanceInsightLoading: MaintenanceInsightLoading = {
   abnormalAlerts: false,
   decisionSummaries: false,
   logEntries: false,
+}
+
+function toastVariantForMessage(message: string): ToastVariant {
+  const lower = message.toLowerCase()
+  if (
+    lower.includes('could not') ||
+    lower.includes('failed') ||
+    lower.includes('rejected') ||
+    lower.includes('invalid') ||
+    lower.includes('permission') ||
+    lower.includes('resolve ') ||
+    lower.includes('select ') ||
+    lower.includes('ended before') ||
+    lower.includes('unavailable')
+  ) {
+    return 'error'
+  }
+  if (
+    lower.includes('streaming') ||
+    lower.includes('judging') ||
+    lower.includes('previewed') ||
+    lower.includes('queued') ||
+    lower.includes('requested')
+  ) {
+    return 'info'
+  }
+  return 'success'
+}
+
+function ToastStack({
+  dismissToast,
+  toasts,
+}: {
+  dismissToast: (toastId: string) => void
+  toasts: ToastNotification[]
+}) {
+  if (!toasts.length) return null
+  return (
+    <div className="toastStack" aria-label="Application notifications">
+      {toasts.map((toast) => {
+        const Icon = toast.variant === 'success' ? CheckCircle2 : toast.variant === 'error' ? XCircle : Info
+        return (
+          <article
+            aria-live={toast.variant === 'error' ? 'assertive' : 'polite'}
+            className={`toastMessage ${toast.variant}`}
+            key={toast.id}
+            role={toast.variant === 'error' ? 'alert' : 'status'}
+          >
+            <Icon size={18} />
+            <p>{toast.message}</p>
+            <button type="button" onClick={() => dismissToast(toast.id)} aria-label="Dismiss notification">
+              <X size={15} />
+            </button>
+          </article>
+        )
+      })}
+    </div>
+  )
 }
 
 function markdownBullets(items: string[]) {
@@ -476,11 +547,13 @@ export function App() {
   const [newUserPassword, setNewUserPassword] = useState('')
   const [resetUser, setResetUser] = useState<AuthUser | null>(null)
   const [resetPasswordValue, setResetPasswordValue] = useState('')
+  const [toasts, setToasts] = useState<ToastNotification[]>([])
   const neoTranscriptRef = useRef<HTMLDivElement | null>(null)
   const morpheusProgressRef = useRef<HTMLDivElement | null>(null)
   const reliabilityStreamRef = useRef<HTMLDivElement | null>(null)
   const technicianInitialContextRef = useRef('')
   const supervisorInitialContextRef = useRef('')
+  const previousToastMessagesRef = useRef<Record<string, string>>({})
 
   const currentUser = session?.user
   const {
@@ -502,6 +575,52 @@ export function App() {
     [currentUser?.role],
   )
   const activeNavigationItem = navigationItemForView(activeView)
+
+  const dismissToast = useCallback((toastId: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== toastId))
+  }, [])
+
+  const showToast = useCallback((message: string) => {
+    const trimmedMessage = message.trim()
+    if (!trimmedMessage) return
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    setToasts((current) => [
+      { id, message: trimmedMessage, variant: toastVariantForMessage(trimmedMessage) },
+      ...current.slice(0, 3),
+    ])
+    window.setTimeout(() => dismissToast(id), TOAST_TIMEOUT_MS)
+  }, [dismissToast])
+
+  useEffect(() => {
+    const nextMessages: Record<string, string> = {
+      feedbackMessage,
+      ingestionMessage,
+      learningMessage,
+      maintenanceInsightsMessage,
+      pmPlanMessage,
+      rcaMessage,
+      reportMessage,
+      userMessage,
+      workOrderMessage,
+    }
+    Object.entries(nextMessages).forEach(([key, message]) => {
+      if (message && previousToastMessagesRef.current[key] !== message) {
+        showToast(message)
+      }
+      previousToastMessagesRef.current[key] = message
+    })
+  }, [
+    feedbackMessage,
+    ingestionMessage,
+    learningMessage,
+    maintenanceInsightsMessage,
+    pmPlanMessage,
+    rcaMessage,
+    reportMessage,
+    showToast,
+    userMessage,
+    workOrderMessage,
+  ])
 
   function clearSession(message = '') {
     api.setSession(null)
@@ -2512,6 +2631,7 @@ export function App() {
       setIngestionMessage('Select a file before upload')
       return
     }
+    setIngestionMessage('')
     setFileIngestionLoading(true)
     try {
       const result = await api.ingestDocumentFile({
@@ -2526,7 +2646,8 @@ export function App() {
       )
       setIngestTitle('')
       setIngestFile(null)
-      await loadDashboard()
+      setFileIngestionLoading(false)
+      void loadDashboard()
     } catch {
       setIngestionMessage('File ingestion failed')
     } finally {
@@ -2535,6 +2656,7 @@ export function App() {
   }
 
   async function ingestJsonPayload() {
+    setIngestionMessage('')
     setJsonIngestionLoading(true)
     try {
       const parsed = JSON.parse(jsonPayload)
@@ -2552,7 +2674,8 @@ export function App() {
         setIngestionMessage(`Stored ${total} record${total === 1 ? '' : 's'}`)
       }
       setJsonPayload('')
-      await loadDashboard()
+      setJsonIngestionLoading(false)
+      void loadDashboard()
     } catch {
       setIngestionMessage('JSON ingestion failed')
     } finally {
@@ -2776,7 +2899,6 @@ export function App() {
         diagnosisUsedLive={diagnosisUsedLive}
         downloadReport={downloadReport}
         feedbackActionTaken={feedbackActionTaken}
-        feedbackMessage={feedbackMessage}
         feedbackNotes={feedbackNotes}
         feedbackOutcome={feedbackOutcome}
         feedbackRootCause={feedbackRootCause}
@@ -2784,7 +2906,6 @@ export function App() {
         onOpenWorkOrder={openWorkOrderRoute}
         recommendation={recommendation}
         reliabilityStreamRef={reliabilityStreamRef}
-        reportMessage={reportMessage}
         runDiagnosis={runDiagnosis}
         selectedEquipment={selectedEquipment}
         sendFeedback={sendFeedback}
@@ -2808,7 +2929,6 @@ export function App() {
         dispatchWorkOrder={dispatchWorkOrder}
         planWorkOrder={planWorkOrder}
         pmPlanLoading={pmPlanLoading}
-        pmPlanMessage={pmPlanMessage}
         pmPlanStreamText={pmPlanStreamText}
         pmPlans={pmPlans}
         pmTemplates={pmTemplates}
@@ -2833,7 +2953,6 @@ export function App() {
         technicianStreaming={technicianStreaming}
         technicians={technicians}
         mode={activeView === 'planning' ? 'planning' : 'execution'}
-        workOrderMessage={workOrderMessage}
         workOrders={workOrders}
       />
     ) : activeView === 'reports' ? (
@@ -2844,7 +2963,6 @@ export function App() {
         exportLoading={maintenanceInsightsExporting}
         logEntries={maintenanceLogEntries}
         loading={maintenanceInsightsLoading}
-        message={maintenanceInsightsMessage}
         refreshMaintenanceInsights={loadMaintenanceInsights}
         selectedEquipment={selectedEquipment}
         structuredReports={structuredReports}
@@ -2860,7 +2978,6 @@ export function App() {
           rcaDraftCaseId={rcaDraftCaseId}
           rcaDraftStreamText={rcaDraftStreamText}
           rcaLoading={rcaLoading}
-          rcaMessage={rcaMessage}
           selectedRcaCaseId={selectedRcaCaseId}
           selectedWorkOrderId={selectedWorkOrderId}
           setSelectedRcaCaseId={setSelectedRcaCaseId}
@@ -2891,7 +3008,6 @@ export function App() {
         learningExamples={learningExamples}
         learningJudgingExampleId={learningJudgingExampleId}
         learningLoading={learningLoading}
-        learningMessage={learningMessage}
         learningSummary={learningSummary}
         peftAdapterName={peftAdapterName}
         previewLearningArtifactCleanup={previewLearningArtifactCleanup}
@@ -2940,7 +3056,6 @@ export function App() {
             ingestSourceType={ingestSourceType}
             ingestTitle={ingestTitle}
             fileIngestionLoading={fileIngestionLoading}
-            ingestionMessage={ingestionMessage}
             jsonIngestionLoading={jsonIngestionLoading}
             jsonMode={jsonMode}
             jsonPayload={jsonPayload}
@@ -2971,7 +3086,6 @@ export function App() {
           setNewUserRole={setNewUserRole}
           setResetPasswordValue={setResetPasswordValue}
           toggleUserActive={toggleUserActive}
-          userMessage={userMessage}
           users={users}
         />
       </section>
@@ -3019,6 +3133,7 @@ export function App() {
 
   return (
     <main className="appShell">
+      <ToastStack dismissToast={dismissToast} toasts={toasts} />
       <header className="topBar">
         <div>
           <p className="eyebrow">Steel Plant Maintenance</p>

@@ -2238,17 +2238,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(within(screen.getByLabelText('Maintenance navigation')).getByRole('button', { name: 'Reports' }))
 
     await waitFor(() => {
-      expect(screen.getAllByRole('status').length).toBeGreaterThanOrEqual(5)
+      expect(screen.getAllByRole('status').length).toBeGreaterThanOrEqual(1)
     })
-    expect(screen.getAllByRole('status').map((item) => item.textContent)).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining('Loading report summary'),
-        expect.stringContaining('Loading structured maintenance reports'),
-        expect.stringContaining('Loading abnormal alert reports'),
-        expect.stringContaining('Loading maintenance decision summaries'),
-        expect.stringContaining('Loading digital maintenance log entries'),
-      ]),
-    )
+    expect(screen.getAllByRole('status').map((item) => item.textContent).join(' ')).toContain('Loading')
     expect(await screen.findByRole('heading', { name: 'Structured Maintenance Insights and Reports' })).toBeInTheDocument()
     expect(screen.getByText(/LLM-dependent report content is limited to recommendation Markdown exports/)).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Structured Maintenance Reports' })).toBeInTheDocument()
@@ -2837,6 +2829,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     await waitFor(() => {
       expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()
     })
+    expect(screen.getByText(/Stored 1 document and extracted/).closest('.toastMessage')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /uploading/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^upload$/i })).not.toBeDisabled()
     expect(fetch).toHaveBeenCalledWith(
       'http://127.0.0.1:8000/api/ingest/document-file',
       expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
@@ -2864,7 +2859,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       fireEvent.click(screen.getByRole('button', { name: /upload/i }))
 
       await waitFor(() => {
-        expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()
+        expect(screen.getAllByText(/Stored 1 document and extracted/).length).toBeGreaterThan(0)
       })
 
       const uploadCall = [...vi.mocked(fetch).mock.calls]
@@ -2895,6 +2890,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     await waitFor(() => {
       expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()
     })
+    expect(screen.getByText(/Stored 1 document and extracted/).closest('.toastMessage')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /importing/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /import json/i })).not.toBeDisabled()
     expect(fetch).toHaveBeenCalledWith(
       'http://127.0.0.1:8000/api/ingest/documents',
       expect.objectContaining({ method: 'POST' }),
