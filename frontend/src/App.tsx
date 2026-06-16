@@ -115,6 +115,22 @@ type ToastNotification = {
 }
 
 type AdminTab = 'ingestion' | 'users' | 'learning'
+type LearningLoadingAction =
+  | 'activateEmbeddingProfile'
+  | 'createSnapshot'
+  | 'deployAdapter'
+  | 'previewArtifactCleanup'
+  | 'previewRagMigration'
+  | 'promoteAdapter'
+  | 'queuePeftTuning'
+  | 'refreshExamples'
+  | 'registerAdapter'
+  | 'reindexRag'
+  | 'rollbackAdapter'
+  | 'runEvaluation'
+  | 'runRagMigration'
+
+export type LearningLoadingState = Partial<Record<LearningLoadingAction, boolean>>
 
 function toDatetimeLocalValue(value: string) {
   if (!value) return ''
@@ -660,7 +676,7 @@ export function App() {
   const [ragTargetCollection, setRagTargetCollection] = useState('')
   const [artifactCleanupResult, setArtifactCleanupResult] = useState<LearningArtifactCleanupResult | null>(null)
   const [learningMessage, setLearningMessage] = useState('')
-  const [learningLoading, setLearningLoading] = useState(false)
+  const [learningLoading, setLearningLoading] = useState<LearningLoadingState>({})
   const [learningJudgingExampleId, setLearningJudgingExampleId] = useState<string | null>(null)
   const [learningDatasetName, setLearningDatasetName] = useState('maintenance-wizard-learning-snapshot')
   const [learningDatasetDescription, setLearningDatasetDescription] = useState('Approved examples for local LLM adapter tuning and evaluation.')
@@ -706,6 +722,10 @@ export function App() {
     [currentUser?.role],
   )
   const activeNavigationItem = navigationItemForView(activeView)
+
+  const setLearningActionLoading = useCallback((action: LearningLoadingAction, isLoading: boolean) => {
+    setLearningLoading((current) => ({ ...current, [action]: isLoading }))
+  }, [])
 
   const dismissToast = useCallback((toastId: string) => {
     setToasts((current) => current.filter((toast) => toast.id !== toastId))
@@ -810,7 +830,7 @@ export function App() {
     setRagTargetCollection('')
     setArtifactCleanupResult(null)
     setLearningMessage('')
-    setLearningLoading(false)
+    setLearningLoading({})
     setAdapterProvider('openai')
     setAdapterModelName('qwen2.5-7b-instruct-lora-candidate')
     setAdapterBaseModel('qwen2.5-7b-instruct')
@@ -930,7 +950,7 @@ export function App() {
   }
 
   function loadLearning() {
-    setLearningLoading(true)
+    setLearningLoading({})
     setLearningMessage('')
     return Promise.all([
       api.learningSummary(),
@@ -958,7 +978,7 @@ export function App() {
         setLearningMessage('Learning data could not be loaded')
         setApiState('fallback')
       })
-      .finally(() => setLearningLoading(false))
+      .finally(() => setLearningLoading({}))
   }
 
   function loadRcaCases() {
@@ -1045,7 +1065,7 @@ export function App() {
   }
 
   async function refreshLearningExamples() {
-    setLearningLoading(true)
+    setLearningActionLoading('refreshExamples', true)
     setLearningMessage('')
     try {
       const examples = await api.refreshLearningExamples()
@@ -1062,7 +1082,7 @@ export function App() {
       setLearningMessage('Learning examples could not be refreshed')
       setApiState('fallback')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('refreshExamples', false)
     }
   }
 
@@ -1095,7 +1115,7 @@ export function App() {
   }
 
   async function createLearningSnapshot() {
-    setLearningLoading(true)
+    setLearningActionLoading('createSnapshot', true)
     setLearningMessage('')
     try {
       const snapshot = await api.createLearningDataset({
@@ -1111,7 +1131,7 @@ export function App() {
     } catch {
       setLearningMessage('Learning dataset snapshot could not be created')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('createSnapshot', false)
     }
   }
 
@@ -1131,7 +1151,7 @@ export function App() {
   }
 
   async function registerLearningAdapter() {
-    setLearningLoading(true)
+    setLearningActionLoading('registerAdapter', true)
     setLearningMessage('')
     try {
       const model = await api.registerLearningModelVersion({
@@ -1148,7 +1168,7 @@ export function App() {
     } catch {
       setLearningMessage('Adapter candidate could not be registered')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('registerAdapter', false)
     }
   }
 
@@ -1160,7 +1180,7 @@ export function App() {
       setLearningMessage('Create a dataset snapshot and keep model/prompt versions available before evaluation')
       return
     }
-    setLearningLoading(true)
+    setLearningActionLoading('runEvaluation', true)
     setLearningMessage('')
     try {
       const run = await api.runLearningEvaluation({
@@ -1175,7 +1195,7 @@ export function App() {
     } catch {
       setLearningMessage('Learning evaluation could not be run')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('runEvaluation', false)
     }
   }
 
@@ -1187,7 +1207,7 @@ export function App() {
       setLearningMessage('Create a dataset snapshot and keep model/prompt versions available before queuing PEFT tuning')
       return
     }
-    setLearningLoading(true)
+    setLearningActionLoading('queuePeftTuning', true)
     setLearningMessage('')
     try {
       const job = await api.queueLearningPeftJob({
@@ -1209,12 +1229,12 @@ export function App() {
     } catch {
       setLearningMessage('PEFT tuning job could not be queued')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('queuePeftTuning', false)
     }
   }
 
   async function reindexLearningRag() {
-    setLearningLoading(true)
+    setLearningActionLoading('reindexRag', true)
     setLearningMessage('')
     try {
       const job = await api.reindexLearningRag({
@@ -1240,13 +1260,13 @@ export function App() {
     } catch {
       setLearningMessage('RAG vector reindex could not be completed')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('reindexRag', false)
     }
   }
 
   async function activateSelectedEmbeddingProfile() {
     if (!selectedEmbeddingProfileId) return
-    setLearningLoading(true)
+    setLearningActionLoading('activateEmbeddingProfile', true)
     setLearningMessage('')
     setRagMigrationPreview(null)
     try {
@@ -1258,12 +1278,12 @@ export function App() {
     } catch {
       setLearningMessage('Embedding profile activation could not be completed')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('activateEmbeddingProfile', false)
     }
   }
 
   async function previewLearningRagMigration() {
-    setLearningLoading(true)
+    setLearningActionLoading('previewRagMigration', true)
     setLearningMessage('')
     try {
       const preview = await api.previewLearningRagMigration({
@@ -1278,12 +1298,12 @@ export function App() {
     } catch {
       setLearningMessage('RAG migration preview could not be completed')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('previewRagMigration', false)
     }
   }
 
   async function runLearningRagMigration() {
-    setLearningLoading(true)
+    setLearningActionLoading('runRagMigration', true)
     setLearningMessage('')
     try {
       const job = await api.migrateLearningRag({
@@ -1302,7 +1322,7 @@ export function App() {
     } catch {
       setLearningMessage('RAG migration could not be completed')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('runRagMigration', false)
     }
   }
 
@@ -2918,7 +2938,7 @@ export function App() {
       setLearningMessage('Run a passing evaluation for this adapter before promotion')
       return
     }
-    setLearningLoading(true)
+    setLearningActionLoading('promoteAdapter', true)
     setLearningMessage('')
     try {
       const promotion = await api.promoteLearningModelVersion({
@@ -2932,7 +2952,7 @@ export function App() {
     } catch {
       setLearningMessage('Adapter promotion was rejected by the evaluation gate')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('promoteAdapter', false)
     }
   }
 
@@ -2942,7 +2962,7 @@ export function App() {
       setLearningMessage('Run a passing evaluation for this model before rollback')
       return
     }
-    setLearningLoading(true)
+    setLearningActionLoading('rollbackAdapter', true)
     setLearningMessage('')
     try {
       const promotion = await api.rollbackLearningModelVersion({
@@ -2956,12 +2976,12 @@ export function App() {
     } catch {
       setLearningMessage('Model rollback was rejected by the evaluation gate')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('rollbackAdapter', false)
     }
   }
 
   async function deployLearningAdapter(model: LearningModelVersion) {
-    setLearningLoading(true)
+    setLearningActionLoading('deployAdapter', true)
     setLearningMessage('')
     try {
       const job = await api.deployLearningModelVersion(model.id, {
@@ -2981,12 +3001,12 @@ export function App() {
     } catch {
       setLearningMessage('Adapter deployment could not be queued')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('deployAdapter', false)
     }
   }
 
   async function previewLearningArtifactCleanup() {
-    setLearningLoading(true)
+    setLearningActionLoading('previewArtifactCleanup', true)
     setLearningMessage('')
     try {
       const result = await api.cleanupLearningArtifacts({
@@ -3003,7 +3023,7 @@ export function App() {
     } catch {
       setLearningMessage('Artifact cleanup preview could not be completed')
     } finally {
-      setLearningLoading(false)
+      setLearningActionLoading('previewArtifactCleanup', false)
     }
   }
 
