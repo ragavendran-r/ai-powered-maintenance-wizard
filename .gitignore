@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 .pycache/
 .venv/
+.venv-peft/
 
 # Node
 node_modules/
