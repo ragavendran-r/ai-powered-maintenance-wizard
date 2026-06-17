@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import os
+from pathlib import Path
+import shlex
+import subprocess
 from typing import Any, Optional
 
 import httpx
@@ -31,9 +35,9 @@ def execute_adapter_deployment(job: dict[str, Any]) -> dict[str, Any]:
     model_version_id = str(input_refs.get("model_version_id") or "").strip()
     model = repository.get_learning_model_version(model_version_id)
     if not model:
-        raise ValueError("Learning model version not found for adapter deployment")
+        raise ValueError("Learning adapter version not found for adapter deployment")
     if model.get("status") == "active":
-        raise ValueError("Active models cannot be redeployed through a candidate deployment job")
+        raise ValueError("Active adapter versions cannot be redeployed through a candidate deployment job")
 
     settings = get_settings()
     runtime_provider = str(
@@ -53,10 +57,21 @@ def execute_adapter_deployment(job: dict[str, Any]) -> dict[str, Any]:
         "notes": input_refs.get("notes"),
         "requested_by": job.get("requested_by"),
         "runtime_provider": runtime_provider,
-        "probe": "manual" if runtime_provider == "manual" else "chat_completion",
+        "probe": "chat_completion",
     }
 
     try:
+        deployer_metadata = _run_configured_deployer(
+            job=job,
+            model=model,
+            runtime_provider=runtime_provider,
+            serving_provider=serving_provider,
+            served_model_name=served_model_name,
+            base_url=base_url,
+            artifact_uri=artifact_uri,
+            artifact_hash=artifact_hash,
+            settings=settings,
+        )
         health_status, probe_metadata = _probe_runtime(
             runtime_provider=runtime_provider,
             serving_provider=serving_provider,
@@ -92,7 +107,7 @@ def execute_adapter_deployment(job: dict[str, Any]) -> dict[str, Any]:
         artifact_hash=artifact_hash,
         status="verified",
         health_status=health_status,
-        metadata={**metadata, **probe_metadata},
+        metadata={**metadata, **deployer_metadata, **probe_metadata},
         error=None,
     )
     return AdapterDeploymentResult(
@@ -154,12 +169,64 @@ def _probe_runtime(
     timeout_seconds: float,
 ) -> tuple[str, dict[str, Any]]:
     if runtime_provider == "manual":
-        return "manual_verified", {"message": "Manual deployment record accepted; external runtime must keep this served model loaded."}
+        raise ValueError("Manual deployment records cannot prove that an adapter is loaded in the serving runtime")
     if serving_provider == "openai":
         return _probe_openai_compatible(served_model_name, base_url, timeout_seconds)
     if serving_provider == "ollama":
         return _probe_ollama(served_model_name, base_url, timeout_seconds)
     raise ValueError(f"Unsupported runtime provider: {runtime_provider}")
+
+
+def _run_configured_deployer(
+    *,
+    job: dict[str, Any],
+    model: dict[str, Any],
+    runtime_provider: str,
+    serving_provider: str,
+    served_model_name: str,
+    base_url: Optional[str],
+    artifact_uri: Optional[str],
+    artifact_hash: Optional[str],
+    settings: Any,
+) -> dict[str, Any]:
+    command = str(getattr(settings, "learning_adapter_deployer_command", "") or "").strip()
+    if not command:
+        return {"deployer": "not_configured"}
+    command_args = shlex.split(command)
+    if not command_args:
+        raise ValueError("LEARNING_ADAPTER_DEPLOYER_COMMAND did not contain an executable")
+    env = {
+        **os.environ,
+        "MW_ADAPTER_JOB_ID": str(job["id"]),
+        "MW_ADAPTER_VERSION_ID": str(model["id"]),
+        "MW_ADAPTER_MODEL_NAME": str(model.get("model_name") or ""),
+        "MW_ADAPTER_BASE_MODEL": str(model.get("base_model") or ""),
+        "MW_ADAPTER_ARTIFACT_URI": str(artifact_uri or ""),
+        "MW_ADAPTER_ARTIFACT_HASH": str(artifact_hash or ""),
+        "MW_ADAPTER_RUNTIME_PROVIDER": runtime_provider,
+        "MW_ADAPTER_SERVING_PROVIDER": serving_provider,
+        "MW_ADAPTER_SERVED_MODEL_NAME": served_model_name,
+        "MW_ADAPTER_BASE_URL": str(base_url or ""),
+    }
+    timeout_seconds = int(getattr(settings, "learning_adapter_deployer_timeout_seconds", 120) or 120)
+    completed = subprocess.run(
+        command_args,
+        cwd=str(Path(__file__).resolve().parents[3]),
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(f"Adapter deployer failed with exit code {completed.returncode}: {detail}")
+    return {
+        "deployer": "external_command",
+        "deployer_return_code": completed.returncode,
+        "deployer_stdout": completed.stdout[-1000:] if completed.stdout else "",
+        "deployer_stderr": completed.stderr[-1000:] if completed.stderr else "",
+    }
 
 
 def _probe_openai_compatible(
@@ -218,7 +285,7 @@ def _probe_ollama(
 def _serving_provider(runtime_provider: str, model: dict[str, Any]) -> str:
     if runtime_provider in {"ollama"}:
         return "ollama"
-    if runtime_provider in {"openai", "openai_compatible", "lmstudio", "lm_studio", "vllm"}:
+    if runtime_provider in {"openai", "openai_compatible", "lmstudio", "lm_studio", "vllm", "llama_cpp", "llamacpp"}:
         return "openai"
     if runtime_provider == "manual":
         return str(model.get("provider") or "openai")

@@ -15,7 +15,7 @@ This file is the durable goal ledger for the Maintenance Wizard project. Use it 
 
 - Active implementation goal: none recorded in this ledger.
 - Latest completed tracked goal: G-016 production Qdrant-backed RAG + PEFT + NATS continuous-learning and tuning design for the local Mac stack.
-- Postgres migration, S3/object-store lifecycle and access-policy hardening, and environment-specific LM Studio/Ollama adapter loader integration are tracked as future phases outside the completed G-016 scope.
+- Postgres migration, S3/object-store lifecycle and access-policy hardening, and hardened environment-specific adapter loader integration are tracked as future phases outside the completed G-016 scope.
 - Branch workflow rule: work intended for `main` must happen on a feature branch and merge through a PR.
 
 ## Goal Index
@@ -45,7 +45,7 @@ These phases are outside the completed G-016 local-stack scope but remain part o
 
 - **F-001 Object-Store Hardening**: add bucket-native lifecycle, retention, encryption, access-policy, audit, and disaster-recovery controls for S3-compatible learning artifacts after the local filesystem/MinIO-compatible registry path is stable.
 - **F-002 Postgres Migration**: move learning, operational, and audit state from local SQLite to Postgres for multi-worker and multi-instance deployments.
-- **F-003 Adapter Loader Integration**: wire approved PEFT adapter artifacts into the chosen serving runtime, such as LM Studio, Ollama, or a hosted OpenAI-compatible endpoint, while keeping the current in-app deployment records and promotion gates as the control plane.
+- **F-003 Adapter Loader Integration Hardening**: harden approved PEFT adapter loading across serving runtimes such as llama.cpp, LM Studio, Ollama, or hosted OpenAI-compatible endpoints while keeping the in-app deployment records and promotion gates as the control plane.
 
 ## Detailed Goal Notes
 
@@ -443,7 +443,7 @@ Remaining G-016 work:
 Future phases after G-016:
 
 - Add production object-bucket lifecycle and access policy hardening for S3-compatible artifact storage.
-- Configure environment-specific adapter loader integration for LM Studio/Ollama or another serving runtime; runtime deployment tracking/gating is now handled inside the app.
+- Harden environment-specific adapter loader integration for llama.cpp, LM Studio, Ollama, or another serving runtime; runtime deployment tracking/gating is handled inside the app.
 - Migrate learning state from SQLite local/demo tables to Postgres for multi-worker production use.
 
 Status: `Complete`

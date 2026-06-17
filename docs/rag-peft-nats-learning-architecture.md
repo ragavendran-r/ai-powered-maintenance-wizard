@@ -76,12 +76,12 @@ Content is eligible for PEFT export only when:
 
 Adapter promotion requires:
 
-- Registered model version with base model and adapter artifact path.
+- Registered adapter version with base model and adapter artifact path.
 - Dataset snapshot used for training.
 - Evaluation run passing quality and regression thresholds.
 - Authorized reviewer approval.
 
-After promotion, real LLM providers resolve the active `learning_model_versions` record and its verified runtime deployment before constructing the serving client. This makes Neo, Morpheus, Smith, recommendation, labeling, reranking, and document-intelligence calls use the promoted served model id while keeping the `mock` provider deterministic for tests. Adapter runtime deployment records and gates track whether the approved adapter is deployable for the selected serving target. Each environment still owns the concrete LM Studio, Ollama, or hosted-runtime loading step.
+After promotion, real LLM providers resolve the active `learning_model_versions` record and its verified runtime deployment before constructing the serving client. This makes Neo, Morpheus, Smith, recommendation, labeling, reranking, and document-intelligence calls use the promoted served adapter alias while keeping the `mock` provider deterministic for tests. Adapter runtime deployment records and gates track whether the approved adapter is loaded for the selected serving target. The default local loader uses llama.cpp to serve a GGUF base model with the trained LoRA adapter; LM Studio remains an optional OpenAI-compatible target for base or fused adapter models.
 
 ## NATS Subjects
 
@@ -95,7 +95,7 @@ Use separate subjects from IoT ingestion so learning jobs can be scaled and secu
 | `maintenance.learning.evaluation.requested` | Evaluate a dataset/model/prompt combination. |
 | `maintenance.learning.peft.requested` | Launch offline/local adapter tuning. |
 | `maintenance.learning.adapter.deployment.requested` | Verify a candidate adapter is deployable in the selected serving runtime. |
-| `maintenance.learning.adapter.registered` | Register a completed adapter artifact as a candidate model version. |
+| `maintenance.learning.adapter.registered` | Register a completed adapter artifact as a candidate adapter version. |
 | `maintenance.learning.dlq` | Invalid, exhausted, or poison learning jobs. |
 
 Each message should include:
@@ -117,7 +117,7 @@ Current implementation:
 - `LEARNING_ASYNC_ENABLED=false` is allowed only for deterministic tests, disconnected development, or emergency fallback; PEFT jobs remain persisted as queued local jobs in that mode.
 - `python -m app.learning_worker` runs the durable worker process. The local stack starts it automatically, and the local Kubernetes runner deploys it as a backend sidecar for shared local SQLite state.
 - Worker-executed PEFT jobs prepare a JSONL dataset artifact and training manifest, persist `learning_artifacts` rows with content hashes, and mark the job as awaiting a trainer when no trainer command is configured. Artifacts can be stored on the local filesystem for offline runs or uploaded to S3-compatible object storage such as MinIO by setting `LEARNING_ARTIFACT_STORE=s3`.
-- When `LEARNING_PEFT_TRAINER_COMMAND` is configured, the worker invokes the command without a shell, passes dataset/manifest/output paths through environment variables, enforces `LEARNING_PEFT_TRAINER_TIMEOUT_SECONDS`, stores trainer logs and adapter manifests, and registers the result as a `candidate` model version. The promotion gate still requires a passing evaluation and human reviewer action.
+- When `LEARNING_PEFT_TRAINER_COMMAND` is configured, the worker invokes the command without a shell, passes dataset/manifest/output paths through environment variables, enforces `LEARNING_PEFT_TRAINER_TIMEOUT_SECONDS`, stores trainer logs and adapter manifests, and registers the result as a `candidate` adapter version. The promotion gate still requires a passing evaluation, verified runtime-loaded deployment, and human reviewer action.
 - The bundled `scripts/peft/train_qwen_lora.py` template provides an optional local Qwen/SLM LoRA or QLoRA path. It consumes the worker-provided `MW_PEFT_DATASET_PATH`, `MW_PEFT_MANIFEST_PATH`, `MW_PEFT_OUTPUT_DIR`, `MW_PEFT_ADAPTER_NAME`, and `MW_PEFT_BASE_MODEL` variables, imports heavy trainer dependencies only during real training, and writes `adapter_manifest.json` in the registration format the backend consumes.
 - Artifact cleanup is registry-first. The cleanup API only evaluates rows in `learning_artifacts`, refuses to sweep arbitrary filesystem paths, protects active/candidate/promoted model adapter references and verified deployment artifacts, and exposes dry-run previews to Learning Review. Deletion requires both a non-dry-run admin or reliability-engineer request and `LEARNING_ARTIFACT_CLEANUP_ENABLED=true`; S3-compatible stores are intentionally read-only in the app.
 
@@ -165,7 +165,7 @@ The local stack starts Qdrant with NATS and the app. The local Kubernetes runner
 
 - Computes deterministic quality metrics.
 - Optionally runs model regression prompts against a held-out set.
-- Records metrics, pass/fail, model version, prompt version, and dataset id.
+- Records metrics, pass/fail, adapter version, prompt version, and dataset id.
 
 **PEFT worker**
 
@@ -230,4 +230,4 @@ These phases remain part of the production roadmap but are outside the completed
 
 1. **Postgres migration**: move learning, operational, and audit state from SQLite to Postgres for multi-worker and multi-instance deployment.
 2. **Object-store hardening**: add bucket-native lifecycle, retention, encryption, access-policy, audit, and recovery controls for S3-compatible learning artifacts.
-3. **Adapter-loader automation**: automate loading approved PEFT adapter artifacts into LM Studio, Ollama, or another serving runtime while preserving the app's model deployment records and promotion gates.
+3. **Adapter-loader hardening**: harden loading approved PEFT adapter artifacts into llama.cpp, LM Studio, Ollama, or another serving runtime while preserving the app's deployment records and promotion gates.

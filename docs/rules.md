@@ -56,8 +56,9 @@ Use this file for durable product and engineering rules. Use `docs/hooks.md` for
 - Async learning is the production default. Local tests may force deterministic fallbacks, but product code and stack scripts should assume NATS-backed learning jobs are enabled and observable.
 - Production RAG must use a real vector database. Qdrant is the default open-source vector DB for this project; SQLite/local-vector scoring is only a fallback for tests, disconnected development, or emergency degradation.
 - Use LLMs/SLMs wherever they materially improve diagnosis, retrieval, summarization, guidance, review, or explanation quality. Keep authorization, lifecycle transitions, schema validation, and safety gates deterministic and server-side.
+- Neo, Morpheus, Smith, and any future LLM/SLM agent must not bypass the configured live model with deterministic or static final assistant prose. Deterministic application code may provide grounding facts, tables, actions, authorization decisions, lifecycle validation, and safety gates, but the user-visible final narrative must come from the configured LLM/SLM whenever a live provider is configured. Static deterministic text is allowed only as an explicit degraded-mode error/fallback when the live model path is unavailable.
 - Every user-visible LLM/SLM response must stream live into the UI in readable formatted text. Do not show raw JSON or wait for a full response before rendering when the user is awaiting assistant content; backend-owned final structured events may still persist validated fields after the readable stream completes.
-- Adapter promotion must require persisted model, prompt, dataset, evaluation, artifact, and reviewer-approval records, with rollback available by switching the active model version.
+- Adapter promotion must require persisted adapter, prompt, dataset, evaluation, artifact, verified runtime deployment, and reviewer-approval records, with rollback available by switching the active adapter version.
 - Markdown report export should remain available for supervisor/demo handoff.
 
 ## UI Consistency

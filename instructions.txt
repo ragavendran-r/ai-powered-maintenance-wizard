@@ -1,0 +1,192 @@
+Intelligent Maintenance Wizard - Project Instructions
+
+Primary demo artifacts
+- Video demo: assets/Intelligent Maintenance Wizard with audio.mp4
+- Slide deck: docs/decks/maintenance-wizard-ai-capabilities-hackathon-objectives.pptx
+
+Short project summary
+- Intelligent Maintenance Wizard is a FastAPI + React prototype for steel-plant maintenance teams.
+- It combines deterministic asset/work-order logic, local LLM/SLM assistance, RAG evidence retrieval, IoT ingestion, learning review, and PEFT-ready tuning workflows.
+- The app helps engineers diagnose asset issues, review evidence, plan work, execute work orders, produce reports, capture feedback, and turn approved outcomes into reusable learning data.
+
+Implemented features
+- Role-based login and access control for admin, maintenance engineer, technician, supervisor, reliability engineer, planner, operator, and IoT service roles.
+- Command Center dashboard with priority assets, work queues, equipment efficiency, incident priority, and Neo assistant.
+- Asset views with data-backed profiles, metrics, recommendations, subsystems, performance, reliability, history, work orders, documents, and prediction drivers.
+- Ingestion view for document uploads and structured JSON records.
+- IoT streaming ingestion through NATS JetStream with status reporting and DLQ handling.
+- Neo role-aware assistant for dashboard, technician execution, supervisor follow-ups, and supported work-order actions.
+- Morpheus diagnosis, RCA, and PM planning flows grounded in asset state, alerts, work history, spares, RAG evidence, and feedback.
+- Work Execution view for assigned technician/supervisor work, execution guidance, material blockers, and approval actions.
+- Planning view for work order assignment, schedules, outage windows, material readiness, spare reservations, procurement status, and dispatch validation.
+- RCA workspace with evidence timeline, hypotheses, 5-Why, fishbone causes, corrective actions, closure review, and accepted learning handoff.
+- Reports view with independently loaded structured reports, abnormal alerts, decision summaries, digital log entries, and Markdown export.
+- RAG retrieval over document chunks and approved learning examples using Qdrant when available, with SQLite/local-vector fallback.
+- Learning and Tuning workflow for example refresh, LLM-as-a-Judge scoring, approval, JSONL snapshots, PEFT job queueing, artifact tracking, adapter deployment, evaluation, promotion, and rollback.
+- Optional external PEFT trainer template for Qwen LoRA/QLoRA adapter generation.
+- Local full-stack runner for NATS, Qdrant, backend, learning worker, and Vite frontend.
+- Local Kubernetes runner for disposable Kind-based deployments.
+- Demo assets and ingestion samples for steel-plant equipment including rolling mill drive, blast furnace blower, cooling pump, hydraulic system, and overhead crane.
+
+Tech stack
+- Backend: Python, FastAPI, Pydantic, SQLite, pytest.
+- Frontend: React, TypeScript, Vite, Vitest, Playwright.
+- AI providers: mock deterministic provider, OpenAI-compatible chat completions, Ollama-compatible chat.
+- Recommended local LLM runtime: LM Studio with OpenAI-compatible endpoint at http://localhost:1234/v1.
+- Recommended local model: Qwen2.5 7B Instruct GGUF for inference; Qwen/Qwen2.5-7B-Instruct for Transformers-compatible PEFT training.
+- RAG/vector store: Qdrant with deterministic hash embeddings by default, plus SQLite/local-vector fallback.
+- Streaming and async jobs: NATS JetStream.
+- PEFT tooling: Transformers, PEFT, optional bitsandbytes/CUDA QLoRA, local trainer script at scripts/peft/train_qwen_lora.py.
+- Auth/security: local SQLite users, bcrypt password hashes, JWT access tokens, role guards.
+- Deployment helpers: Docker containers for NATS/Qdrant, Vite dev server, uvicorn backend, Kind local Kubernetes script.
+
+Future phases
+- Move production persistence from SQLite to Postgres for multi-worker deployments.
+- Harden object-store lifecycle, access policies, and bucket-native artifact retention for S3/MinIO.
+- Automate adapter loading into LM Studio, Ollama, vLLM, or another runtime after reviewer promotion.
+- Add richer plant time-series data and model-backed prediction/anomaly algorithms beyond current heuristic/demo-grade scoring.
+- Add production monitoring, tracing, audit dashboards, and model-quality drift tracking.
+- Expand mobile/responsive validation coverage where it has been paused or only partially covered.
+- Add stronger CI branch protection/rulesets when the GitHub plan supports private-repository rulesets.
+- Improve click-only PEFT setup so trainer environment validation, dependency checks, and worker readiness are visible before queueing jobs.
+
+Known open bugs and limitations
+- PEFT training is not fully click-only unless the trainer environment, dependencies, NATS, backend, and learning worker are already configured and running.
+- Local Qwen 7B PEFT training may exceed normal Mac memory/compute limits, especially with MW_PEFT_QUANTIZATION=none.
+- LM Studio GGUF model names are serving identifiers, not Transformers training sources; PEFT training needs a Hugging Face model id or local Transformers model directory.
+- Qdrant unavailable or mismatched vector dimensions cause RAG to fall back to local SQLite vector/lexical retrieval.
+- Prediction and anomaly detection remain heuristic/demo-grade until richer real plant telemetry and validated models are added.
+- Some UI validation has been desktop-focused; mobile/responsive coverage is not complete for every workflow.
+- GitHub private-repository branch protection/rulesets were blocked by the current GitHub plan.
+- Artifact cleanup is intentionally conservative and only deletes registered local filesystem artifacts when cleanup is explicitly enabled.
+- The app records and gates adapter candidates, but runtime-specific adapter loading remains external to the application.
+
+Documentation paths
+- docs/architecture.md
+- docs/auth-authorization-plan.md
+- docs/completion-audit.md
+- docs/demo_script.md
+- docs/goal-tracker.md
+- docs/hooks.md
+- docs/implementation-plan.md
+- docs/iot-streaming-ingestion-plan.md
+- docs/local-llm-lm-studio.md
+- docs/peft-training.md
+- docs/production-hardening.md
+- docs/progress.md
+- docs/rag-peft-nats-learning-architecture.md
+- docs/rules.md
+- docs/submission-guide.md
+- docs/diagrams/application-architecture.svg
+- docs/decks/maintenance-wizard-ai-capabilities-hackathon-objectives.pptx
+
+Demo and data asset paths
+- assets/Intelligent Maintenance Wizard with audio.mp4
+- assets/ingestion_samples/README.md
+- assets/ingestion_samples/BF-BLOWER-02_MANUAL_inlet_guide_vane_actuator.txt
+- assets/ingestion_samples/CC-PUMP-03_SPARES_cooling_pump_inventory.csv
+- assets/ingestion_samples/HYD-SYS-04_LOG_hydraulic_temperature_pulsation.log
+- assets/ingestion_samples/OH-CRANE-05_ALERT_hoist_current_brake_temperature.json
+- assets/ingestion_samples/RM-DRIVE-01_HISTORY_drive_bearing_maintenance.json
+- assets/ingestion_samples/RM-DRIVE-01_SOP_main_drive_bearing_vibration.md
+- assets/sample_data/asset_detail_seed.sql
+- assets/sample_data/feedback.jsonl
+- assets/sample_data/steel_plant_demo.json
+- assets/sample_data/users_seed.sql
+
+Backend paths
+- backend/app/main.py
+- backend/app/learning_worker.py
+- backend/app/manage.py
+- backend/app/api/__init__.py
+- backend/app/core/auth.py
+- backend/app/core/config.py
+- backend/app/core/security.py
+- backend/app/data/database.py
+- backend/app/data/repository.py
+- backend/app/data/sample_loader.py
+- backend/app/models/schemas.py
+- backend/app/services/adapter_runtime.py
+- backend/app/services/ai_client.py
+- backend/app/services/anomaly.py
+- backend/app/services/anomaly_context.py
+- backend/app/services/artifact_store.py
+- backend/app/services/assets.py
+- backend/app/services/document_intelligence.py
+- backend/app/services/document_parser.py
+- backend/app/services/embeddings.py
+- backend/app/services/iot_streaming.py
+- backend/app/services/learning.py
+- backend/app/services/learning_worker.py
+- backend/app/services/llm.py
+- backend/app/services/maintenance_labeling.py
+- backend/app/services/neo_assistant.py
+- backend/app/services/pm_plans.py
+- backend/app/services/rca.py
+- backend/app/services/reasoning_explainer.py
+- backend/app/services/recommendations.py
+- backend/app/services/reports.py
+- backend/app/services/retrieval.py
+- backend/app/services/risk.py
+- backend/app/services/vector_index.py
+- backend/app/services/vector_store.py
+- backend/app/services/work_order_assistant.py
+- backend/data/maintenance_wizard.db
+- backend/requirements.txt
+- backend/pyproject.toml
+- backend/tests/test_api.py
+- backend/tests/test_llm.py
+
+Frontend paths
+- frontend/index.html
+- frontend/package.json
+- frontend/package-lock.json
+- frontend/playwright.config.ts
+- frontend/tsconfig.json
+- frontend/vite.config.ts
+- frontend/public/favicon.svg
+- frontend/src/App.tsx
+- frontend/src/App.test.tsx
+- frontend/src/appModel.ts
+- frontend/src/assistantContent.tsx
+- frontend/src/main.tsx
+- frontend/src/navigation.ts
+- frontend/src/permissions.ts
+- frontend/src/services/api.ts
+- frontend/src/sharedComponents.tsx
+- frontend/src/styles.css
+- frontend/src/vite-env.d.ts
+- frontend/src/workOrderStatus.ts
+- frontend/src/routes/AssetDetail.tsx
+- frontend/src/routes/Assets.tsx
+- frontend/src/routes/Auth.tsx
+- frontend/src/routes/Dashboard.tsx
+- frontend/src/routes/Ingestion.tsx
+- frontend/src/routes/LearningReview.tsx
+- frontend/src/routes/RcaWorkspace.tsx
+- frontend/src/routes/Reports.tsx
+- frontend/src/routes/Users.tsx
+- frontend/src/routes/WorkOrders.tsx
+- frontend/src/test/setup.ts
+- frontend/e2e/assistant-scroll.spec.ts
+- frontend/e2e/learning-review-rag.spec.ts
+- frontend/e2e/maintenance-fixtures.ts
+- frontend/e2e/rca-layout.spec.ts
+- frontend/e2e/responsive-routes.spec.ts
+- frontend/e2e/role-capabilities.spec.ts
+
+Script paths
+- scripts/export-learning-dataset.py
+- scripts/notify-complete.sh
+- scripts/run-local-k8s.sh
+- scripts/run-local-stack.sh
+- scripts/peft/README.md
+- scripts/peft/requirements-qwen-lora.txt
+- scripts/peft/train_qwen_lora.py
+
+Root and generated/local paths
+- README.md
+- .env.example
+- instructions.txt
+- outputs/ (local generated outputs, currently untracked)
+- assets/demo/ (local generated demo artifacts, currently untracked unless added)

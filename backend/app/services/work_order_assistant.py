@@ -21,8 +21,8 @@ from app.services.retrieval import retrieve_evidence
 from app.services.risk import health_summary
 
 
-TECHNICIAN_ASSISTANT_NAME = "Neo"
-SUPERVISOR_ASSISTANT_NAME = "Neo"
+TECHNICIAN_ASSISTANT_NAME = "Trinity"
+SUPERVISOR_ASSISTANT_NAME = "Trinity"
 WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS = 600
 WORK_ORDER_ASSISTANT_INITIAL_CONTEXT_MAX_TOKENS = 220
 MATERIAL_INQUIRY_TERMS = (
@@ -193,6 +193,7 @@ def stream_technician_assistance(
     prompt = _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes, current_user)
     content_parts: list[str] = []
     last_meta = (provider, used_live_provider)
+    initial_context = request.requested_step == "initial_context"
     for chunk in llm_client.stream_text(
         prompt,
         _technician_text_system_prompt(),
@@ -211,13 +212,20 @@ def stream_technician_assistance(
             last_meta = (provider, used_live_provider)
         if chunk.content:
             content_parts.append(chunk.content)
-            yield {"type": "token", "content": chunk.content}
+            if not initial_context:
+                yield {"type": "token", "content": chunk.content}
 
     answer = "".join(content_parts).strip()
     if not answer:
         answer = _technician_stream_fallback_text(fallback, "stream returned no content")
         provider = "mock"
         used_live_provider = False
+    if initial_context:
+        checked_answer = _quality_checked_technician_initial_answer(answer, work_order)
+        if checked_answer != answer:
+            answer = checked_answer
+            provider = "grounded_priority_guard"
+            used_live_provider = False
         yield {"type": "token", "content": answer}
     base_response = fallback if used_live_provider else _technician_llm_unavailable_response(work_order, evidence, provider)
     response = base_response.model_copy(
@@ -319,6 +327,7 @@ def stream_supervisor_assistance(
     provider = "mock"
     used_live_provider = False
     sent_meta = False
+    initial_context = _is_supervisor_initial_context_request(request)
     for chunk in configured_llm_client().stream_text(
         prompt,
         _supervisor_text_system_prompt(),
@@ -337,7 +346,8 @@ def stream_supervisor_assistance(
             yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
         if chunk.content:
             content_parts.append(chunk.content)
-            yield {"type": "token", "content": chunk.content}
+            if not initial_context:
+                yield {"type": "token", "content": chunk.content}
 
     answer = "".join(content_parts).strip()
     if not answer:
@@ -346,6 +356,12 @@ def stream_supervisor_assistance(
         used_live_provider = False
         if not sent_meta:
             yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+    if initial_context:
+        checked_answer = _quality_checked_supervisor_initial_answer(answer, work_orders)
+        if checked_answer != answer:
+            answer = checked_answer
+            provider = "grounded_priority_guard"
+            used_live_provider = False
         yield {"type": "token", "content": answer}
     base_response = fallback if used_live_provider else _supervisor_llm_unavailable_response(work_orders, selected, provider)
     response = base_response.model_copy(
@@ -403,7 +419,8 @@ def _technician_text_system_prompt() -> str:
         "actions, a suggested problem code, and a completion summary. Ground every suggestion in the "
         "supplied work order, asset state, alerts, evidence, material plan, and approved learning "
         "context. When Requested step is initial_context, summarize the selected work order's current "
-        "state. If the material plan has a blocker, explain the blocker and next permissible action; "
+        "state as a prioritized technician action list. Each initial_context bullet must include the work-order ID, "
+        "why it matters, and the next action. If the material plan has a blocker, explain the blocker and next permissible action; "
         "do not give start-work steps. Do not override deterministic inventory or work-order facts with learned context. "
         "Do not include table names, column names, row counts, or table-update metadata."
     )
@@ -429,10 +446,11 @@ def _supervisor_text_system_prompt() -> str:
         f"You are {SUPERVISOR_ASSISTANT_NAME}, a maintenance supervisor assistant. "
         "Stream a concise Markdown chat response for supervisor review. Do not return JSON. "
         "When a supervisor name is supplied in the prompt, address them by name and not by role. "
-        "Answer the supervisor's exact question first. If the question asks for waiting approval or pending "
+        "Answer the supervisor's exact question first as a prioritized action list. If the question asks for waiting approval or pending "
         "approval, list only WAPPR work orders and the required approval decision. If it asks for follow-ups, "
         "list follow-up work. If it asks for material blockers, list material-blocked work. Then list risks "
         "and say whether a draft follow-up work order is warranted based only on supplied work-order data. "
+        "For initial Work Execution context, use one short lead sentence and numbered P1/P2/P3 items in this format: P1: WO-1234: why it needs focus: next supervisor decision. "
         "Do not include table names, "
         "column names, row counts, or table-update metadata."
     )
@@ -444,15 +462,16 @@ def _technician_text_prompt(request, work_order, equipment, summary, evidence, f
     material_inquiry = _is_material_inquiry(request.observation or "") or (initial_context and has_material_blocker)
     if initial_context and has_material_blocker:
         response_objective = (
-            "Response objective: explain the selected work order's material blocker, expected availability "
-            "or substitute limits when supplied, and what the technician can do next without starting field execution. "
-            "Limit the response to 3 short bullets and no more than 90 words."
+            "Response objective: return a prioritized technician action list for the selected assigned work. "
+            "Use one short lead sentence and numbered P1/P2 items in this format: P1: WO-1234: why it needs focus: next action. Each item must include the work-order ID, "
+            "the material blocker or execution risk, and what the technician can do next without starting field execution. "
+            "Limit the response to 100 words."
         )
     elif initial_context:
         response_objective = (
-            "Response objective: summarize the selected work order's current technician context and ask for "
-            "the next field observation only if execution is allowed. Limit the response to 3 short bullets and "
-            "no more than 90 words."
+            "Response objective: return a prioritized technician action list for the selected assigned work. "
+            "Use one short lead sentence and numbered P1/P2 items in this format: P1: WO-1234: why it needs focus: next action. Each item must include the work-order ID, "
+            "why it needs focus, and the next technician action. Limit the response to 100 words."
         )
     elif material_inquiry:
         response_objective = (
@@ -508,7 +527,7 @@ def _supervisor_text_prompt(
             "Address the supervisor by this name; do not address them by role.",
             f"Supervisor question: {request.question or 'Review work order status and follow-ups.'}",
             f"Queue focus: {queue_focus}",
-            "Response objective: answer the supervisor question using only the focused queue below before adding risks.",
+            "Response objective: answer the supervisor question using only the focused queue below as a prioritized action list before adding risks. Use numbered P1/P2/P3 items in this format: P1: WO-1234: why it needs focus: next supervisor decision.",
             "Selected work order:",
             _work_order_line(selected) if selected else "None selected",
             "Queue work orders:",
@@ -531,8 +550,109 @@ def _supervisor_stream_fallback_text(response: SupervisorAssistantResponse, reas
     return _llm_unavailable_apology()
 
 
+def _quality_checked_technician_initial_answer(answer: str, work_order: dict) -> str:
+    normalized = answer.strip()
+    lowered = normalized.lower()
+    has_id = work_order["id"] in normalized
+    leaked_prompt = any(term in lowered for term in ["reason=", "; reason", "asset=", "status=", "priority=", "material="])
+    too_short = len(normalized.split()) < 14
+    if has_id and not leaked_prompt and not too_short:
+        return answer
+    return _canonical_technician_initial_answer(work_order)
+
+
+def _canonical_technician_initial_answer(work_order: dict) -> str:
+    material_blocker = _material_blocker_sentence(work_order)
+    if material_blocker:
+        reason = material_blocker.replace("Material status: ", "")
+        action = _material_availability_answer(work_order)
+        return "\n".join(
+            [
+                f"{work_order['id']} is blocked before field execution.",
+                f"1. P1: {work_order['id']}: {reason}: Confirm ETA, reservation, or approved substitute before starting work.",
+                f"2. P2: {work_order['id']}: Execution evidence is still needed: {_truncate_text(action, 120)}",
+            ]
+        )
+    return "\n".join(
+        [
+            f"{work_order['id']} is the next assigned execution focus.",
+            f"1. P1: {work_order['id']}: {work_order['title']} is {_readable_status(work_order['status']).lower()}: verify permits, lockout/tagout, and material readiness.",
+            f"2. P2: {work_order['id']}: Closeout evidence will be needed: record readings, findings, corrective action, and residual risk.",
+        ]
+    )
+
+
+def _is_supervisor_initial_context_request(request: SupervisorAssistantRequest) -> bool:
+    text = f"{request.question or ''} {request.queue_name or ''}".lower()
+    return "open supervisor work execution" in text or ("prioritized action list" in text and request.queue_name == "all_work")
+
+
+def _quality_checked_supervisor_initial_answer(answer: str, work_orders: list[dict]) -> str:
+    normalized = answer.strip()
+    lowered = normalized.lower()
+    ids = [item["id"] for item in work_orders[:8]]
+    has_id = any(item_id in normalized for item_id in ids)
+    leaked_prompt = any(term in lowered for term in ["reason=", "; reason", "asset=", "status=", "priority=", "material="])
+    too_short = len(normalized.split()) < 14
+    if has_id and not leaked_prompt and not too_short:
+        return answer
+    return _canonical_supervisor_initial_answer(work_orders)
+
+
+def _canonical_supervisor_initial_answer(work_orders: list[dict]) -> str:
+    priorities = _supervisor_priority_items(work_orders)
+    if not priorities:
+        return "No supervisor work-execution priorities are currently waiting in this queue."
+    lines = ["Current supervisor priorities need decisions before the next handoff."]
+    for index, item in enumerate(priorities[:4], start=1):
+        lines.append(
+            f"{index}. P{min(index, 3)}: {item['id']}: {_supervisor_priority_reason(item)}: {_supervisor_priority_action(item)}"
+        )
+    return "\n".join(lines)
+
+
+def _supervisor_priority_items(work_orders: list[dict]) -> list[dict]:
+    def score(item: dict) -> tuple[int, int]:
+        if item["status"] == "WAPPR":
+            return (0, item["priority"])
+        if item.get("material_blocker_status") in {"blocked", "waiting_procurement", "reorder_requested"}:
+            return (1, item["priority"])
+        if item.get("follow_up_required"):
+            return (2, item["priority"])
+        return (3, item["priority"])
+
+    return sorted([item for item in work_orders if item["status"] not in {"COMP", "CLOSE"} or item.get("follow_up_required")], key=score)
+
+
+def _supervisor_priority_reason(item: dict) -> str:
+    if item["status"] == "WAPPR":
+        return "approval is blocking execution"
+    if item.get("material_blocker_status") in {"blocked", "waiting_procurement", "reorder_requested"}:
+        return item.get("material_blocker_note") or "material is blocking execution"
+    if item.get("follow_up_required"):
+        return "follow-up is flagged from work execution"
+    return f"priority {item['priority']} work remains {_readable_status(item['status']).lower()}"
+
+
+def _supervisor_priority_action(item: dict) -> str:
+    if item["status"] == "WAPPR":
+        return "approve, reject, or send back the scope"
+    if item.get("material_blocker_status") in {"blocked", "waiting_procurement", "reorder_requested"}:
+        return "coordinate ETA, substitute approval, or resequencing"
+    if item.get("follow_up_required"):
+        return "review residual risk and decide whether to create follow-up work"
+    return "check owner progress before shift handoff"
+
+
+def _truncate_text(value: str, limit: int) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 1].rstrip() + "..."
+
+
 def _llm_unavailable_apology() -> str:
-    return "Sorry, Neo could not get a live LLM response right now. Please retry after confirming the LLM service is responding."
+    return "Sorry, Trinity could not get a live LLM response right now. Please retry after confirming the LLM service is responding."
 
 
 def _technician_llm_unavailable_response(work_order, evidence, provider: str) -> TechnicianAssistantResponse:

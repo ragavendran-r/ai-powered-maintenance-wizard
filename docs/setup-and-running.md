@@ -8,7 +8,8 @@ This guide explains how to set up and run the AI-Powered Maintenance Wizard loca
 - Python 3.11 or newer.
 - Node.js 20 or newer with npm.
 - Docker Desktop if you want the full local stack with NATS JetStream and Qdrant.
-- Optional: LM Studio if you want live local LLM responses instead of deterministic mock responses.
+- Optional: llama.cpp if you want to serve a trained LoRA adapter without fusing it into the base model.
+- Optional: LM Studio if you want live local LLM responses from a base model or a fused/imported adapter model instead of deterministic mock responses.
 
 ## 1. Open The Project
 
@@ -32,18 +33,26 @@ For deterministic offline/demo mode, use:
 LLM_PROVIDER=mock
 ```
 
-For local LM Studio inference, set:
+For local llama.cpp adapter inference, set:
 
 ```env
 LLM_PROVIDER=openai
-OPENAI_API_KEY=lm-studio-local
-OPENAI_BASE_URL=http://localhost:1234/v1
-OPENAI_MODEL=qwen2.5-7b-instruct
+OPENAI_API_KEY=local-runtime
+OPENAI_BASE_URL=http://127.0.0.1:8080/v1
+OPENAI_MODEL=maintenance-wizard-qwen-lora
 LLM_TIMEOUT_SECONDS=15
 LLM_STREAM_TIMEOUT_SECONDS=60
 LLM_STRUCTURED_MAX_TOKENS=300
 LLM_TEXT_MAX_TOKENS=600
+LEARNING_RUNTIME_DEPLOYER_DEFAULT=llama_cpp
+LEARNING_ADAPTER_DEPLOYER_COMMAND="bash scripts/peft/deploy_llama_cpp_adapter.sh"
+LLAMA_CPP_BASE_MODEL_PATH=
+LLAMA_CPP_HF_REPO=Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
+LLAMA_CPP_HF_FILE=
+LLAMA_CPP_ADAPTER_GGUF_PATH=/path/to/trained-adapter.gguf
 ```
+
+For optional LM Studio base-model or fused-model inference, use `OPENAI_BASE_URL=http://localhost:1234/v1`, set `OPENAI_API_KEY=lm-studio-local`, and set `OPENAI_MODEL` to the loaded LM Studio model identifier.
 
 Keep `.env` local. Do not commit secrets or machine-specific runtime values.
 
@@ -140,7 +149,11 @@ operator@plant.local
 
 The application uses local SQLite users, bcrypt password hashes, JWT bearer tokens, and role-based navigation/API guards.
 
-## 8. Optional LM Studio Setup
+## 8. Optional Local LLM Runtime Setup
+
+For llama.cpp adapter serving, install or build `llama-server`, configure the GGUF base model and adapter paths in `.env`, then let the Learning and Tuning deployment action run `scripts/peft/deploy_llama_cpp_adapter.sh`. The script starts `llama-server` on `http://127.0.0.1:8080` with the selected adapter alias and the backend verifies it through the OpenAI-compatible `/v1` endpoint.
+
+LM Studio remains available for base-model or fused-model serving when you do not need raw LoRA adapter loading.
 
 Start or restart LM Studio's local server:
 
@@ -161,7 +174,7 @@ In LM Studio, load a stable model identifier such as:
 qwen2.5-7b-instruct
 ```
 
-The backend uses LM Studio through the OpenAI-compatible provider mode. If LM Studio is unavailable, keep `LLM_PROVIDER=mock` or rely on the deterministic fallback behavior.
+The backend uses both llama.cpp and LM Studio through the OpenAI-compatible provider mode. If no local LLM runtime is available, keep `LLM_PROVIDER=mock` or rely on the deterministic fallback behavior.
 
 ## 9. Verify The Application
 
@@ -212,6 +225,7 @@ Do not commit runtime database files.
 Frontend:      http://127.0.0.1:5173
 Backend API:   http://127.0.0.1:8000
 Backend health http://127.0.0.1:8000/api/health
+llama.cpp:     http://127.0.0.1:8080/v1
 LM Studio:     http://localhost:1234/v1
 ```
 
@@ -221,7 +235,8 @@ When the full local stack is running, NATS and Qdrant are managed by `scripts/ru
 
 - If login fails, confirm the backend is running and demo users are seeded.
 - If the frontend cannot reach the API, confirm the backend is on `http://127.0.0.1:8000`.
-- If live LLM responses fail, confirm LM Studio is running and `OPENAI_MODEL` matches the loaded model id.
+- If live LLM responses fail on llama.cpp, confirm `llama-server` is running, `OPENAI_BASE_URL` points to `http://127.0.0.1:8080/v1`, and `OPENAI_MODEL` matches the alias passed to `--alias`.
+- If live LLM responses fail on LM Studio, confirm LM Studio is running and `OPENAI_MODEL` matches the loaded model id.
 - If ports are already in use, stop the local stack with `scripts/run-local-stack.sh stop` and retry.
 - If dependencies are stale, reinstall backend and frontend dependencies using the install steps above.
 - If Docker services fail, restart Docker Desktop and rerun the local stack script.

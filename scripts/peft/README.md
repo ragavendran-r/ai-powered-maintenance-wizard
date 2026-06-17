@@ -33,7 +33,7 @@ MW_PEFT_MODEL_SOURCE=Qwen/Qwen2.5-7B-Instruct
 MW_PEFT_QUANTIZATION=4bit
 ```
 
-Use `MW_PEFT_MODEL_SOURCE` when the serving model id differs from the trainable Hugging Face model id. For example, LM Studio may serve an adapter-backed model as `qwen2.5-7b-instruct`, while training should load `Qwen/Qwen2.5-7B-Instruct` or a local Transformers model directory. GGUF files and LM Studio aliases are serving artifacts, not PEFT training sources.
+Use `MW_PEFT_MODEL_SOURCE` when the serving adapter alias differs from the trainable Hugging Face model id. For example, llama.cpp may serve a trained adapter alias as `maintenance-wizard-qwen-lora`, while training should load `Qwen/Qwen2.5-7B-Instruct` or a local Transformers model directory. GGUF files, llama.cpp aliases, and LM Studio aliases are serving artifacts, not PEFT training sources.
 
 For Apple Silicon, CPU-only hosts, or environments without CUDA bitsandbytes, use regular LoRA:
 
@@ -52,7 +52,7 @@ MW_PEFT_BASE_MODEL=Qwen/Qwen2.5-7B-Instruct \
 python scripts/peft/train_qwen_lora.py --check-config
 ```
 
-After a successful training run, the script writes `adapter_manifest.json` directly under `MW_PEFT_OUTPUT_DIR`. The backend reads this manifest and registers a `candidate` model version. Promotion still requires a passing evaluation and authorized reviewer action.
+After a successful training run, the script writes `adapter_manifest.json` directly under `MW_PEFT_OUTPUT_DIR`. The backend reads this manifest and registers a `candidate` adapter version. Promotion still requires a passing evaluation, verified runtime-loaded deployment, and authorized reviewer action.
 
 Minimum manifest fields written for backend registration:
 
@@ -67,3 +67,19 @@ Minimum manifest fields written for backend registration:
 ```
 
 The manifest also includes dataset hash, job id, LoRA parameters, training parameters, quantization mode, and artifact file names for auditability.
+
+## Runtime Deployment Helpers
+
+The default local runtime helper is `deploy_llama_cpp_adapter.sh`. It expects either a local GGUF base model path or a llama.cpp Hugging Face GGUF repo, plus either a preconverted GGUF LoRA adapter or a path to `llama.cpp/convert_lora_to_gguf.py`:
+
+```bash
+LEARNING_RUNTIME_DEPLOYER_DEFAULT=llama_cpp
+LEARNING_ADAPTER_DEPLOYER_COMMAND="bash scripts/peft/deploy_llama_cpp_adapter.sh"
+OPENAI_BASE_URL=http://127.0.0.1:8080/v1
+LLAMA_CPP_BASE_MODEL_PATH=
+LLAMA_CPP_HF_REPO=Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
+LLAMA_CPP_HF_FILE=
+LLAMA_CPP_ADAPTER_GGUF_PATH=/path/to/trained-adapter.gguf
+```
+
+LM Studio is still available as an optional fused-model helper through `deploy_lmstudio_fused_model.sh`. That path requires a fused/imported model file or key because LM Studio's CLI does not attach a raw PEFT adapter folder.

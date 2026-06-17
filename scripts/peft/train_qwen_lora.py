@@ -670,7 +670,7 @@ def model_source_error(model_source: str, exc: Exception) -> str:
         f"Could not load model source {model_source!r}: {exc}. "
         "Set MW_PEFT_MODEL_SOURCE to a Hugging Face model id such as "
         "Qwen/Qwen2.5-7B-Instruct or to a local Transformers model directory. "
-        "LM Studio GGUF aliases are serving identifiers and are not training model sources."
+        "llama.cpp aliases, LM Studio GGUF aliases, and GGUF files are serving identifiers or artifacts, not training model sources."
     )
 
 

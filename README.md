@@ -8,22 +8,24 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 
 The AI layer is an audited maintenance copilot layered after deterministic backend controls. Raw IoT ingestion, anomaly scoring, risk calculation, role permissions, and persisted work-order updates stay in deterministic flows; AI explains, retrieves evidence, guides role-specific work, and helps turn reviewed outcomes into reusable learning material.
 
-- Provider modes: `mock` for deterministic offline development/tests, `openai` for OpenAI-compatible runtimes such as LM Studio or vLLM, and `ollama` for local Ollama. Live providers share structured-output validation, token limits, timeouts, streaming support, and deterministic fallback behavior.
+- Provider modes: `mock` for deterministic offline development/tests, `openai` for OpenAI-compatible runtimes such as llama.cpp, LM Studio, or vLLM, and `ollama` for local Ollama. Live providers share structured-output validation, token limits, timeouts, streaming support, and deterministic fallback behavior.
 - Role-aware assistants: Neo supports command-center and work-order workflows, Morpheus supports diagnosis/RCA/PM planning, and Smith explains reliability prediction and technician-ready preventive-maintenance steps.
-- Local LLM runtime: The recommended setup is LM Studio with Qwen2.5 7B Instruct GGUF served through the OpenAI-compatible endpoint at `http://localhost:1234/v1`:
+- Local LLM runtime: The recommended adapter-serving setup is llama.cpp with a Qwen2.5 GGUF base model and a GGUF LoRA adapter served through the OpenAI-compatible endpoint at `http://127.0.0.1:8080/v1`. LM Studio remains supported as an optional OpenAI-compatible runtime for base models or fused adapter models:
 
   ```env
   LLM_PROVIDER=openai
-  OPENAI_API_KEY=lm-studio-local
-  OPENAI_BASE_URL=http://localhost:1234/v1
-  OPENAI_MODEL=qwen2.5-7b-instruct
+  OPENAI_API_KEY=local-runtime
+  OPENAI_BASE_URL=http://127.0.0.1:8080/v1
+  OPENAI_MODEL=maintenance-wizard-qwen-lora
   LLM_TIMEOUT_SECONDS=15
   LLM_STREAM_TIMEOUT_SECONDS=60
   LLM_STRUCTURED_MAX_TOKENS=300
   LLM_TEXT_MAX_TOKENS=600
+  LEARNING_RUNTIME_DEPLOYER_DEFAULT=llama_cpp
+  LEARNING_ADAPTER_DEPLOYER_COMMAND="bash scripts/peft/deploy_llama_cpp_adapter.sh"
   ```
 
-  Load the model in LM Studio with a stable identifier such as `qwen2.5-7b-instruct`. See `docs/local-llm-lm-studio.md` for model loading, timeout, streaming, and smoke-test details.
+  See `docs/peft-training.md` for the llama.cpp adapter deployment flow and `docs/local-llm-lm-studio.md` for the optional LM Studio base/fused-model setup.
 - Evidence-grounded RAG and learning: Qdrant stores document chunks and approved learning examples for production-like retrieval, while SQLite-local vector scoring remains a fallback. Learning Review requires both human approval and LLM-as-a-Judge quality scoring before examples can be reused for RAG or exported as JSONL snapshots for PEFT.
 - Tuning handoff: NATS-backed learning jobs can prepare audited dataset and manifest artifacts, optionally invoke the bundled Qwen LoRA/QLoRA trainer template, and register adapter candidates. Evaluation, deployment verification, promotion, and rollback remain reviewer-controlled. See `docs/rag-peft-nats-learning-architecture.md` and `docs/peft-training.md` for the full design.
 
@@ -36,7 +38,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 | Frontend | React, TypeScript, Vite, CSS modules via `frontend/src/styles.css`, lucide-react icons |
 | Auth | Local SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI role guards, React session storage |
 | AI provider adapters | Mock deterministic provider, OpenAI-compatible chat completions, Ollama-compatible chat completions |
-| Local LLM runtime | LM Studio OpenAI-compatible server with Qwen2.5 7B Instruct GGUF as the recommended local setup |
+| Local LLM runtime | llama.cpp OpenAI-compatible server for base GGUF + LoRA adapter serving; LM Studio remains optional for base or fused-model serving |
 | Assistants | Neo for dashboard/work execution, Morpheus for diagnosis/RCA/PM planning, Smith for reliability prediction and technician-ready planning |
 | RAG/vector search | Qdrant for production-like document and approved-learning retrieval, deterministic hashed embeddings, SQLite/local-vector fallback |
 | Streaming and async jobs | NATS JetStream for IoT ingestion and learning jobs, durable consumers, explicit acknowledgments, DLQ handling |
@@ -247,7 +249,7 @@ Supported LLM provider values:
 - `openai`: OpenAI-compatible chat completions adapter using `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL`.
 - `ollama`: Ollama chat adapter using `OLLAMA_BASE_URL` and `OLLAMA_MODEL`.
 
-For local LM Studio inference, use the `openai` provider mode with the low-latency Qwen2.5 7B Instruct settings summarized in `AI Capabilities`. See `docs/local-llm-lm-studio.md` for install, model loading, `.env`, and smoke-test steps.
+For local llama.cpp adapter inference, use the `openai` provider mode with the endpoint and deployer settings summarized in `AI Capabilities`. For LM Studio base-model or fused-model inference, use `OPENAI_BASE_URL=http://localhost:1234/v1` and see `docs/local-llm-lm-studio.md` for install, model loading, `.env`, and smoke-test steps.
 
 When `LLM_USE_ACTIVE_LEARNING_MODEL=true`, real OpenAI-compatible or Ollama provider calls resolve the currently active `learning_model_versions` record before building the serving client. A promoted adapter candidate therefore changes the model id sent by Neo, Morpheus, Smith, recommendation, labeling, reranking, and document-intelligence calls without bypassing deterministic fallback or role checks. The `mock` provider intentionally ignores active model resolution so automated tests remain deterministic.
 
@@ -261,7 +263,7 @@ Structured record ingestion supports `equipment`, `alerts`, `spares`, `work_orde
 
 NATS JetStream streaming ingestion is enabled in the local stack and should remain enabled for production. Set `STREAMING_ENABLED=true` and configure `NATS_URL` to consume IoT envelopes from `steelplant.iot.*` subjects into the same structured record tables used by JSON ingestion. The backend uses the `MW_IOT` stream, `maintenance-wizard-ingestor` durable consumer, explicit acknowledgments after persistence, and `steelplant.iot.dlq` for invalid messages.
 
-The same NATS server also carries production learning jobs without mixing them with plant IoT payloads. Keep `LEARNING_ASYNC_ENABLED=true` to publish queued tuning jobs to `LEARNING_NATS_STREAM=MW_LEARNING` on `maintenance.learning.*` subjects. Run the worker with `python -m app.learning_worker`, or use the local stack scripts, to consume jobs with `LEARNING_NATS_CONSUMER=maintenance-wizard-learning-worker`. PEFT requests prepare a JSONL dataset and training manifest under `LEARNING_ARTIFACT_DIR`, then record artifact hashes for audit. When `LEARNING_PEFT_TRAINER_COMMAND` is configured, the worker invokes that external trainer with bounded timeout and registers the resulting adapter as a `candidate` model version only.
+The same NATS server also carries production learning jobs without mixing them with plant IoT payloads. Keep `LEARNING_ASYNC_ENABLED=true` to publish queued tuning jobs to `LEARNING_NATS_STREAM=MW_LEARNING` on `maintenance.learning.*` subjects. Run the worker with `python -m app.learning_worker`, or use the local stack scripts, to consume jobs with `LEARNING_NATS_CONSUMER=maintenance-wizard-learning-worker`. PEFT requests prepare a JSONL dataset and training manifest under `LEARNING_ARTIFACT_DIR`, then record artifact hashes for audit. When `LEARNING_PEFT_TRAINER_COMMAND` is configured, the worker invokes that external trainer with bounded timeout and registers the resulting adapter as a `candidate` adapter version only. Promotion requires a passing evaluation and a verified runtime-loaded deployment; the default deployment hook uses llama.cpp to serve the GGUF base model with the trained LoRA adapter alias.
 
 Learning artifacts default to local filesystem storage with `LEARNING_ARTIFACT_STORE=filesystem`. For production-like object storage, set `LEARNING_ARTIFACT_STORE=s3`, `LEARNING_ARTIFACT_S3_BUCKET`, and optionally `LEARNING_ARTIFACT_S3_ENDPOINT_URL` for MinIO or another S3-compatible store. The worker keeps local files for offline handoff, uploads each artifact through the S3-compatible client, and records `s3://` object URIs, object keys, storage backend, SHA-256 hashes, and local retained paths in `learning_artifacts`. External trainer output can be directed with `LEARNING_PEFT_OUTPUT_DIR`, and `LEARNING_PEFT_TRAINER_TIMEOUT_SECONDS` bounds the run.
 
@@ -271,7 +273,7 @@ Production RAG uses Qdrant as the vector database. Set `RAG_VECTOR_STORE=qdrant`
 
 The current SQLite schema version is `19`. Lightweight startup migrations add `feedback.equipment_id`, create asset detail tables, `document_intelligence`, `maintenance_labels`, `streaming_messages`, local auth tables, work orders, work-order planning/dispatch metadata, work-order spare reservations with reorder/procurement/substitute/blocker fields, work-order logs, RCA cases, PM templates and PM plans, learning interactions, judged examples, dataset snapshots, model versions, prompt versions, evaluation runs, learning jobs, learning artifacts, model promotion audit records, adapter runtime deployment records, and RAG embedding profile metadata for older local databases.
 
-The current production-aligned learning scope is intentionally constrained to what can run on the local Mac stack: SQLite, Qdrant, NATS, filesystem/S3-compatible artifact registration, local PEFT trainer hooks, and OpenAI-compatible or Ollama-style LLM serving. Future production phases track Postgres migration, bucket-native object-store lifecycle/access hardening, and environment-specific adapter-loader automation for LM Studio/Ollama or another serving runtime.
+The current production-aligned learning scope is intentionally constrained to what can run on the local Mac stack: SQLite, Qdrant, NATS, filesystem/S3-compatible artifact registration, local PEFT trainer hooks, llama.cpp adapter serving, and OpenAI-compatible or Ollama-style LLM serving. Future production phases track Postgres migration, bucket-native object-store lifecycle/access hardening, and hardened environment-specific adapter-loader automation for llama.cpp, LM Studio, Ollama, or another serving runtime.
 
 ## Authentication And Authorization
 

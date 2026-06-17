@@ -1433,7 +1433,16 @@ export const api = {
   learningEvaluations: () => request<LearningEvaluationRun[]>('/api/learning/evaluations'),
   learningEvaluationsPage: ({ limit = 10, offset = 0 }: { limit?: number; offset?: number } = {}) =>
     request<PaginatedResponse<LearningEvaluationRun>>(`/api/learning/evaluations/page?limit=${limit}&offset=${offset}`),
-  promoteLearningModelVersion: (payload: { model_version_id: string; evaluation_run_id: string; notes?: string }) =>
+  promoteLearningModelVersion: (payload: {
+    model_version_id: string
+    evaluation_run_id: string
+    runtime_provider?: string
+    served_model_name?: string
+    base_url?: string
+    artifact_uri?: string
+    artifact_hash?: string
+    notes?: string
+  }) =>
     request<LearningModelPromotion>('/api/learning/model-versions/promote', {
       method: 'POST',
       body: JSON.stringify(payload),

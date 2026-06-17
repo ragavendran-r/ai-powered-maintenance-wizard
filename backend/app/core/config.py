@@ -71,7 +71,9 @@ class Settings(BaseSettings):
         alias="LEARNING_PEFT_OUTPUT_DIR",
     )
     learning_runtime_deployment_required: bool = Field(default=True, alias="LEARNING_RUNTIME_DEPLOYMENT_REQUIRED")
-    learning_runtime_deployer_default: str = Field(default="manual", alias="LEARNING_RUNTIME_DEPLOYER_DEFAULT")
+    learning_runtime_deployer_default: str = Field(default="llama_cpp", alias="LEARNING_RUNTIME_DEPLOYER_DEFAULT")
+    learning_adapter_deployer_command: Optional[str] = Field(default=None, alias="LEARNING_ADAPTER_DEPLOYER_COMMAND")
+    learning_adapter_deployer_timeout_seconds: int = Field(default=120, ge=1, alias="LEARNING_ADAPTER_DEPLOYER_TIMEOUT_SECONDS")
     learning_runtime_deployment_timeout_seconds: float = Field(default=15.0, ge=1.0, alias="LEARNING_RUNTIME_DEPLOYMENT_TIMEOUT_SECONDS")
     rag_vector_store: str = Field(default="qdrant", alias="RAG_VECTOR_STORE")
     rag_qdrant_url: str = Field(default="http://localhost:6333", alias="RAG_QDRANT_URL")

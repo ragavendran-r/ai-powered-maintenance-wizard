@@ -1,3 +1,4 @@
+import re
 from collections import defaultdict
 from collections.abc import Iterator
 from typing import Optional
@@ -170,9 +171,8 @@ def stream_asset_reliability_prediction(equipment_id: str) -> Iterator[dict[str,
             return
         if chunk.content:
             content_parts.append(chunk.content)
-            yield {"type": "token", "content": chunk.content}
 
-    answer = "".join(content_parts).strip()
+    answer = _sanitize_reliability_prediction_answer("".join(content_parts).strip())
     if not answer:
         yield {
             "type": "error",
@@ -181,6 +181,7 @@ def stream_asset_reliability_prediction(equipment_id: str) -> Iterator[dict[str,
             "used_live_provider": False,
         }
         return
+    yield {"type": "token", "content": answer}
     record_assistant_interaction(
         assistant="smith",
         interaction_type="reliability_prediction_stream",
@@ -227,6 +228,7 @@ def _reliability_prediction_system_prompt() -> str:
         "Do not calculate raw sensor predictions. Do not change the numeric probability, confidence interval, or RUL. "
         "Do not include table names, column names, row counts, or table-update metadata. "
         "Use Markdown with short headings and bullets. Complete the answer within 600 output tokens."
+        " Do not repeat the same driver, metric, signal, or sentence."
     )
 
 
@@ -287,7 +289,7 @@ def _reliability_prediction_prompt(
             "Degradation trend history:",
             *trend_lines,
             "Prediction drivers:",
-            *[f"- {driver}" for driver in prediction.drivers[:10]],
+            *[f"- {driver}" for driver in _unique_prediction_drivers(prediction.drivers)[:10]],
             "",
             "Return:",
             "### Failure Prediction",
@@ -302,6 +304,62 @@ def _reliability_prediction_prompt(
             "- 2-4 prioritized maintenance actions.",
         ]
     )
+
+
+def _unique_prediction_drivers(drivers: list[str]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for driver in drivers:
+        key = _reliability_repetition_key(driver)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(driver)
+    return unique
+
+
+def _sanitize_reliability_prediction_answer(answer: str) -> str:
+    lines = answer.splitlines()
+    cleaned: list[str] = []
+    section = ""
+    seen_by_section: dict[str, set[str]] = {}
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        heading = re.match(r"^\s*#{1,6}\s+(.+?)\s*$", line)
+        if heading:
+            section = heading.group(1).strip().lower()
+            cleaned.append(line)
+            continue
+        if not line.strip():
+            if cleaned and cleaned[-1].strip():
+                cleaned.append("")
+            continue
+        key = _reliability_repetition_key(line)
+        seen = seen_by_section.setdefault(section, set())
+        if key in seen or _reliability_has_repeated_phrase(key):
+            continue
+        seen.add(key)
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
+
+
+def _reliability_repetition_key(text: str) -> str:
+    value = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", text).strip().lower()
+    value = re.sub(r"\b\d+(?:\.\d+)?\s*(?:%|percent|days?|c|a|mm/s)?\b", "#", value)
+    value = re.sub(r"[^a-z0-9#]+", " ", value)
+    value = re.sub(r"\b(contributing|contributes|contribution)\s+#\b", "contribution #", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _reliability_has_repeated_phrase(key: str) -> bool:
+    tokens = key.split()
+    for size in (3, 4):
+        if len(tokens) < size * 2:
+            continue
+        phrases = [" ".join(tokens[index:index + size]) for index in range(len(tokens) - size + 1)]
+        if len(phrases) - len(set(phrases)) >= 1:
+            return True
+    return False
 
 
 def _performance_charts(equipment_id: str) -> list[AssetPerformanceChart]:

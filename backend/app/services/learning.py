@@ -32,6 +32,7 @@ from app.models.schemas import (
     UserPublic,
 )
 from app.services.ai_client import active_llm_serving_config, configured_llm_client
+from app.services.adapter_runtime import execute_adapter_deployment
 from app.services.artifact_store import artifact_store_status, store_learning_artifact_file
 from app.services.embeddings import current_embedding_profile, embedding_profile_id, supported_embedding_provider
 from app.services.vector_store import (
@@ -240,7 +241,7 @@ def run_learning_evaluation(
         raise ValueError("Learning dataset not found")
     model_ids = {model["id"] for model in repository.list_learning_model_versions()}
     if request.model_version_id not in model_ids:
-        raise ValueError("Learning model version not found")
+        raise ValueError("Learning adapter version not found")
     prompt_ids = {prompt["id"] for prompt in repository.list_learning_prompt_versions()}
     if request.prompt_version_id not in prompt_ids:
         raise ValueError("Learning prompt version not found")
@@ -284,7 +285,7 @@ def promote_model_version(request: LearningModelPromotionRequest, current_user: 
         request.evaluation_run_id,
         request.model_version_id,
     )
-    deployment = _validated_runtime_deployment(model)
+    deployment = _ensure_runtime_deployment_for_promotion(model, request, current_user)
     previous_active = next(
         (item for item in repository.list_learning_model_versions() if item["status"] == "active" and item["id"] != model["id"]),
         None,
@@ -335,7 +336,7 @@ def promote_model_version(request: LearningModelPromotionRequest, current_user: 
 def rollback_model_version(request: LearningModelRollbackRequest, current_user: UserPublic) -> dict[str, Any]:
     model = repository.get_learning_model_version(request.target_model_version_id)
     if not model:
-        raise ValueError("Learning model version not found")
+        raise ValueError("Learning adapter version not found")
     evaluation = _validated_promotion_evaluation(
         request.evaluation_run_id,
         request.target_model_version_id,
@@ -395,9 +396,9 @@ def queue_adapter_deployment_job(
 ) -> LearningJob:
     model = repository.get_learning_model_version(model_version_id)
     if not model:
-        raise ValueError("Learning model version not found")
+        raise ValueError("Learning adapter version not found")
     if model.get("status") == "active":
-        raise ValueError("Active model versions are already serving and cannot be deployed as candidates")
+        raise ValueError("Active adapter versions are already serving and cannot be deployed as candidates")
     artifact_uri = request.artifact_uri or model.get("adapter_path")
     _validate_artifact_reference(artifact_uri, request.artifact_hash)
     input_refs = {
@@ -449,9 +450,9 @@ def queue_adapter_deployment_job(
 def _validated_promotable_model(model_version_id: str) -> dict[str, Any]:
     model = repository.get_learning_model_version(model_version_id)
     if not model:
-        raise ValueError("Learning model version not found")
+        raise ValueError("Learning adapter version not found")
     if model["status"] == "active":
-        raise ValueError("Learning model version is already active")
+        raise ValueError("Learning adapter version is already active")
     if not model.get("adapter_path"):
         raise ValueError("Adapter promotion requires an adapter_path or registered adapter artifact URI")
     return model
@@ -464,12 +465,59 @@ def _validated_runtime_deployment(model: dict[str, Any]) -> Optional[dict[str, A
         return None
     deployment = repository.get_verified_learning_model_deployment(model["id"])
     if not deployment:
-        raise ValueError("Adapter promotion requires a verified runtime deployment for this model version")
+        raise ValueError("Adapter promotion requires a runtime-loaded deployment for this adapter version")
     artifact_uri = deployment.get("artifact_uri")
     if artifact_uri and artifact_uri != model.get("adapter_path"):
         raise ValueError("Verified runtime deployment artifact URI does not match the model adapter path")
     _validate_artifact_reference(artifact_uri, deployment.get("artifact_hash"))
     return deployment
+
+
+def _ensure_runtime_deployment_for_promotion(
+    model: dict[str, Any],
+    request: LearningModelPromotionRequest,
+    current_user: UserPublic,
+) -> Optional[dict[str, Any]]:
+    try:
+        return _validated_runtime_deployment(model)
+    except ValueError as exc:
+        if "runtime-loaded deployment" not in str(exc):
+            raise
+
+    artifact_uri = request.artifact_uri or model.get("adapter_path")
+    deployment_job = repository.save_learning_job(
+        {
+            "job_type": "adapter_deployment",
+            "subject": _learning_subject("adapter_deployment"),
+            "status": "running",
+            "requested_by": current_user.email,
+            "input_refs": {
+                "model_version_id": model["id"],
+                "runtime_provider": request.runtime_provider,
+                "served_model_name": request.served_model_name or model.get("model_name"),
+                "base_url": request.base_url,
+                "artifact_uri": artifact_uri,
+                "artifact_hash": request.artifact_hash,
+                "notes": _append_note(request.notes, "Runtime deployment attempted during promotion."),
+            },
+        }
+    )
+    try:
+        result = execute_adapter_deployment(deployment_job)
+    except Exception as exc:
+        repository.update_learning_job_status(deployment_job["id"], "failed", error=str(exc))
+        raise ValueError(f"Adapter promotion requires a runtime-loaded deployment: {exc}") from exc
+    repository.update_learning_job_status(
+        deployment_job["id"],
+        "completed",
+        output_refs={
+            "deployment_id": result["deployment_id"],
+            "runtime_provider": result["runtime_provider"],
+            "served_model_name": result["served_model_name"],
+            "health_status": result["health_status"],
+        },
+    )
+    return _validated_runtime_deployment(model)
 
 
 def _validated_promotion_evaluation(evaluation_run_id: str, model_version_id: str) -> dict[str, Any]:
@@ -479,7 +527,7 @@ def _validated_promotion_evaluation(evaluation_run_id: str, model_version_id: st
     if not evaluation["passed"]:
         raise ValueError("Adapter promotion requires a passed evaluation run")
     if evaluation.get("model_version_id") != model_version_id:
-        raise ValueError("Evaluation run does not match the requested model version")
+        raise ValueError("Evaluation run does not match the requested adapter version")
     if not evaluation.get("dataset_id") or not repository.get_learning_dataset_snapshot(evaluation["dataset_id"]):
         raise ValueError("Promotion evaluation is missing a persisted dataset snapshot")
     if not evaluation.get("prompt_version_id") or not repository.get_learning_prompt_version(evaluation["prompt_version_id"]):
@@ -975,7 +1023,7 @@ def _validate_dataset_model_prompt(dataset_id: str, model_version_id: str, promp
         raise ValueError("Learning dataset not found")
     model_ids = {model["id"] for model in repository.list_learning_model_versions()}
     if model_version_id not in model_ids:
-        raise ValueError("Learning model version not found")
+        raise ValueError("Learning adapter version not found")
     prompt_ids = {prompt["id"] for prompt in repository.list_learning_prompt_versions()}
     if prompt_version_id not in prompt_ids:
         raise ValueError("Learning prompt version not found")

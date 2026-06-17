@@ -70,41 +70,16 @@ def draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> PmPlanD
 
 
 def stream_draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> Iterator[dict[str, Any]]:
-    context = _resolve_pm_context(request)
     llm_client = configured_llm_client()
     yield {"type": "meta", "provider": llm_client.provider_name, "used_live_provider": llm_client.provider_name in {"openai", "ollama"}}
-    if llm_client.provider_name not in {"openai", "ollama"}:
-        response = draft_plan(request, current_user)
-        yield {"type": "done", "response": response.model_dump(mode="json")}
-        return
-
-    chunks: list[str] = []
-    provider = llm_client.provider_name
-    used_live_provider = True
-    for chunk in llm_client.stream_text(
-        context["prompt"],
-        _morpheus_stream_system_prompt(),
-        lambda provider, reason: LLMTextResponse(content=reason, provider=provider, used_live_provider=False),
-        max_tokens=1200,
-    ):
-        provider = chunk.provider
-        used_live_provider = chunk.used_live_provider
-        if not chunk.used_live_provider:
-            fallback = _fallback_from_context(context, provider, chunk.content)
-            response = _store_pm_plan_response(context, request, current_user, fallback)
-            yield {"type": "token", "content": _stream_text_from_pm_draft(fallback), "provider": provider, "used_live_provider": False}
-            yield {"type": "done", "response": response.model_dump(mode="json")}
-            return
-        chunks.append(chunk.content)
-        yield {"type": "token", "content": chunk.content, "provider": provider, "used_live_provider": True}
-
-    streamed_answer = "".join(chunks).strip()
-    if streamed_answer:
-        draft = _draft_from_streamed_pm_answer(context, streamed_answer, provider, used_live_provider)
-    else:
-        draft = _fallback_from_context(context, provider, "stream returned no content")
-        yield {"type": "token", "content": _stream_text_from_pm_draft(draft), "provider": provider, "used_live_provider": False}
-    response = _store_pm_plan_response(context, request, current_user, draft)
+    response = draft_plan(request, current_user)
+    for chunk in _chunk_stream_text(_stream_text_from_saved_pm_plan(response.plan)):
+        yield {
+            "type": "token",
+            "content": chunk,
+            "provider": response.plan.provider,
+            "used_live_provider": response.plan.used_live_provider,
+        }
     yield {"type": "done", "response": response.model_dump(mode="json")}
 
 
@@ -142,6 +117,7 @@ def _store_pm_plan_response(
     equipment = context["equipment"]
     evidence = context["evidence"]
     prompt = context["prompt"]
+    draft = _sanitize_pm_draft(context, draft)
     plan_payload = _plan_payload(request.equipment_id, context["template"], draft, evidence)
     saved = repository.save_pm_plan(plan_payload)
     smith_steps = _smith_steps(PmPlan(**saved), equipment, evidence)
@@ -264,10 +240,11 @@ def _morpheus_system_prompt() -> str:
 def _morpheus_stream_system_prompt() -> str:
     return (
         "You are Morpheus, a reliability planning assistant for steel-plant preventive maintenance. "
-        "Stream a concise, readable PM plan in Markdown, not JSON. Use only the supplied SOP, manual, "
-        "history, risk prediction, spares, and feedback context. Use these sections: ### PM Plan, "
+        "Stream the final PM plan only in Markdown, not JSON. Use only the supplied SOP, manual, "
+        "history, risk prediction, spares, and feedback context. Use each section exactly once: ### PM Plan, "
         "### Trigger, ### Monitoring Thresholds, ### Generated Task List, ### Spares Strategy, and "
-        "### Adjustment Notes. Use short bullets and operational language. Do not mention JSON, schemas, "
+        "### Adjustment Notes. Keep each section to one or two short bullets, except PM Plan which is one title line. "
+        "Do not repeat headings, labels, bullet text, or metric names. Do not mention JSON, schemas, "
         "backend fields, table names, or row counts. Do not invent measurements, people, or parts."
     )
 
@@ -383,6 +360,83 @@ def _draft_from_streamed_pm_answer(
     )
 
 
+def _sanitize_pm_draft(context: dict[str, Any], draft: _PmPlanDraft) -> _PmPlanDraft:
+    equipment = context["equipment"]
+    template = context["template"]
+    prediction = context["prediction"]
+    feedback = context["feedback"]
+    events = context["events"]
+    spares = context["spares"]
+    fallback = _fallback_from_context(context, draft.provider, "live PM draft required cleanup")
+
+    title = _clean_pm_content_line(draft.title)
+    if _is_weak_pm_line(title):
+        title = f"{equipment['name']} proactive PM plan"
+
+    trigger_description = _clean_pm_content_line(draft.trigger.description)
+    if _is_weak_pm_line(trigger_description) or trigger_description.lower().startswith("convert from prediction"):
+        trigger_description = (template or {}).get("description") or fallback.trigger.description
+
+    thresholds = _clean_pm_list(
+        list(draft.thresholds),
+        fallback_items=list((template or {}).get("thresholds", []))[:6] or prediction.drivers[:3] or fallback.thresholds,
+        max_items=6,
+    )
+    task_texts = _clean_pm_list(
+        [task.task for task in draft.tasks],
+        fallback_items=list((template or {}).get("task_list", []))[:6] or [task.task for task in fallback.tasks],
+        max_items=6,
+    )
+    spares_strategy = _clean_pm_list(
+        draft.spares_strategy,
+        fallback_items=fallback.spares_strategy,
+        max_items=6,
+    )
+    adjustment_notes = _clean_pm_list(
+        draft.adjustment_notes,
+        fallback_items=_adjustment_notes(feedback, events) or fallback.adjustment_notes,
+        max_items=6,
+    )
+    adjustment_notes = [note for note in adjustment_notes if not _is_internal_pm_note(note)]
+    if not adjustment_notes:
+        adjustment_notes = _adjustment_notes(feedback, events) or [
+            "Review the generated PM scope against SOP/manual evidence before dispatch."
+        ]
+    metric_key, threshold_value, unit = _first_threshold_hint(thresholds)
+
+    return _PmPlanDraft(
+        title=_clip_pm_text(title, 120),
+        cadence_days=max(draft.cadence_days or fallback.cadence_days, 1),
+        next_due_days=max(draft.next_due_days or fallback.next_due_days, 1),
+        trigger=_PmTriggerDraft(
+            type=draft.trigger.type if draft.trigger.type in {"recurring", "condition", "risk_prediction"} else fallback.trigger.type,
+            metric_key=draft.trigger.metric_key or metric_key,
+            operator=draft.trigger.operator or (">=" if threshold_value is not None else None),
+            threshold=draft.trigger.threshold if draft.trigger.threshold is not None else threshold_value,
+            unit=draft.trigger.unit or unit,
+            description=_clip_pm_text(trigger_description, 240),
+        ),
+        thresholds=[_clip_pm_text(item, 240) for item in thresholds],
+        tasks=[
+            _PmTaskDraft(
+                task=_clip_pm_text(task, 240),
+                owner_role="Maintenance Technician",
+                estimated_minutes=max(15, draft.tasks[index].estimated_minutes if index < len(draft.tasks) else 30 + index * 10),
+                safety_note=(
+                    draft.tasks[index].safety_note
+                    if index < len(draft.tasks) and draft.tasks[index].safety_note
+                    else ("Follow LOTO and area access controls before inspection." if index == 0 else None)
+                ),
+            )
+            for index, task in enumerate(task_texts)
+        ],
+        spares_strategy=[_clip_pm_text(item, 240) for item in spares_strategy],
+        adjustment_notes=[_clip_pm_text(item, 240) for item in adjustment_notes],
+        used_live_provider=draft.used_live_provider,
+        provider=draft.provider,
+    )
+
+
 def _stream_text_from_pm_draft(draft: _PmPlanDraft) -> str:
     return "\n".join(
         [
@@ -406,6 +460,36 @@ def _stream_text_from_pm_draft(draft: _PmPlanDraft) -> str:
             "",
         ]
     )
+
+
+def _stream_text_from_saved_pm_plan(plan: PmPlan) -> str:
+    return "\n".join(
+        [
+            "### PM Plan",
+            plan.title,
+            "",
+            "### Trigger",
+            f"- {plan.trigger.description}",
+            "",
+            "### Monitoring Thresholds",
+            *[f"- {item}" for item in plan.thresholds],
+            "",
+            "### Generated Task List",
+            *[f"- {item.task}" for item in plan.tasks],
+            "",
+            "### Spares Strategy",
+            *[f"- {item}" for item in plan.spares_strategy],
+            "",
+            "### Adjustment Notes",
+            *[f"- {item}" for item in plan.adjustment_notes],
+            "",
+        ]
+    )
+
+
+def _chunk_stream_text(content: str, chunk_size: int = 320) -> Iterator[str]:
+    for index in range(0, len(content), chunk_size):
+        yield content[index : index + chunk_size]
 
 
 def _fallback_pm_plan(provider, reason, equipment, template, prediction, evidence, feedback, events, spares) -> _PmPlanDraft:
@@ -452,7 +536,7 @@ def _fallback_pm_plan(provider, reason, equipment, template, prediction, evidenc
             for item in spares[:3]
         ],
         adjustment_notes=adjustment_notes
-        or [f"Deterministic PM plan used because {reason}; review against SOP/manual before dispatch."],
+        or ["Review the generated PM scope against SOP/manual evidence before dispatch."],
         used_live_provider=False,
         provider=provider,
     )
@@ -628,6 +712,65 @@ def _clean_pm_markdown_line(value: str) -> str:
         cleaned = cleaned[3:].strip()
     cleaned = cleaned.replace("**", "").replace("__", "").strip()
     return cleaned
+
+
+def _clean_pm_content_line(value: str) -> str:
+    cleaned = _clean_pm_markdown_line(value)
+    cleaned = cleaned.lstrip("#").strip()
+    cleaned = cleaned.rstrip(":").strip()
+    for prefix in ("trigger:", "thresholds:", "monitoring thresholds:"):
+        if cleaned.lower().startswith(prefix):
+            cleaned = cleaned[len(prefix):].strip()
+    return cleaned
+
+
+def _clean_pm_list(items: list[str], fallback_items: list[str], max_items: int) -> list[str]:
+    cleaned: list[str] = []
+    seen = set()
+    for item in [*items, *fallback_items]:
+        line = _clean_pm_content_line(str(item))
+        if _is_weak_pm_line(line):
+            continue
+        key = _normalize_pm_list_key(line)
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(line)
+        if len(cleaned) >= max_items:
+            break
+    return cleaned
+
+
+def _is_weak_pm_line(value: str) -> bool:
+    normalized = _normalize_pm_heading(value)
+    return not normalized or normalized in {
+        "hydraulictemperature",
+        "hydraulicoiltemperature",
+        "hydraulictemperatureandpulsation",
+        "pmplan",
+        "trigger",
+        "threshold",
+        "thresholds",
+        "monitoringthresholds",
+        "generatedtasklist",
+        "tasklist",
+        "tasks",
+        "sparesstrategy",
+        "adjustmentnotes",
+    }
+
+
+def _normalize_pm_list_key(value: str) -> str:
+    normalized = _normalize_pm_heading(value)
+    for suffix in ("threshold", "thresholds", "pm", "inspection"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)]
+    return normalized
+
+
+def _is_internal_pm_note(value: str) -> bool:
+    lowered = value.lower()
+    return any(term in lowered for term in ["json", "parser", "parse", "unterminated", "openai call failed", "live pm draft required cleanup"])
 
 
 def _clip_pm_text(value: str, limit: int) -> str:

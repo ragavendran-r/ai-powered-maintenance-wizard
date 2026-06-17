@@ -223,7 +223,7 @@ export function WorkOrdersRoute({
                         <Bot size={18} />
                         <div>
                           <h2>{technicianAssistantName}</h2>
-                          <small>Technician AI assistant with shared LLM configuration</small>
+                          <small>Prioritized work list with short summary and next recommendation</small>
                         </div>
                       </div>
                       <div ref={technicianTranscriptRef} className="assistantTranscript" aria-label={`${technicianAssistantName} technician chat`}>
@@ -269,7 +269,7 @@ export function WorkOrdersRoute({
                         <Bot size={18} />
                         <div>
                           <h2>{supervisorAssistantName}</h2>
-                          <small>Supervisor AI assistant with shared LLM configuration</small>
+                          <small>Prioritized work list with short summary and next recommendation</small>
                         </div>
                       </div>
                       <div ref={supervisorTranscriptRef} className="assistantTranscript" aria-label={`${supervisorAssistantName} supervisor chat`}>

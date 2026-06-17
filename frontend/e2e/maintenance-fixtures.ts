@@ -673,7 +673,7 @@ const learningSummary: LearningSummary = {
     provider: 'openai',
     openai_model: 'qwen2.5-7b-instruct',
     ollama_model: 'qwen2.5-7b-instruct',
-    openai_base_url: 'http://localhost:1234/v1',
+    openai_base_url: 'http://127.0.0.1:8080/v1',
     ollama_base_url: 'http://localhost:11434',
     source: 'learning_active_model',
     active_model_version_id: 'model-local-qwen',
