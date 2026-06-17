@@ -1424,24 +1424,6 @@ h3 {
   width: 100%;
 }
 
-.latestDatasetDownload {
-  align-items: center;
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-border-soft-alt);
-  border-radius: 8px;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  padding: 10px 12px;
-}
-
-.latestDatasetDownload small {
-  color: var(--color-text-muted);
-  display: block;
-  font-weight: 700;
-  margin-top: 2px;
-}
-
 .learningStats {
   display: grid;
   gap: 10px;
@@ -1645,6 +1627,22 @@ h3 {
   min-width: 0;
 }
 
+.learningSnapshotRow {
+  align-items: stretch;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
+  min-width: 0;
+}
+
+.learningSnapshotPanel {
+  align-content: start;
+}
+
+.learningGridFull {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .learningPanel {
   align-content: start;
   border: 1px solid var(--color-border-soft-alt);
@@ -1657,6 +1655,129 @@ h3 {
 
 .learningPanel h3 {
   margin: 0;
+}
+
+.learningExamplesTableWrap {
+  min-width: 0;
+  overflow-x: auto;
+  width: 100%;
+}
+
+.learningExamplesTable {
+  border-collapse: collapse;
+  color: var(--color-text);
+  font-size: var(--content-font-size);
+  line-height: var(--content-line-height);
+  min-width: 920px;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.learningExamplesTable th:nth-child(1),
+.learningExamplesTable td:nth-child(1) {
+  width: 19%;
+}
+
+.learningExamplesTable th:nth-child(2),
+.learningExamplesTable td:nth-child(2) {
+  width: 13%;
+}
+
+.learningExamplesTable th:nth-child(3),
+.learningExamplesTable td:nth-child(3) {
+  width: 13%;
+}
+
+.learningExamplesTable th:nth-child(4),
+.learningExamplesTable td:nth-child(4) {
+  width: 7%;
+}
+
+.learningExamplesTable th:nth-child(5),
+.learningExamplesTable td:nth-child(5) {
+  width: auto;
+}
+
+.learningExamplesTable th:nth-child(6),
+.learningExamplesTable td:nth-child(6) {
+  width: 26%;
+}
+
+.learningExamplesTable th,
+.learningExamplesTable td {
+  border-top: 1px solid var(--color-border-soft-alt);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.learningExamplesTable th {
+  color: var(--color-text-muted);
+  font-size: var(--content-font-size);
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.learningExamplesTable td strong {
+  color: var(--color-text);
+  font-weight: 800;
+}
+
+.learningExamplesTable td small {
+  color: var(--color-text-muted);
+  display: block;
+  font-weight: 700;
+  margin-top: 3px;
+}
+
+.learningExampleSummaryCell {
+  color: var(--color-text);
+  font-weight: 400;
+  line-height: var(--content-line-height);
+  overflow-wrap: anywhere;
+}
+
+.inlineStatusBadge {
+  background: var(--state-success-bg);
+  border-radius: 999px;
+  color: var(--state-success-text) !important;
+  display: inline-flex !important;
+  font-size: 0.72rem;
+  font-weight: 800;
+  margin-left: 8px;
+  margin-top: 0 !important;
+  padding: 3px 7px;
+  vertical-align: middle;
+}
+
+.approvalBadge {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 5px 9px;
+}
+
+.approvalBadge.approved {
+  background: var(--state-success-bg);
+  color: var(--state-success-text);
+}
+
+.approvalBadge.review {
+  background: var(--state-warning-bg-muted);
+  color: var(--state-warning-text-strong);
+}
+
+.tableActionGroup {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tableActionGroup button {
+  min-height: 32px;
 }
 
 .learningExamples,
@@ -2045,6 +2166,54 @@ h3 {
   max-width: 420px;
   padding: 20px;
   width: min(100%, 420px);
+}
+
+.learningExampleDialog {
+  max-height: min(88vh, 820px);
+  max-width: 840px;
+  overflow-y: auto;
+  width: min(100%, 840px);
+}
+
+.learningExampleDialog h3 {
+  margin: 0;
+}
+
+.learningExampleDetailGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.learningExampleDetailGrid span,
+.learningExampleDetailBlock {
+  border: 1px solid var(--color-border-soft-alt);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.learningExampleDetailGrid small {
+  color: var(--color-text-muted);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.learningExampleDetailBlock h4 {
+  margin: 0;
+}
+
+.learningExampleDetailBlock p,
+.learningExampleDetailBlock blockquote {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.learningExampleDetailBlock blockquote {
+  border-left: 4px solid var(--color-brand-border);
+  color: var(--color-text-evidence);
+  padding-left: 10px;
 }
 
 .workOrderReviewDialog {
@@ -4322,6 +4491,7 @@ h3 {
   .ingestionGrid,
   .jsonIngest,
   .learningToolbar,
+  .learningSnapshotRow,
   .learningStats,
   .learningGrid,
   .vectorStoreFacts,
