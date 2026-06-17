@@ -1477,6 +1477,7 @@ def list_learning_examples(
     equipment_id: Optional[str] = None,
     min_judge_score: Optional[float] = None,
     limit: int = 100,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -1490,17 +1491,38 @@ def list_learning_examples(
         clauses.append("judge_score >= ?")
         params.append(min_judge_score)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    params.append(limit)
+    params.extend([limit, offset])
     rows = _fetch_all(
         f"""
         SELECT * FROM learning_examples
         {where}
         ORDER BY approved DESC, created_at DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
         tuple(params),
     )
     return [_decode_learning_example(row) for row in rows]
+
+
+def count_learning_examples(
+    approved_only: Optional[bool] = None,
+    equipment_id: Optional[str] = None,
+    min_judge_score: Optional[float] = None,
+) -> int:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if approved_only is not None:
+        clauses.append("approved = ?")
+        params.append(1 if approved_only else 0)
+    if equipment_id:
+        clauses.append("equipment_id = ?")
+        params.append(equipment_id)
+    if min_judge_score is not None:
+        clauses.append("judge_score >= ?")
+        params.append(min_judge_score)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    row = _fetch_one(f"SELECT COUNT(*) AS count FROM learning_examples {where}", tuple(params))
+    return int(row["count"]) if row else 0
 
 
 def set_learning_example_approval(example_id: str, approved: bool) -> Optional[dict[str, Any]]:
@@ -1821,16 +1843,21 @@ def get_learning_evaluation_run(run_id: str) -> Optional[dict[str, Any]]:
     return _decode_learning_evaluation(row) if row else None
 
 
-def list_learning_evaluation_runs(limit: int = 20) -> list[dict[str, Any]]:
+def list_learning_evaluation_runs(limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
     rows = _fetch_all(
         """
         SELECT * FROM learning_evaluation_runs
         ORDER BY created_at DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        (limit,),
+        (limit, offset),
     )
     return [_decode_learning_evaluation(row) for row in rows]
+
+
+def count_learning_evaluation_runs() -> int:
+    row = _fetch_one("SELECT COUNT(*) AS count FROM learning_evaluation_runs")
+    return int(row["count"]) if row else 0
 
 
 def save_learning_model_promotion(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1875,15 +1902,20 @@ def get_learning_model_promotion(promotion_id: str) -> Optional[dict[str, Any]]:
     return dict(row) if row else None
 
 
-def list_learning_model_promotions(limit: int = 20) -> list[dict[str, Any]]:
+def list_learning_model_promotions(limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
     return _fetch_all(
         """
         SELECT * FROM learning_model_promotions
         ORDER BY created_at DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        (limit,),
+        (limit, offset),
     )
+
+
+def count_learning_model_promotions() -> int:
+    row = _fetch_one("SELECT COUNT(*) AS count FROM learning_model_promotions")
+    return int(row["count"]) if row else 0
 
 
 def save_learning_model_deployment(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1957,6 +1989,7 @@ def list_learning_model_deployments(
     *,
     model_version_id: Optional[str] = None,
     limit: int = 20,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     if model_version_id:
         rows = _fetch_all(
@@ -1964,20 +1997,28 @@ def list_learning_model_deployments(
             SELECT * FROM learning_model_deployments
             WHERE model_version_id = ?
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (model_version_id, limit),
+            (model_version_id, limit, offset),
         )
     else:
         rows = _fetch_all(
             """
             SELECT * FROM learning_model_deployments
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (limit,),
+            (limit, offset),
         )
     return [_decode_learning_model_deployment(row) for row in rows]
+
+
+def count_learning_model_deployments(model_version_id: Optional[str] = None) -> int:
+    if model_version_id:
+        row = _fetch_one("SELECT COUNT(*) AS count FROM learning_model_deployments WHERE model_version_id = ?", (model_version_id,))
+    else:
+        row = _fetch_one("SELECT COUNT(*) AS count FROM learning_model_deployments")
+    return int(row["count"]) if row else 0
 
 
 def get_verified_learning_model_deployment(model_version_id: str) -> Optional[dict[str, Any]]:
@@ -2087,27 +2128,35 @@ def get_learning_job(job_id: str) -> Optional[dict[str, Any]]:
     return _decode_learning_job(row) if row else None
 
 
-def list_learning_jobs(limit: int = 20, status: Optional[str] = None) -> list[dict[str, Any]]:
+def list_learning_jobs(limit: int = 20, status: Optional[str] = None, offset: int = 0) -> list[dict[str, Any]]:
     if status:
         rows = _fetch_all(
             """
             SELECT * FROM learning_jobs
             WHERE status = ?
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (status, limit),
+            (status, limit, offset),
         )
     else:
         rows = _fetch_all(
             """
             SELECT * FROM learning_jobs
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (limit,),
+            (limit, offset),
         )
     return [_decode_learning_job(row) for row in rows]
+
+
+def count_learning_jobs(status: Optional[str] = None) -> int:
+    if status:
+        row = _fetch_one("SELECT COUNT(*) AS count FROM learning_jobs WHERE status = ?", (status,))
+    else:
+        row = _fetch_one("SELECT COUNT(*) AS count FROM learning_jobs")
+    return int(row["count"]) if row else 0
 
 
 def save_learning_artifact(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2152,27 +2201,35 @@ def get_learning_artifact(artifact_id: str) -> Optional[dict[str, Any]]:
     return _decode_learning_artifact(row) if row else None
 
 
-def list_learning_artifacts(job_id: Optional[str] = None, limit: int = 20) -> list[dict[str, Any]]:
+def list_learning_artifacts(job_id: Optional[str] = None, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
     if job_id:
         rows = _fetch_all(
             """
             SELECT * FROM learning_artifacts
             WHERE job_id = ?
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (job_id, limit),
+            (job_id, limit, offset),
         )
     else:
         rows = _fetch_all(
             """
             SELECT * FROM learning_artifacts
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (limit,),
+            (limit, offset),
         )
     return [_decode_learning_artifact(row) for row in rows]
+
+
+def count_learning_artifacts(job_id: Optional[str] = None) -> int:
+    if job_id:
+        row = _fetch_one("SELECT COUNT(*) AS count FROM learning_artifacts WHERE job_id = ?", (job_id,))
+    else:
+        row = _fetch_one("SELECT COUNT(*) AS count FROM learning_artifacts")
+    return int(row["count"]) if row else 0
 
 
 def learning_counts() -> dict[str, int]:

@@ -1514,6 +1514,11 @@ beforeEach(() => {
         const response = new Response(JSON.stringify(learningRefreshExamples), { status: 200 })
         return learningRefreshDelayMs > 0 ? delayedResponse(response, init, learningRefreshDelayMs) : Promise.resolve(response)
       }
+      if (url.includes('/api/learning/examples/page')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: [learningExample], total: 1, limit: 10, offset: 0 }), { status: 200 }),
+        )
+      }
       if (url.includes('/api/learning/examples/') && url.endsWith('/judge')) {
         const response = new Response(
           JSON.stringify({
@@ -1531,6 +1536,13 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/learning/examples')) {
         return Promise.resolve(new Response(JSON.stringify([learningExample]), { status: 200 }))
+      }
+      if (url.includes('/api/learning/model-deployments/page')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: learningDeploymentResponses, total: learningDeploymentResponses.length, limit: 10, offset: 0 }), {
+            status: 200,
+          }),
+        )
       }
       if (url.endsWith('/api/learning/model-deployments')) {
         return Promise.resolve(new Response(JSON.stringify(learningDeploymentResponses), { status: 200 }))
@@ -1598,8 +1610,18 @@ beforeEach(() => {
           new Response(JSON.stringify({ ...learningPromotion, id: 'LPROMO-ROLLBACK-1', action: 'rollback' }), { status: 200 }),
         )
       }
+      if (url.includes('/api/learning/model-promotions/page')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: [learningPromotion], total: 1, limit: 10, offset: 0 }), { status: 200 }),
+        )
+      }
       if (url.endsWith('/api/learning/model-promotions')) {
         return Promise.resolve(new Response(JSON.stringify([learningPromotion]), { status: 200 }))
+      }
+      if (url.includes('/api/learning/evaluations/page')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: [learningEvaluation], total: 1, limit: 10, offset: 0 }), { status: 200 }),
+        )
       }
       if (url.endsWith('/api/learning/evaluations')) {
         if (init?.method === 'POST') {
@@ -1729,6 +1751,16 @@ beforeEach(() => {
             }),
             { status: 200 },
           ),
+        )
+      }
+      if (url.includes('/api/learning/jobs/page')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: [learningJob], total: 1, limit: 10, offset: 0 }), { status: 200 }),
+        )
+      }
+      if (url.includes('/api/learning/artifacts/page')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: [learningArtifact], total: 1, limit: 10, offset: 0 }), { status: 200 }),
         )
       }
       if (url.endsWith('/api/learning/jobs')) {
@@ -3073,10 +3105,11 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Passed')).toBeInTheDocument()
     expect(screen.getByText('Quality')).toBeInTheDocument()
     expect(screen.getByText('dataset snapshot')).toBeInTheDocument()
-    expect(screen.getByText(/completed ·/)).toBeInTheDocument()
-    expect(screen.getByText('Training adapter candidate registered')).toBeInTheDocument()
-    expect(screen.getByText('Registered model model-adapter-candidate')).toBeInTheDocument()
-    expect(screen.getByText('Adapter output backend/data/learning_adapters/LJOB-1/adapter')).toBeInTheDocument()
+    const initialJobTrailTable = screen.getByRole('table', { name: 'Learning job trail' })
+    expect(within(initialJobTrailTable).getByText('completed')).toBeInTheDocument()
+    expect(within(initialJobTrailTable).getByText('Training adapter candidate registered')).toBeInTheDocument()
+    expect(within(initialJobTrailTable).getByText('Registered model model-adapter-candidate')).toBeInTheDocument()
+    expect(within(initialJobTrailTable).getByText('Adapter output backend/data/learning_adapters/LJOB-1/adapter')).toBeInTheDocument()
     expect(screen.getByText('peft training manifest')).toBeInTheDocument()
     expect(screen.getByText('artifact://learning/LJOB-1/training_manifest.json')).toBeInTheDocument()
     expect(screen.getByText('sha256 abcdef123456')).toBeInTheDocument()
@@ -3086,8 +3119,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByText(/Promotion recorded as LPROMO-1/)).toBeInTheDocument()
     expect(screen.getByText(/Verified deployment qwen2\.5-7b-instruct-lora-candidate · openai/)).toBeInTheDocument()
     expect(screen.getByText('Adapter Runtime Deployments')).toBeInTheDocument()
-    expect(screen.getByText('verified')).toBeInTheDocument()
-    expect(screen.getByText('health healthy')).toBeInTheDocument()
+    const initialDeploymentTable = screen.getByRole('table', { name: 'Adapter runtime deployments' })
+    expect(within(initialDeploymentTable).getByText('verified')).toBeInTheDocument()
+    expect(within(initialDeploymentTable).getByText('healthy')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Preview cleanup' }))
     expect(await screen.findByText('Artifact cleanup preview found 1 eligible and 1 protected artifact(s).')).toBeInTheDocument()
@@ -3114,14 +3148,36 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getAllByRole('button', { name: 'Download JSONL' }).length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('tab', { name: 'Adapter lifecycle' }))
+    const lifecycleHeadings = [
+      'Dataset Validation',
+      'PEFT Tuning Job',
+      'Learning Job Trail',
+      'Learning Artifacts',
+      'Model and Prompt Versions',
+      'Adapter Runtime Deployments',
+      'Promotion Audit',
+      'Manual Adapter Candidate',
+    ].map((name) => screen.getByRole('heading', { name }))
+    lifecycleHeadings.slice(0, -1).forEach((heading, index) => {
+      expect(Boolean(heading.compareDocumentPosition(lifecycleHeadings[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    })
+    const validationButton = screen.getByRole('button', { name: 'Run dataset validation' })
+    const peftQueueButton = screen.getByRole('button', { name: 'Queue PEFT tuning job' })
+    expect(Boolean(validationButton.compareDocumentPosition(peftQueueButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(screen.getByRole('table', { name: 'Dataset validation runs' })).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'Learning job trail' })).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'Learning artifacts' })).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'Adapter runtime deployments' })).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'Promotion audit' })).toBeInTheDocument()
+
     fireEvent.change(screen.getByLabelText('Adapter path'), { target: { value: 'file:///models/qwen2.5-lora' } })
     fireEvent.click(screen.getByRole('button', { name: 'Register adapter' }))
     expect(await screen.findByText('Registered adapter candidate qwen2.5-7b-instruct-lora-candidate')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Run dataset evaluation' }))
+    fireEvent.click(validationButton)
     expect(await screen.findByText('Evaluation passed with quality 0.81')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Queue PEFT tuning job' }))
+    fireEvent.click(peftQueueButton)
     expect(await screen.findByText('Queued PEFT tuning job LJOB-PEFT-1 with status queued')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Runtime provider'), { target: { value: 'vllm' } })
@@ -3129,7 +3185,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deploy adapter' }))
     expect(await screen.findByText('Deployment job LJOB-DEPLOY-1 requested with status queued')).toBeInTheDocument()
     expect(await screen.findByText('deploying')).toBeInTheDocument()
-    expect(screen.getByText('health pending')).toBeInTheDocument()
+    expect(within(screen.getByRole('table', { name: 'Adapter runtime deployments' })).getByText('pending')).toBeInTheDocument()
     const deployCall = [...vi.mocked(fetch).mock.calls]
       .reverse()
       .find(([url]) => url.toString().endsWith('/api/learning/model-versions/model-adapter-candidate/deploy'))

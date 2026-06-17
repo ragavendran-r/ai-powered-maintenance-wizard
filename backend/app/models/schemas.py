@@ -1145,6 +1145,48 @@ class LearningSummary(BaseModel):
     vector_store: dict[str, Any] = Field(default_factory=dict)
 
 
+class LearningExamplePage(BaseModel):
+    items: list[LearningExample] = []
+    total: int
+    limit: int
+    offset: int
+
+
+class LearningEvaluationRunPage(BaseModel):
+    items: list[LearningEvaluationRun] = []
+    total: int
+    limit: int
+    offset: int
+
+
+class LearningJobPage(BaseModel):
+    items: list[LearningJob] = []
+    total: int
+    limit: int
+    offset: int
+
+
+class LearningArtifactPage(BaseModel):
+    items: list[LearningArtifact] = []
+    total: int
+    limit: int
+    offset: int
+
+
+class LearningModelDeploymentPage(BaseModel):
+    items: list[LearningModelDeployment] = []
+    total: int
+    limit: int
+    offset: int
+
+
+class LearningModelPromotionPage(BaseModel):
+    items: list[LearningModelPromotion] = []
+    total: int
+    limit: int
+    offset: int
+
+
 class AnomalyContext(BaseModel):
     equipment_id: str
     signal: str

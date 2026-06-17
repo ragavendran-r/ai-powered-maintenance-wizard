@@ -1663,7 +1663,8 @@ h3 {
   width: 100%;
 }
 
-.learningExamplesTable {
+.learningExamplesTable,
+.lifecycleTable {
   border-collapse: collapse;
   color: var(--color-text);
   font-size: var(--content-font-size);
@@ -1680,7 +1681,12 @@ h3 {
 
 .learningExamplesTable th:nth-child(2),
 .learningExamplesTable td:nth-child(2) {
+  text-align: center;
   width: 13%;
+}
+
+.learningExamplesTable td:nth-child(2) .judgeBadge {
+  justify-content: center;
 }
 
 .learningExamplesTable th:nth-child(3),
@@ -1704,14 +1710,17 @@ h3 {
 }
 
 .learningExamplesTable th,
-.learningExamplesTable td {
+.learningExamplesTable td,
+.lifecycleTable th,
+.lifecycleTable td {
   border-top: 1px solid var(--color-border-soft-alt);
   padding: 10px 12px;
   text-align: left;
   vertical-align: top;
 }
 
-.learningExamplesTable th {
+.learningExamplesTable th,
+.lifecycleTable th {
   color: var(--color-text-muted);
   font-size: var(--content-font-size);
   font-weight: 800;
@@ -1719,16 +1728,126 @@ h3 {
   text-transform: uppercase;
 }
 
-.learningExamplesTable td strong {
+.learningExamplesTable td strong,
+.lifecycleTable td strong {
   color: var(--color-text);
   font-weight: 800;
 }
 
-.learningExamplesTable td small {
+.learningExamplesTable td small,
+.lifecycleTable td small {
   color: var(--color-text-muted);
   display: block;
+  font-size: var(--content-font-size);
   font-weight: 700;
+  line-height: var(--content-line-height);
   margin-top: 3px;
+}
+
+.lifecycleTable {
+  min-width: 880px;
+}
+
+.lifecycleJobTable th:nth-child(1),
+.lifecycleJobTable td:nth-child(1) {
+  width: 16%;
+}
+
+.lifecycleJobTable th:nth-child(2),
+.lifecycleJobTable td:nth-child(2) {
+  width: 10%;
+}
+
+.lifecycleJobTable th:nth-child(3),
+.lifecycleJobTable td:nth-child(3) {
+  width: 24%;
+}
+
+.lifecycleJobTable th:nth-child(4),
+.lifecycleJobTable td:nth-child(4) {
+  width: 14%;
+}
+
+.lifecycleEvaluationTable th:nth-child(1),
+.lifecycleEvaluationTable td:nth-child(1),
+.lifecycleDeploymentTable th:nth-child(3),
+.lifecycleDeploymentTable td:nth-child(3),
+.lifecycleDeploymentTable th:nth-child(4),
+.lifecycleDeploymentTable td:nth-child(4) {
+  width: 12%;
+}
+
+.lifecycleEvaluationTable th:nth-child(2),
+.lifecycleEvaluationTable td:nth-child(2) {
+  width: 16%;
+}
+
+.lifecycleEvaluationTable th:nth-child(3),
+.lifecycleEvaluationTable td:nth-child(3),
+.lifecycleEvaluationTable th:nth-child(4),
+.lifecycleEvaluationTable td:nth-child(4) {
+  width: 10%;
+}
+
+.lifecycleArtifactTable th:nth-child(1),
+.lifecycleArtifactTable td:nth-child(1),
+.lifecycleArtifactTable th:nth-child(2),
+.lifecycleArtifactTable td:nth-child(2) {
+  width: 17%;
+}
+
+.lifecycleArtifactTable th:nth-child(3),
+.lifecycleArtifactTable td:nth-child(3),
+.lifecycleArtifactTable th:nth-child(5),
+.lifecycleArtifactTable td:nth-child(5) {
+  width: 14%;
+}
+
+.lifecycleDeploymentTable th:nth-child(1),
+.lifecycleDeploymentTable td:nth-child(1) {
+  width: 22%;
+}
+
+.lifecycleDeploymentTable th:nth-child(2),
+.lifecycleDeploymentTable td:nth-child(2),
+.lifecycleDeploymentTable th:nth-child(5),
+.lifecycleDeploymentTable td:nth-child(5) {
+  width: 16%;
+}
+
+.lifecyclePromotionTable th:nth-child(1),
+.lifecyclePromotionTable td:nth-child(1),
+.lifecyclePromotionTable th:nth-child(4),
+.lifecyclePromotionTable td:nth-child(4) {
+  width: 16%;
+}
+
+.lifecyclePromotionTable th:nth-child(2),
+.lifecyclePromotionTable td:nth-child(2),
+.lifecyclePromotionTable th:nth-child(3),
+.lifecyclePromotionTable td:nth-child(3) {
+  width: 22%;
+}
+
+.tablePagination {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: var(--content-font-size);
+  font-weight: 700;
+  gap: 10px;
+  justify-content: space-between;
+  line-height: var(--content-line-height);
+  padding-top: 8px;
+}
+
+.tablePagination > div {
+  display: flex;
+  gap: 6px;
+}
+
+.tablePagination button {
+  min-height: 30px;
 }
 
 .learningExampleSummaryCell {
@@ -1792,6 +1911,7 @@ h3 {
   display: grid;
   gap: 10px;
   min-width: 0;
+  overflow-x: auto;
 }
 
 .learningExample,
@@ -1859,6 +1979,7 @@ h3 {
 
 .judgeBadge {
   border-radius: 999px;
+  display: inline-flex;
   font-size: 0.78rem;
   font-weight: 800;
   padding: 5px 9px;

@@ -39,16 +39,22 @@ from app.models.schemas import (
     LearningDatasetCreateRequest,
     LearningDatasetSnapshot,
     LearningEvaluationCreateRequest,
+    LearningEvaluationRunPage,
     LearningEvaluationRun,
     LearningExample,
+    LearningExamplePage,
     LearningExampleUpdateRequest,
     LearningArtifact,
     LearningArtifactCleanupRequest,
     LearningArtifactCleanupResult,
+    LearningArtifactPage,
     LearningJob,
+    LearningJobPage,
     LearningModelPromotion,
     LearningModelDeployment,
+    LearningModelDeploymentPage,
     LearningModelDeploymentCreateRequest,
+    LearningModelPromotionPage,
     LearningModelPromotionRequest,
     LearningModelRollbackRequest,
     LearningModelVersion,
@@ -1030,6 +1036,24 @@ def list_learning_dataset_examples(approved_only: Optional[bool] = None):
     return repository.list_learning_examples(approved_only=approved_only, limit=200)
 
 
+@app.get(
+    "/api/learning/examples/page",
+    response_model=LearningExamplePage,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_dataset_examples_page(
+    approved_only: Optional[bool] = None,
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    return {
+        "items": repository.list_learning_examples(approved_only=approved_only, limit=limit, offset=offset),
+        "total": repository.count_learning_examples(approved_only=approved_only),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 @app.patch(
     "/api/learning/examples/{example_id}",
     response_model=LearningExample,
@@ -1102,6 +1126,24 @@ def learning_dataset_jsonl(dataset_id: str):
 )
 def list_learning_artifacts():
     return repository.list_learning_artifacts(limit=100)
+
+
+@app.get(
+    "/api/learning/artifacts/page",
+    response_model=LearningArtifactPage,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_artifacts_page(
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    job_id: Optional[str] = None,
+):
+    return {
+        "items": repository.list_learning_artifacts(job_id=job_id, limit=limit, offset=offset),
+        "total": repository.count_learning_artifacts(job_id=job_id),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @app.post(
@@ -1188,12 +1230,47 @@ def list_learning_model_promotions():
 
 
 @app.get(
+    "/api/learning/model-promotions/page",
+    response_model=LearningModelPromotionPage,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_model_promotions_page(
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    return {
+        "items": repository.list_learning_model_promotions(limit=limit, offset=offset),
+        "total": repository.count_learning_model_promotions(),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get(
     "/api/learning/model-deployments",
     response_model=list[LearningModelDeployment],
     dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
 )
 def list_learning_model_deployments():
     return repository.list_learning_model_deployments(limit=50)
+
+
+@app.get(
+    "/api/learning/model-deployments/page",
+    response_model=LearningModelDeploymentPage,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_model_deployments_page(
+    model_version_id: Optional[str] = None,
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    return {
+        "items": repository.list_learning_model_deployments(model_version_id=model_version_id, limit=limit, offset=offset),
+        "total": repository.count_learning_model_deployments(model_version_id=model_version_id),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @app.post(
@@ -1237,12 +1314,47 @@ def list_learning_evaluations():
 
 
 @app.get(
+    "/api/learning/evaluations/page",
+    response_model=LearningEvaluationRunPage,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_evaluations_page(
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    return {
+        "items": repository.list_learning_evaluation_runs(limit=limit, offset=offset),
+        "total": repository.count_learning_evaluation_runs(),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get(
     "/api/learning/jobs",
     response_model=list[LearningJob],
     dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
 )
 def list_learning_jobs():
     return repository.list_learning_jobs(limit=50)
+
+
+@app.get(
+    "/api/learning/jobs/page",
+    response_model=LearningJobPage,
+    dependencies=[Depends(require_roles(*LEARNING_REVIEW_ROLES))],
+)
+def list_learning_jobs_page(
+    status: Optional[str] = None,
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    return {
+        "items": repository.list_learning_jobs(status=status, limit=limit, offset=offset),
+        "total": repository.count_learning_jobs(status=status),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @app.get(

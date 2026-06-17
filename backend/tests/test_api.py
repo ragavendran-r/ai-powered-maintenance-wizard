@@ -2006,6 +2006,8 @@ def test_rag_reindex_syncs_approved_learning_examples(monkeypatch):
 def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
     monkeypatch.setenv("LEARNING_ARTIFACT_RETENTION_DAYS", "0")
     monkeypatch.setenv("LEARNING_ARTIFACT_CLEANUP_ENABLED", "false")
+    monkeypatch.setenv("LEARNING_PEFT_TRAINER_COMMAND", "")
+    get_settings.cache_clear()
     operator_response = client.get("/api/learning/summary", headers=auth_headers("operator@plant.local"))
     assert operator_response.status_code == 403
     reliability_response = client.get("/api/learning/summary", headers=auth_headers("reliability@plant.local"))
@@ -2226,6 +2228,36 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
     jobs = jobs_response.json()
     assert any(job["id"] == peft_job["id"] for job in jobs)
     assert any(job["job_type"] == "dataset_snapshot" and job["status"] == "completed" for job in jobs)
+
+    paged_examples = client.get("/api/learning/examples/page?limit=1&offset=0", headers=headers)
+    assert paged_examples.status_code == 200
+    assert paged_examples.json()["total"] >= 1
+    assert len(paged_examples.json()["items"]) == 1
+
+    paged_evaluations = client.get("/api/learning/evaluations/page?limit=1&offset=0", headers=headers)
+    assert paged_evaluations.status_code == 200
+    assert paged_evaluations.json()["total"] >= 1
+    assert len(paged_evaluations.json()["items"]) == 1
+
+    paged_jobs = client.get("/api/learning/jobs/page?limit=1&offset=0", headers=headers)
+    assert paged_jobs.status_code == 200
+    assert paged_jobs.json()["total"] >= 1
+    assert len(paged_jobs.json()["items"]) == 1
+
+    paged_deployments = client.get("/api/learning/model-deployments/page?limit=1&offset=0", headers=headers)
+    assert paged_deployments.status_code == 200
+    assert paged_deployments.json()["total"] >= 1
+    assert len(paged_deployments.json()["items"]) == 1
+
+    paged_promotions = client.get("/api/learning/model-promotions/page?limit=1&offset=0", headers=headers)
+    assert paged_promotions.status_code == 200
+    assert paged_promotions.json()["total"] >= 1
+    assert len(paged_promotions.json()["items"]) == 1
+
+    paged_artifacts = client.get("/api/learning/artifacts/page?limit=1&offset=0", headers=headers)
+    assert paged_artifacts.status_code == 200
+    assert "items" in paged_artifacts.json()
+    assert "total" in paged_artifacts.json()
 
 
 def test_learning_review_can_reindex_rag_vectors():
