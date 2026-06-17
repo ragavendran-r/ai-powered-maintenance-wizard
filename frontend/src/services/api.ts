@@ -908,6 +908,13 @@ export interface LearningSummary {
   vector_store: LearningVectorStoreStatus
 }
 
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export type WorkOrderStatus = 'WAPPR' | 'APPR' | 'WMATL' | 'INPRG' | 'COMP' | 'CLOSE'
 export type WorkOrderPlanningStatus = 'unscheduled' | 'planned' | 'dispatched'
 export type MaterialReadiness = 'unknown' | 'pending' | 'ready' | 'blocked'
@@ -1377,6 +1384,13 @@ export const api = {
     const query = typeof approvedOnly === 'boolean' ? `?approved_only=${approvedOnly ? 'true' : 'false'}` : ''
     return request<LearningExample[]>(`/api/learning/examples${query}`)
   },
+  learningExamplesPage: ({ approvedOnly, limit = 10, offset = 0 }: { approvedOnly?: boolean; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+    if (typeof approvedOnly === 'boolean') {
+      query.set('approved_only', approvedOnly ? 'true' : 'false')
+    }
+    return request<PaginatedResponse<LearningExample>>(`/api/learning/examples/page?${query.toString()}`)
+  },
   updateLearningExample: (exampleId: string, approved: boolean) =>
     request<LearningExample>(`/api/learning/examples/${exampleId}`, {
       method: 'PATCH',
@@ -1417,6 +1431,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   learningEvaluations: () => request<LearningEvaluationRun[]>('/api/learning/evaluations'),
+  learningEvaluationsPage: ({ limit = 10, offset = 0 }: { limit?: number; offset?: number } = {}) =>
+    request<PaginatedResponse<LearningEvaluationRun>>(`/api/learning/evaluations/page?limit=${limit}&offset=${offset}`),
   promoteLearningModelVersion: (payload: { model_version_id: string; evaluation_run_id: string; notes?: string }) =>
     request<LearningModelPromotion>('/api/learning/model-versions/promote', {
       method: 'POST',
@@ -1428,7 +1444,11 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   learningModelPromotions: () => request<LearningModelPromotion[]>('/api/learning/model-promotions'),
+  learningModelPromotionsPage: ({ limit = 10, offset = 0 }: { limit?: number; offset?: number } = {}) =>
+    request<PaginatedResponse<LearningModelPromotion>>(`/api/learning/model-promotions/page?limit=${limit}&offset=${offset}`),
   learningModelDeployments: () => request<LearningModelDeployment[]>('/api/learning/model-deployments'),
+  learningModelDeploymentsPage: ({ limit = 10, offset = 0 }: { limit?: number; offset?: number } = {}) =>
+    request<PaginatedResponse<LearningModelDeployment>>(`/api/learning/model-deployments/page?limit=${limit}&offset=${offset}`),
   deployLearningModelVersion: (modelId: string, payload: LearningModelDeploymentRequest) =>
     request<LearningJob>(`/api/learning/model-versions/${modelId}/deploy`, {
       method: 'POST',
@@ -1440,6 +1460,10 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   learningJobs: () => request<LearningJob[]>('/api/learning/jobs'),
+  learningJobsPage: ({ limit = 10, offset = 0 }: { limit?: number; offset?: number } = {}) =>
+    request<PaginatedResponse<LearningJob>>(`/api/learning/jobs/page?limit=${limit}&offset=${offset}`),
+  learningArtifactsPage: ({ limit = 10, offset = 0 }: { limit?: number; offset?: number } = {}) =>
+    request<PaginatedResponse<LearningArtifact>>(`/api/learning/artifacts/page?limit=${limit}&offset=${offset}`),
   learningEmbeddingProfiles: () => request<LearningEmbeddingProfile[]>('/api/learning/rag/embedding-profiles'),
   createLearningEmbeddingProfile: (payload: {
     provider: string

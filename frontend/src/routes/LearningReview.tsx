@@ -7,7 +7,8 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { api } from '../services/api'
 import type {
   LearningArtifactCleanupResult,
   LearningDatasetSnapshot,
@@ -21,6 +22,7 @@ import type {
   LearningModelVersion,
   LearningRagMigrationPlan,
   LearningSummary,
+  PaginatedResponse,
 } from '../services/api'
 import {
   clipText,
@@ -50,6 +52,14 @@ type LearningLoadingState = Partial<Record<
 >>
 
 type LearningReviewTab = 'examples' | 'adapter' | 'vector'
+type LifecycleTableKey = 'examples' | 'evaluations' | 'jobs' | 'artifacts' | 'deployments' | 'promotions'
+
+const LIFECYCLE_TABLE_PAGE_SIZE = 10
+
+type TablePageState<T> = PaginatedResponse<T> & {
+  error?: string
+  loading?: boolean
+}
 
 export function LearningReviewRoute({
   activateSelectedEmbeddingProfile,
@@ -160,7 +170,46 @@ export function LearningReviewRoute({
   const learningJobs: LearningJob[] = learningSummary?.recent_jobs ?? []
   const learningArtifacts: LearningArtifact[] = learningSummary?.recent_artifacts ?? []
   const learningPromotions: LearningModelPromotion[] = learningSummary?.recent_promotions ?? []
-  const learningDeploymentRecords = mergeLearningDeployments(learningDeployments, learningSummary?.recent_deployments ?? [])
+  const learningDeploymentRecords = useMemo(
+    () => mergeLearningDeployments(learningDeployments, learningSummary?.recent_deployments ?? []),
+    [learningDeployments, learningSummary?.recent_deployments],
+  )
+  const [exampleTablePage, setExampleTablePage] = useState<TablePageState<LearningExample>>({
+    items: learningExamples,
+    limit: LIFECYCLE_TABLE_PAGE_SIZE,
+    offset: 0,
+    total: learningSummary?.counts.examples ?? learningExamples.length,
+  })
+  const [evaluationTablePage, setEvaluationTablePage] = useState<TablePageState<LearningEvaluationRun>>({
+    items: learningEvaluations,
+    limit: LIFECYCLE_TABLE_PAGE_SIZE,
+    offset: 0,
+    total: learningSummary?.counts.evaluation_runs ?? learningEvaluations.length,
+  })
+  const [jobTablePage, setJobTablePage] = useState<TablePageState<LearningJob>>({
+    items: learningJobs,
+    limit: LIFECYCLE_TABLE_PAGE_SIZE,
+    offset: 0,
+    total: learningSummary?.counts.jobs ?? learningJobs.length,
+  })
+  const [artifactTablePage, setArtifactTablePage] = useState<TablePageState<LearningArtifact>>({
+    items: learningArtifacts,
+    limit: LIFECYCLE_TABLE_PAGE_SIZE,
+    offset: 0,
+    total: learningSummary?.counts.artifacts ?? learningArtifacts.length,
+  })
+  const [promotionTablePage, setPromotionTablePage] = useState<TablePageState<LearningModelPromotion>>({
+    items: learningPromotions,
+    limit: LIFECYCLE_TABLE_PAGE_SIZE,
+    offset: 0,
+    total: learningSummary?.counts.promotions ?? learningPromotions.length,
+  })
+  const [deploymentTablePage, setDeploymentTablePage] = useState<TablePageState<LearningModelDeployment>>({
+    items: learningDeploymentRecords,
+    limit: LIFECYCLE_TABLE_PAGE_SIZE,
+    offset: 0,
+    total: learningSummary?.counts.deployments ?? learningDeploymentRecords.length,
+  })
   const artifactRetention = learningSummary?.artifact_store?.retention ?? {}
   const artifactRetentionState = String(artifactRetention.state ?? 'not configured')
   const artifactRetentionDays = String(artifactRetention.retention_days ?? 'unknown')
@@ -176,6 +225,134 @@ export function LearningReviewRoute({
   const vectorProfile = vectorStore?.embedding_profile
   const ragMigrationNeeded = Boolean(vectorStore?.migration_required || (selectedEmbeddingProfile && activeEmbeddingProfile && selectedEmbeddingProfile.id !== activeEmbeddingProfile.id))
   const latestDatasetSnapshot = learningDatasets[0] ?? learningSummary?.recent_snapshots?.[0]
+  const configuredRuntimeModel = learningSummary?.serving_model?.provider === 'ollama'
+    ? learningSummary?.serving_model?.ollama_model
+    : learningSummary?.serving_model?.openai_model
+  const servedAdapterModel = learningSummary?.serving_model?.served_model_name
+  const shouldShowConfiguredRuntimeModel = configuredRuntimeModel && configuredRuntimeModel !== servedAdapterModel
+
+  useEffect(() => {
+    setExampleTablePage({
+      items: learningExamples,
+      limit: LIFECYCLE_TABLE_PAGE_SIZE,
+      offset: 0,
+      total: learningSummary?.counts.examples ?? learningExamples.length,
+    })
+  }, [learningExamples, learningSummary?.counts.examples])
+
+  useEffect(() => {
+    setEvaluationTablePage({
+      items: learningEvaluations,
+      limit: LIFECYCLE_TABLE_PAGE_SIZE,
+      offset: 0,
+      total: learningSummary?.counts.evaluation_runs ?? learningEvaluations.length,
+    })
+  }, [learningEvaluations, learningSummary?.counts.evaluation_runs])
+
+  useEffect(() => {
+    setJobTablePage({
+      items: learningJobs,
+      limit: LIFECYCLE_TABLE_PAGE_SIZE,
+      offset: 0,
+      total: learningSummary?.counts.jobs ?? learningJobs.length,
+    })
+  }, [learningJobs, learningSummary?.counts.jobs])
+
+  useEffect(() => {
+    setArtifactTablePage({
+      items: learningArtifacts,
+      limit: LIFECYCLE_TABLE_PAGE_SIZE,
+      offset: 0,
+      total: learningSummary?.counts.artifacts ?? learningArtifacts.length,
+    })
+  }, [learningArtifacts, learningSummary?.counts.artifacts])
+
+  useEffect(() => {
+    setPromotionTablePage({
+      items: learningPromotions,
+      limit: LIFECYCLE_TABLE_PAGE_SIZE,
+      offset: 0,
+      total: learningSummary?.counts.promotions ?? learningPromotions.length,
+    })
+  }, [learningPromotions, learningSummary?.counts.promotions])
+
+  useEffect(() => {
+    setDeploymentTablePage({
+      items: learningDeploymentRecords,
+      limit: LIFECYCLE_TABLE_PAGE_SIZE,
+      offset: 0,
+      total: learningSummary?.counts.deployments ?? learningDeploymentRecords.length,
+    })
+  }, [learningDeploymentRecords, learningSummary?.counts.deployments])
+
+  const setTableLoading = (key: LifecycleTableKey, loading: boolean) => {
+    const applyLoading = <T,>(setPage: Dispatch<SetStateAction<TablePageState<T>>>) =>
+      setPage((page) => ({ ...page, error: undefined, loading }))
+    if (key === 'examples') applyLoading(setExampleTablePage)
+    if (key === 'evaluations') applyLoading(setEvaluationTablePage)
+    if (key === 'jobs') applyLoading(setJobTablePage)
+    if (key === 'artifacts') applyLoading(setArtifactTablePage)
+    if (key === 'deployments') applyLoading(setDeploymentTablePage)
+    if (key === 'promotions') applyLoading(setPromotionTablePage)
+  }
+
+  const setTableError = (key: LifecycleTableKey, message: string) => {
+    const applyError = <T,>(setPage: Dispatch<SetStateAction<TablePageState<T>>>) =>
+      setPage((page) => ({ ...page, error: message, loading: false }))
+    if (key === 'examples') applyError(setExampleTablePage)
+    if (key === 'evaluations') applyError(setEvaluationTablePage)
+    if (key === 'jobs') applyError(setJobTablePage)
+    if (key === 'artifacts') applyError(setArtifactTablePage)
+    if (key === 'deployments') applyError(setDeploymentTablePage)
+    if (key === 'promotions') applyError(setPromotionTablePage)
+  }
+
+  const loadTablePage = async (key: LifecycleTableKey, offset: number) => {
+    setTableLoading(key, true)
+    try {
+      if (key === 'examples') setExampleTablePage({ ...(await api.learningExamplesPage({ limit: LIFECYCLE_TABLE_PAGE_SIZE, offset })), loading: false })
+      if (key === 'evaluations') setEvaluationTablePage({ ...(await api.learningEvaluationsPage({ limit: LIFECYCLE_TABLE_PAGE_SIZE, offset })), loading: false })
+      if (key === 'jobs') setJobTablePage({ ...(await api.learningJobsPage({ limit: LIFECYCLE_TABLE_PAGE_SIZE, offset })), loading: false })
+      if (key === 'artifacts') setArtifactTablePage({ ...(await api.learningArtifactsPage({ limit: LIFECYCLE_TABLE_PAGE_SIZE, offset })), loading: false })
+      if (key === 'deployments') setDeploymentTablePage({ ...(await api.learningModelDeploymentsPage({ limit: LIFECYCLE_TABLE_PAGE_SIZE, offset })), loading: false })
+      if (key === 'promotions') setPromotionTablePage({ ...(await api.learningModelPromotionsPage({ limit: LIFECYCLE_TABLE_PAGE_SIZE, offset })), loading: false })
+    } catch {
+      setTableError(key, 'Page could not be loaded from the backend.')
+    }
+  }
+
+  const renderLifecyclePagination = (key: LifecycleTableKey, page: TablePageState<unknown>) => {
+    if (page.total <= page.limit) {
+      return null
+    }
+    const pageIndex = Math.floor(page.offset / page.limit)
+    const pageCount = Math.ceil(page.total / page.limit)
+    return (
+      <div className="tablePagination" aria-label={`${key} table pagination`}>
+        <span>
+          Rows {page.offset + 1}-{Math.min(page.total, page.offset + page.items.length)} of {page.total}
+        </span>
+        <div>
+          <button
+            className="outlineButton"
+            disabled={page.loading || pageIndex === 0}
+            onClick={() => void loadTablePage(key, Math.max(0, page.offset - page.limit))}
+            type="button"
+          >
+            Previous
+          </button>
+          <button
+            className="outlineButton"
+            disabled={page.loading || pageIndex >= pageCount - 1}
+            onClick={() => void loadTablePage(key, page.offset + page.limit)}
+            type="button"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <section className="detailPanel learningView">
@@ -269,7 +446,7 @@ export function LearningReviewRoute({
           <section className="learningPanel">
             <h3>Approved Controls</h3>
             <div className="learningExamplesTableWrap">
-              {learningExamples.length ? (
+              {exampleTablePage.items.length ? (
                 <table className="learningExamplesTable" aria-label="Approved Controls">
                   <thead>
                     <tr>
@@ -282,7 +459,7 @@ export function LearningReviewRoute({
                     </tr>
                   </thead>
                   <tbody>
-                    {learningExamples.slice(0, 30).map((example) => (
+                    {exampleTablePage.items.map((example) => (
                       <tr key={example.id}>
                         <td>
                           <strong>{example.source_type.replace(/_/g, ' ')}</strong>
@@ -324,6 +501,8 @@ export function LearningReviewRoute({
               ) : (
                 <p className="emptyState">No learning examples have been generated yet.</p>
               )}
+              {exampleTablePage.error && <p className="emptyState">{exampleTablePage.error}</p>}
+              {renderLifecyclePagination('examples', exampleTablePage)}
             </div>
           </section>
         </div>
@@ -454,14 +633,12 @@ export function LearningReviewRoute({
             {learningSummary?.serving_model?.source?.replace(/_/g, ' ') ?? 'unknown'} · {learningSummary?.serving_model?.provider ?? 'unknown'}
           </small>
         </span>
-        <span>
-          <small>Model</small>
-          <strong>
-            {learningSummary?.serving_model?.provider === 'ollama'
-              ? learningSummary?.serving_model?.ollama_model
-              : learningSummary?.serving_model?.openai_model}
-          </strong>
-        </span>
+        {shouldShowConfiguredRuntimeModel && (
+          <span>
+            <small>Configured runtime model</small>
+            <strong>{configuredRuntimeModel}</strong>
+          </span>
+        )}
         {learningSummary?.serving_model?.active_model_version_id && (
           <span>
             <small>Active version</small>
@@ -484,7 +661,7 @@ export function LearningReviewRoute({
         )}
         {learningSummary?.serving_model?.served_model_name && (
           <span>
-            <small>Served model</small>
+            <small>Served adapter alias</small>
             <strong>{learningSummary.serving_model.served_model_name}</strong>
           </span>
         )}
@@ -595,7 +772,49 @@ export function LearningReviewRoute({
       </div>
       <div className="learningGrid learningGridFull">
         <section className="learningPanel">
-          <h3>Learning Job Trail</h3>
+          <h3>Dataset Validation</h3>
+          <button className="textButton fullWidthAction" onClick={runLearningEvaluation} disabled={learningLoading.runEvaluation}>
+            {learningLoading.runEvaluation ? <span className="loadingSpinner" aria-hidden="true" /> : <CheckCircle2 size={16} />}
+            Run dataset validation
+          </button>
+          <div className="evaluationList">
+            {evaluationTablePage.items.length ? (
+              <>
+                <table className="lifecycleTable lifecycleEvaluationTable" aria-label="Dataset validation runs">
+                  <thead>
+                    <tr>
+                      <th>Status</th>
+                      <th>Run date</th>
+                      <th>Quality</th>
+                      <th>Judge avg</th>
+                      <th>Coverage</th>
+                      <th>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {evaluationTablePage.items.map((run) => (
+                      <tr className={run.passed ? 'passed' : 'review'} key={run.id}>
+                        <td><strong>{run.passed ? 'Passed' : 'Needs review'}</strong></td>
+                        <td>{formatDate(run.created_at)}</td>
+                        <td>{metricValue(run.metrics.quality_score)}</td>
+                        <td>{metricValue(run.metrics.average_judge_score)}</td>
+                        <td>
+                          <small>Sources {metricValue(run.metrics.source_type_coverage)}</small>
+                          <small>Assets {metricValue(run.metrics.asset_coverage)}</small>
+                        </td>
+                        <td>{run.notes || 'No notes recorded'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {renderLifecyclePagination('evaluations', evaluationTablePage)}
+              </>
+            ) : (
+              <p className="emptyState">Run validation after creating a dataset snapshot.</p>
+            )}
+            {evaluationTablePage.error && <p className="emptyState">{evaluationTablePage.error}</p>}
+          </div>
+          <h3>PEFT Tuning Job</h3>
           <div className="learningAdapterGrid">
             <label className="field adapterNotesField">
               <span>PEFT adapter job name</span>
@@ -606,118 +825,86 @@ export function LearningReviewRoute({
               Queue PEFT tuning job
             </button>
           </div>
+          <h3>Learning Job Trail</h3>
           <div className="jobList">
-            {learningJobs.length ? learningJobs.map((job) => (
-              <div className={`jobRow ${job.status}`} key={job.id}>
-                <span>
-                  <strong>{job.job_type.replace(/_/g, ' ')}</strong>
-                  <small>{job.status} · {formatDate(job.updated_at)}</small>
-                </span>
-                <small>{job.subject}</small>
-                {typeof job.output_refs.training_status === 'string' && (
-                  <small>Training {job.output_refs.training_status.replace(/_/g, ' ')}</small>
-                )}
-                {typeof job.output_refs.registered_model_version_id === 'string' && (
-                  <small>Registered model {job.output_refs.registered_model_version_id}</small>
-                )}
-                {typeof job.output_refs.adapter_output_dir === 'string' && (
-                  <small>Adapter output {job.output_refs.adapter_output_dir}</small>
-                )}
-                {job.error && <p>{job.error}</p>}
-                {typeof job.output_refs.dispatch === 'string' && <p>{job.output_refs.dispatch}</p>}
-              </div>
-            )) : (
+            {jobTablePage.items.length ? (
+              <>
+                <table className="lifecycleTable lifecycleJobTable" aria-label="Learning job trail">
+                  <thead>
+                    <tr>
+                      <th>Job</th>
+                      <th>Status</th>
+                      <th>Subject</th>
+                      <th>Updated</th>
+                      <th>Output</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {jobTablePage.items.map((job) => (
+                      <tr className={job.status} key={job.id}>
+                        <td><strong>{job.job_type.replace(/_/g, ' ')}</strong></td>
+                        <td>{job.status}</td>
+                        <td>{job.subject}</td>
+                        <td>{formatDate(job.updated_at)}</td>
+                        <td>
+                          {typeof job.output_refs.training_status === 'string' && (
+                            <small>Training {job.output_refs.training_status.replace(/_/g, ' ')}</small>
+                          )}
+                          {typeof job.output_refs.registered_model_version_id === 'string' && (
+                            <small>Registered model {job.output_refs.registered_model_version_id}</small>
+                          )}
+                          {typeof job.output_refs.adapter_output_dir === 'string' && (
+                            <small>Adapter output {job.output_refs.adapter_output_dir}</small>
+                          )}
+                          {typeof job.output_refs.dispatch === 'string' && <small>{job.output_refs.dispatch}</small>}
+                          {job.error && <small>{job.error}</small>}
+                          {!job.error && !job.output_refs.training_status && !job.output_refs.registered_model_version_id && !job.output_refs.adapter_output_dir && !job.output_refs.dispatch && (
+                            <small>No output recorded</small>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {renderLifecyclePagination('jobs', jobTablePage)}
+              </>
+            ) : (
               <p className="emptyState">Learning jobs will appear after review, dataset, evaluation, or PEFT queue actions.</p>
             )}
+            {jobTablePage.error && <p className="emptyState">{jobTablePage.error}</p>}
           </div>
           <h3>Learning Artifacts</h3>
           <div className="artifactList">
-            {learningArtifacts.length ? learningArtifacts.map((artifact) => (
-              <div className="artifactRow" key={artifact.id}>
-                <span>
-                  <strong>{artifact.artifact_type.replace(/_/g, ' ')}</strong>
-                  <small>{artifact.job_id} · {formatDate(artifact.created_at)}</small>
-                </span>
-                <small>{artifact.uri}</small>
-                <small>sha256 {artifact.content_hash.slice(0, 12)}</small>
-              </div>
-            )) : (
+            {artifactTablePage.items.length ? (
+              <>
+                <table className="lifecycleTable lifecycleArtifactTable" aria-label="Learning artifacts">
+                  <thead>
+                    <tr>
+                      <th>Artifact</th>
+                      <th>Job</th>
+                      <th>Created</th>
+                      <th>URI</th>
+                      <th>Hash</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {artifactTablePage.items.map((artifact) => (
+                      <tr key={artifact.id}>
+                        <td><strong>{artifact.artifact_type.replace(/_/g, ' ')}</strong></td>
+                        <td>{artifact.job_id}</td>
+                        <td>{formatDate(artifact.created_at)}</td>
+                        <td>{artifact.uri}</td>
+                        <td>sha256 {artifact.content_hash.slice(0, 12)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {renderLifecyclePagination('artifacts', artifactTablePage)}
+              </>
+            ) : (
               <p className="emptyState">Worker-produced datasets, manifests, and adapter artifacts will appear here.</p>
             )}
-          </div>
-          <h3>Adapter Runtime Deployments</h3>
-          <div className="learningAdapterGrid">
-            <label className="field">
-              <span>Runtime provider</span>
-              <input value={deploymentRuntimeProvider} onChange={(event) => setDeploymentRuntimeProvider(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Runtime base URL</span>
-              <input value={deploymentBaseUrl} onChange={(event) => setDeploymentBaseUrl(event.target.value)} placeholder="optional runtime endpoint" />
-            </label>
-          </div>
-          <div className="deploymentList">
-            {learningDeploymentRecords.length ? learningDeploymentRecords.map((deployment) => (
-              <div className={`deploymentRow ${deploymentStatusClass(deployment.status)} ${deploymentStatusClass(deployment.health_status)}`} key={deployment.id}>
-                <span>
-                  <strong>{deployment.served_model_name}</strong>
-                  <small>{deployment.runtime_provider} · {deployment.serving_provider}</small>
-                </span>
-                <div className="deploymentBadges">
-                  <span className={`deploymentBadge ${deploymentStatusClass(deployment.status)}`}>{deployment.status.replace(/_/g, ' ')}</span>
-                  <span className={`deploymentBadge ${deploymentStatusClass(deployment.health_status)}`}>
-                    health {deployment.health_status?.replace(/_/g, ' ') ?? 'not checked'}
-                  </span>
-                </div>
-                <small>Model version {deployment.model_version_id} · {formatDate(deploymentDisplayDate(deployment))}</small>
-                {deployment.base_url && <small>Base URL {deployment.base_url}</small>}
-                {deployment.artifact_uri && <small>Artifact {deployment.artifact_uri}</small>}
-                {deployment.error && <p>{deployment.error}</p>}
-              </div>
-            )) : (
-              <p className="emptyState">Adapter runtime deployments will appear after a candidate deployment is queued.</p>
-            )}
-          </div>
-          <h3>Evaluation Runs</h3>
-          <button className="textButton fullWidthAction" onClick={runLearningEvaluation} disabled={learningLoading.runEvaluation}>
-            {learningLoading.runEvaluation ? <span className="loadingSpinner" aria-hidden="true" /> : <CheckCircle2 size={16} />}
-            Run dataset evaluation
-          </button>
-          <div className="evaluationList">
-            {learningEvaluations.length ? learningEvaluations.map((run) => (
-              <div className={`evaluationRow ${run.passed ? 'passed' : 'review'}`} key={run.id}>
-                <span>
-                  <strong>{run.passed ? 'Passed' : 'Needs review'}</strong>
-                  <small>{formatDate(run.created_at)}</small>
-                </span>
-                <div className="evaluationMetrics">
-                  <span>Quality <strong>{metricValue(run.metrics.quality_score)}</strong></span>
-                  <span>Avg judge <strong>{metricValue(run.metrics.average_judge_score)}</strong></span>
-                  <span>Sources <strong>{metricValue(run.metrics.source_type_coverage)}</strong></span>
-                  <span>Assets <strong>{metricValue(run.metrics.asset_coverage)}</strong></span>
-                </div>
-                {run.notes && <p>{run.notes}</p>}
-              </div>
-            )) : (
-              <p className="emptyState">Run an evaluation after creating a dataset snapshot.</p>
-            )}
-          </div>
-          <h3>Promotion Audit</h3>
-          <div className="promotionList">
-            {learningPromotions.length ? learningPromotions.map((promotion) => (
-              <div className={`promotionRow ${promotion.action}`} key={promotion.id}>
-                <span>
-                  <strong>{promotion.action === 'promote' ? 'Adapter promoted' : 'Rollback completed'}</strong>
-                  <small>{promotion.model_version_id} · {formatDate(promotion.created_at)}</small>
-                </span>
-                <small>Evaluation {promotion.evaluation_run_id} · Dataset {promotion.dataset_id}</small>
-                <small>Reviewer {promotion.reviewer_email}</small>
-                {promotion.previous_active_model_id && <small>Previous active {promotion.previous_active_model_id}</small>}
-                {promotion.notes && <p>{promotion.notes}</p>}
-              </div>
-            )) : (
-              <p className="emptyState">Adapter promotions and rollbacks will appear after a reviewer activates a passed model.</p>
-            )}
+            {artifactTablePage.error && <p className="emptyState">{artifactTablePage.error}</p>}
           </div>
           <h3>Model and Prompt Versions</h3>
           <div className="versionList">
@@ -787,6 +974,100 @@ export function LearningReviewRoute({
                 {prompt.notes && <p>{prompt.notes}</p>}
               </div>
             ))}
+          </div>
+          <h3>Adapter Runtime Deployments</h3>
+          <div className="learningAdapterGrid">
+            <label className="field">
+              <span>Runtime provider</span>
+              <input value={deploymentRuntimeProvider} onChange={(event) => setDeploymentRuntimeProvider(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Runtime base URL</span>
+              <input value={deploymentBaseUrl} onChange={(event) => setDeploymentBaseUrl(event.target.value)} placeholder="optional runtime endpoint" />
+            </label>
+          </div>
+          <div className="deploymentList">
+            {deploymentTablePage.items.length ? (
+              <table className="lifecycleTable lifecycleDeploymentTable" aria-label="Adapter runtime deployments">
+                <thead>
+                  <tr>
+                    <th>Served model</th>
+                    <th>Runtime</th>
+                    <th>Status</th>
+                    <th>Health</th>
+                    <th>Model version</th>
+                    <th>Artifact</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deploymentTablePage.items.map((deployment) => (
+                    <tr className={`${deploymentStatusClass(deployment.status)} ${deploymentStatusClass(deployment.health_status)}`} key={deployment.id}>
+                      <td><strong>{deployment.served_model_name}</strong></td>
+                      <td>
+                        <small>{deployment.runtime_provider}</small>
+                        <small>{deployment.serving_provider}</small>
+                        {deployment.base_url && <small>{deployment.base_url}</small>}
+                      </td>
+                      <td>{deployment.status.replace(/_/g, ' ')}</td>
+                      <td>{deployment.health_status?.replace(/_/g, ' ') ?? 'not checked'}</td>
+                      <td>
+                        <small>{deployment.model_version_id}</small>
+                        <small>{formatDate(deploymentDisplayDate(deployment))}</small>
+                      </td>
+                      <td>
+                        {deployment.artifact_uri && <small>{deployment.artifact_uri}</small>}
+                        {deployment.error && <small>{deployment.error}</small>}
+                        {!deployment.artifact_uri && !deployment.error && <small>No artifact recorded</small>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="emptyState">Adapter runtime deployments will appear after a candidate deployment is queued.</p>
+            )}
+            {renderLifecyclePagination('deployments', deploymentTablePage)}
+            {deploymentTablePage.error && <p className="emptyState">{deploymentTablePage.error}</p>}
+          </div>
+          <h3>Promotion Audit</h3>
+          <div className="promotionList">
+            {promotionTablePage.items.length ? (
+              <table className="lifecycleTable lifecyclePromotionTable" aria-label="Promotion audit">
+                <thead>
+                  <tr>
+                    <th>Action</th>
+                    <th>Model</th>
+                    <th>Evaluation</th>
+                    <th>Reviewer</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {promotionTablePage.items.map((promotion) => (
+                    <tr className={promotion.action} key={promotion.id}>
+                      <td><strong>{promotion.action === 'promote' ? 'Adapter promoted' : 'Rollback completed'}</strong></td>
+                      <td>
+                        <small>{promotion.model_version_id}</small>
+                        {promotion.previous_active_model_id && <small>Previous {promotion.previous_active_model_id}</small>}
+                      </td>
+                      <td>
+                        <small>{promotion.evaluation_run_id}</small>
+                        <small>Dataset {promotion.dataset_id}</small>
+                      </td>
+                      <td>{promotion.reviewer_email}</td>
+                      <td>
+                        <small>{formatDate(promotion.created_at)}</small>
+                        {promotion.notes && <small>{promotion.notes}</small>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="emptyState">Adapter promotions and rollbacks will appear after a reviewer activates a passed model.</p>
+            )}
+            {renderLifecyclePagination('promotions', promotionTablePage)}
+            {promotionTablePage.error && <p className="emptyState">{promotionTablePage.error}</p>}
           </div>
           <h3>Manual Adapter Candidate</h3>
           <div className="learningAdapterGrid">

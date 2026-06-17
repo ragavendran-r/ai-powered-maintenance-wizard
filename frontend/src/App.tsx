@@ -954,14 +954,14 @@ export function App() {
     setLearningMessage('')
     return Promise.all([
       api.learningSummary(),
-      api.learningExamples(),
+      api.learningExamplesPage({ limit: 10, offset: 0 }),
       api.learningDatasets(),
       api.learningModelDeployments().catch((): LearningModelDeployment[] => []),
       api.learningEmbeddingProfiles().catch((): LearningEmbeddingProfile[] => []),
     ])
-      .then(([summary, examples, datasets, deployments, embeddingProfiles]) => {
+      .then(([summary, examplesPage, datasets, deployments, embeddingProfiles]) => {
         setLearningSummary(summary)
-        setLearningExamples(examples)
+        setLearningExamples(examplesPage.items)
         setLearningDatasets(datasets)
         setLearningDeployments(deployments)
         setLearningEmbeddingProfiles(embeddingProfiles)
@@ -1069,8 +1069,11 @@ export function App() {
     setLearningMessage('')
     try {
       const examples = await api.refreshLearningExamples()
-      const summary = await api.learningSummary()
-      setLearningExamples(examples)
+      const [summary, examplesPage] = await Promise.all([
+        api.learningSummary(),
+        api.learningExamplesPage({ limit: 10, offset: 0 }),
+      ])
+      setLearningExamples(examplesPage.items)
       setLearningSummary(summary)
       setLearningMessage(
         examples.length > 0
@@ -2213,10 +2216,10 @@ export function App() {
       setRcaCases((items) => items.map((item) => (item.id === updated.id ? updated : item)))
       setSelectedRcaCaseId(updated.id)
       setRcaMessage(`${updated.id} closed and accepted for learning`)
-      void Promise.all([api.learningSummary(), api.learningExamples()])
-        .then(([summary, examples]) => {
+      void Promise.all([api.learningSummary(), api.learningExamplesPage({ limit: 10, offset: 0 })])
+        .then(([summary, examplesPage]) => {
           setLearningSummary(summary)
-          setLearningExamples(examples)
+          setLearningExamples(examplesPage.items)
         })
         .catch(() => undefined)
     } catch {
