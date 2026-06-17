@@ -7,6 +7,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
+import { useState } from 'react'
 import type {
   LearningArtifactCleanupResult,
   LearningDatasetSnapshot,
@@ -47,6 +48,8 @@ type LearningLoadingState = Partial<Record<
   | 'runRagMigration',
   boolean
 >>
+
+type LearningReviewTab = 'examples' | 'adapter' | 'vector'
 
 export function LearningReviewRoute({
   activateSelectedEmbeddingProfile,
@@ -149,6 +152,8 @@ export function LearningReviewRoute({
   setSelectedEmbeddingProfileId: (value: string) => void
   toggleLearningApproval: (example: LearningExample) => void
 }) {
+  const [learningReviewTab, setLearningReviewTab] = useState<LearningReviewTab>('examples')
+  const [selectedLearningExample, setSelectedLearningExample] = useState<LearningExample | null>(null)
   const learningModels: LearningModelVersion[] = learningSummary?.model_versions ?? []
   const learningPrompts = learningSummary?.prompt_versions ?? []
   const learningEvaluations: LearningEvaluationRun[] = learningSummary?.evaluation_runs ?? []
@@ -181,44 +186,157 @@ export function LearningReviewRoute({
       <p className="emptyState">
         Review approved human feedback, maintenance labels, work-order outcomes, ingested documents, and assistant interactions before exporting a local tuning dataset.
       </p>
-      <div className="learningToolbar">
-        <button className="textButton" onClick={refreshLearningExamples} disabled={learningLoading.refreshExamples}>
-          {learningLoading.refreshExamples ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
-          Refresh examples
-        </button>
-        <label className="field">
-          <span>Snapshot name</span>
-          <input value={learningDatasetName} onChange={(event) => setLearningDatasetName(event.target.value)} />
-        </label>
-        <label className="field">
-          <span>Description</span>
-          <input value={learningDatasetDescription} onChange={(event) => setLearningDatasetDescription(event.target.value)} />
-        </label>
-        <button className="textButton" onClick={createLearningSnapshot} disabled={learningLoading.createSnapshot}>
-          {learningLoading.createSnapshot ? <span className="loadingSpinner" aria-hidden="true" /> : <FileJson size={16} />}
-          Create JSONL snapshot
-        </button>
-      </div>
-      {latestDatasetSnapshot && (
-        <div className="latestDatasetDownload">
-          <span>
-            <strong>Latest dataset snapshot</strong>
-            <small>{latestDatasetSnapshot.example_count} examples · {formatDate(latestDatasetSnapshot.created_at)}</small>
-          </span>
-          <button className="iconTextButton" onClick={() => downloadLearningSnapshot(latestDatasetSnapshot)}>
-            <Download size={16} />
-            Download JSONL
+      <div className="planningTabRow learningReviewTabs" role="tablist" aria-label="Learning and tuning review tabs">
+        {([
+          ['examples', 'Examples & judgments'],
+          ['adapter', 'Adapter lifecycle'],
+          ['vector', 'Qdrant migration'],
+        ] as const).map(([tab, label]) => (
+          <button
+            aria-controls={`learning-review-tab-${tab}`}
+            aria-selected={learningReviewTab === tab}
+            className={learningReviewTab === tab ? 'selected' : ''}
+            id={`learning-review-tab-trigger-${tab}`}
+            key={tab}
+            onClick={() => setLearningReviewTab(tab)}
+            role="tab"
+            type="button"
+          >
+            {label}
           </button>
-        </div>
-      )}
-      <div className="learningStats">
-        {(['interactions', 'examples', 'approved_examples', 'snapshots', 'artifacts', 'promotions', 'deployments'] as const).map((key) => (
-          <span className="learningStat" key={key}>
-            <small>{key.replace(/_/g, ' ')}</small>
-            <strong>{learningSummary?.counts[key] ?? 0}</strong>
-          </span>
         ))}
       </div>
+      <div
+        aria-labelledby="learning-review-tab-trigger-examples"
+        hidden={learningReviewTab !== 'examples'}
+        id="learning-review-tab-examples"
+        role="tabpanel"
+      >
+        <div className="learningSnapshotRow">
+          <section className="learningPanel learningSnapshotPanel">
+            <h3>Create Snapshot</h3>
+            <div className="learningToolbar">
+              <button className="textButton" onClick={refreshLearningExamples} disabled={learningLoading.refreshExamples}>
+                {learningLoading.refreshExamples ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
+                Refresh examples
+              </button>
+              <label className="field">
+                <span>Snapshot name</span>
+                <input value={learningDatasetName} onChange={(event) => setLearningDatasetName(event.target.value)} />
+              </label>
+              <label className="field">
+                <span>Description</span>
+                <input value={learningDatasetDescription} onChange={(event) => setLearningDatasetDescription(event.target.value)} />
+              </label>
+              <button className="textButton" onClick={createLearningSnapshot} disabled={learningLoading.createSnapshot}>
+                {learningLoading.createSnapshot ? <span className="loadingSpinner" aria-hidden="true" /> : <FileJson size={16} />}
+                Create JSONL snapshot
+              </button>
+            </div>
+          </section>
+          <section className="learningPanel learningSnapshotPanel">
+            <h3>Dataset Snapshots</h3>
+            <div className="datasetList">
+              {learningDatasets.length ? learningDatasets.map((snapshot) => (
+                <div className="datasetRow" key={snapshot.id}>
+                  <span>
+                    <strong>
+                      {snapshot.name}
+                      {snapshot.id === latestDatasetSnapshot?.id && <small className="inlineStatusBadge">Latest</small>}
+                    </strong>
+                    <small>{snapshot.example_count} examples · {formatDate(snapshot.created_at)}</small>
+                  </span>
+                  <button className="iconTextButton" onClick={() => downloadLearningSnapshot(snapshot)}>
+                    <Download size={16} />
+                    Download JSONL
+                  </button>
+                </div>
+              )) : (
+                <p className="emptyState">Create a snapshot after approving examples.</p>
+              )}
+            </div>
+          </section>
+        </div>
+        <div className="learningStats">
+          {(['interactions', 'examples', 'approved_examples', 'snapshots', 'artifacts', 'promotions', 'deployments'] as const).map((key) => (
+            <span className="learningStat" key={key}>
+              <small>{key.replace(/_/g, ' ')}</small>
+              <strong>{learningSummary?.counts[key] ?? 0}</strong>
+            </span>
+          ))}
+        </div>
+        <div className="learningGrid learningGridFull">
+          <section className="learningPanel">
+            <h3>Approved Controls</h3>
+            <div className="learningExamplesTableWrap">
+              {learningExamples.length ? (
+                <table className="learningExamplesTable" aria-label="Approved Controls">
+                  <thead>
+                    <tr>
+                      <th>Source</th>
+                      <th>Score</th>
+                      <th>Judge</th>
+                      <th>Status</th>
+                      <th>Summary</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {learningExamples.slice(0, 30).map((example) => (
+                      <tr key={example.id}>
+                        <td>
+                          <strong>{example.source_type.replace(/_/g, ' ')}</strong>
+                          <small>{example.equipment_id ?? 'company-wide'} · {formatDate(example.created_at)}</small>
+                        </td>
+                        <td>
+                          <span className={`judgeBadge ${example.judge_label}`}>
+                            {Math.round(example.judge_score * 100)}% · {example.judge_label.replace(/_/g, ' ')}
+                          </span>
+                        </td>
+                        <td>
+                          <strong>{example.judge_used_live_provider ? 'Live LLM' : 'Fallback'}</strong>
+                          <small>{example.judge_provider}</small>
+                        </td>
+                        <td>
+                          <span className={`approvalBadge ${example.approved ? 'approved' : 'review'}`}>
+                            {example.approved ? 'Approved' : 'Review'}
+                          </span>
+                        </td>
+                        <td className="learningExampleSummaryCell">{clipText(example.expected_output, 110)}</td>
+                        <td>
+                          <div className="tableActionGroup">
+                            <button className="outlineButton" onClick={() => setSelectedLearningExample(example)}>
+                              View details
+                            </button>
+                            <button className="outlineButton" onClick={() => judgeLearningExample(example)} disabled={learningJudgingExampleId === example.id}>
+                              {learningJudgingExampleId === example.id ? <span className="loadingSpinner" aria-hidden="true" /> : null}
+                              {learningJudgingExampleId === example.id ? 'Judging...' : 'Judge'}
+                            </button>
+                            <button className={example.approved ? 'outlineButton' : 'textButton'} onClick={() => toggleLearningApproval(example)}>
+                              {example.approved ? 'Remove approval' : 'Approve'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="emptyState">No learning examples have been generated yet.</p>
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
+      <div
+        aria-labelledby="learning-review-tab-trigger-vector"
+        hidden={learningReviewTab !== 'vector'}
+        id="learning-review-tab-vector"
+        role="tabpanel"
+      >
+      <p className="emptyState">
+        Qdrant migration is only required when the embedding profile, vector dimensions, distance, or target collection changes. Adapter deployment and PEFT promotion do not by themselves require a vector migration.
+      </p>
       <div className="vectorStoreStatus">
         <div className="vectorStoreFacts">
           <span>
@@ -322,6 +440,13 @@ export function LearningReviewRoute({
           </div>
         )}
       </div>
+      </div>
+      <div
+        aria-labelledby="learning-review-tab-trigger-adapter"
+        hidden={learningReviewTab !== 'adapter'}
+        id="learning-review-tab-adapter"
+        role="tabpanel"
+      >
       <div className="servingModelStatus">
         <span>
           <strong>Serving LLM</strong>
@@ -468,122 +593,56 @@ export function LearningReviewRoute({
           <strong>{String(learningSummary?.peft_trainer?.output_dir ?? 'not configured')}</strong>
         </span>
       </div>
-      <div className="learningGrid">
+      <div className="learningGrid learningGridFull">
         <section className="learningPanel">
-          <h3>Approved Controls</h3>
-          <div className="learningExamples" aria-label="Learning examples">
-            {learningExamples.length ? learningExamples.slice(0, 30).map((example) => (
-              <article className={`learningExample ${example.approved ? 'approved' : ''}`} key={example.id}>
-                <div>
-                  <strong>{example.source_type.replace(/_/g, ' ')}</strong>
-                  <small>{example.equipment_id ?? 'company-wide'} · {formatDate(example.created_at)}</small>
-                </div>
-                <div className="judgeScoreRow">
-                  <span className={`judgeBadge ${example.judge_label}`}>
-                    {Math.round(example.judge_score * 100)}% · {example.judge_label.replace(/_/g, ' ')}
-                  </span>
-                  <small>{example.judge_used_live_provider ? 'Live LLM judge' : 'Judge fallback'} · {example.judge_provider}</small>
-                </div>
-                <p>{example.instruction}</p>
-                <blockquote>{clipText(example.expected_output, 220)}</blockquote>
-                {example.judge_rationale && <p className="judgeRationale">{clipText(example.judge_rationale, 220)}</p>}
-                <div className="learningExampleActions">
-                  <button className="outlineButton" onClick={() => judgeLearningExample(example)} disabled={learningJudgingExampleId === example.id}>
-                    {learningJudgingExampleId === example.id ? <span className="loadingSpinner" aria-hidden="true" /> : null}
-                    {learningJudgingExampleId === example.id ? 'Judging...' : 'Judge'}
-                  </button>
-                  <button className={example.approved ? 'outlineButton' : 'textButton'} onClick={() => toggleLearningApproval(example)}>
-                    {example.approved ? 'Remove approval' : 'Approve'}
-                  </button>
-                </div>
-              </article>
+          <h3>Learning Job Trail</h3>
+          <div className="learningAdapterGrid">
+            <label className="field adapterNotesField">
+              <span>PEFT adapter job name</span>
+              <input value={peftAdapterName} onChange={(event) => setPeftAdapterName(event.target.value)} />
+            </label>
+            <button className="textButton fullWidthAction" onClick={queuePeftTuningJob} disabled={learningLoading.queuePeftTuning}>
+              {learningLoading.queuePeftTuning ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
+              Queue PEFT tuning job
+            </button>
+          </div>
+          <div className="jobList">
+            {learningJobs.length ? learningJobs.map((job) => (
+              <div className={`jobRow ${job.status}`} key={job.id}>
+                <span>
+                  <strong>{job.job_type.replace(/_/g, ' ')}</strong>
+                  <small>{job.status} · {formatDate(job.updated_at)}</small>
+                </span>
+                <small>{job.subject}</small>
+                {typeof job.output_refs.training_status === 'string' && (
+                  <small>Training {job.output_refs.training_status.replace(/_/g, ' ')}</small>
+                )}
+                {typeof job.output_refs.registered_model_version_id === 'string' && (
+                  <small>Registered model {job.output_refs.registered_model_version_id}</small>
+                )}
+                {typeof job.output_refs.adapter_output_dir === 'string' && (
+                  <small>Adapter output {job.output_refs.adapter_output_dir}</small>
+                )}
+                {job.error && <p>{job.error}</p>}
+                {typeof job.output_refs.dispatch === 'string' && <p>{job.output_refs.dispatch}</p>}
+              </div>
             )) : (
-              <p className="emptyState">No learning examples have been generated yet.</p>
+              <p className="emptyState">Learning jobs will appear after review, dataset, evaluation, or PEFT queue actions.</p>
             )}
           </div>
-        </section>
-        <section className="learningPanel">
-          <h3>Model and Prompt Versions</h3>
-          <div className="versionList">
-            {learningModels.map((model) => {
-              const promotionEvaluation = passedEvaluationForModel(model.id)
-              const latestDeployment = latestDeploymentForModel(model.id)
-              const latestVerifiedDeployment = latestVerifiedDeploymentForModel(model.id)
-              const canPromoteModel = model.status !== 'active' && Boolean(promotionEvaluation)
-              const canRollbackModel = model.status === 'retired' && Boolean(promotionEvaluation)
-              const canDeployModel = model.status === 'candidate' && Boolean(model.adapter_path)
-              return (
-                <div className="versionRow" key={model.id}>
-                  <strong>{model.model_name}</strong>
-                  <small>{model.provider} · {model.status}</small>
-                  {model.adapter_path && <small>Adapter {model.adapter_path}</small>}
-                  {latestDeployment && (
-                    <small>
-                      Latest deployment {latestDeployment.runtime_provider} · {latestDeployment.status} · health{' '}
-                      {latestDeployment.health_status ?? 'not checked'}
-                    </small>
-                  )}
-                  {latestVerifiedDeployment ? (
-                    <small>
-                      Verified deployment {latestVerifiedDeployment.served_model_name} · {latestVerifiedDeployment.serving_provider} ·{' '}
-                      {formatDate(deploymentDisplayDate(latestVerifiedDeployment))}
-                    </small>
-                  ) : (
-                    <small>No verified deployment recorded for this model.</small>
-                  )}
-                  {promotionEvaluation ? (
-                    <small>Promotion gate passed by evaluation {promotionEvaluation.id}</small>
-                  ) : model.status !== 'active' ? (
-                    <small>Promotion gate requires a passing evaluation for this model.</small>
-                  ) : null}
-                  {model.notes && <p>{model.notes}</p>}
-                  {(canPromoteModel || canRollbackModel || canDeployModel) && (
-                    <div className="versionActions">
-                      {canDeployModel && (
-                        <button className="textButton" onClick={() => deployLearningAdapter(model)} disabled={learningLoading.deployAdapter}>
-                          <Upload size={16} />
-                          Deploy adapter
-                        </button>
-                      )}
-                      {canPromoteModel && (
-                        <button className="textButton" onClick={() => promoteLearningAdapter(model)} disabled={learningLoading.promoteAdapter}>
-                          <CheckCircle2 size={16} />
-                          Promote adapter
-                        </button>
-                      )}
-                      {canRollbackModel && (
-                        <button className="outlineButton" onClick={() => rollbackLearningAdapter(model)} disabled={learningLoading.rollbackAdapter}>
-                          Roll back to this model
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            {learningPrompts.map((prompt) => (
-              <div className="versionRow" key={prompt.id}>
-                <strong>{prompt.assistant} / {prompt.version}</strong>
-                <small>{prompt.status}</small>
-                {prompt.notes && <p>{prompt.notes}</p>}
-              </div>
-            ))}
-          </div>
-          <h3>Promotion Audit</h3>
-          <div className="promotionList">
-            {learningPromotions.length ? learningPromotions.map((promotion) => (
-              <div className={`promotionRow ${promotion.action}`} key={promotion.id}>
+          <h3>Learning Artifacts</h3>
+          <div className="artifactList">
+            {learningArtifacts.length ? learningArtifacts.map((artifact) => (
+              <div className="artifactRow" key={artifact.id}>
                 <span>
-                  <strong>{promotion.action === 'promote' ? 'Adapter promoted' : 'Rollback completed'}</strong>
-                  <small>{promotion.model_version_id} · {formatDate(promotion.created_at)}</small>
+                  <strong>{artifact.artifact_type.replace(/_/g, ' ')}</strong>
+                  <small>{artifact.job_id} · {formatDate(artifact.created_at)}</small>
                 </span>
-                <small>Evaluation {promotion.evaluation_run_id} · Dataset {promotion.dataset_id}</small>
-                <small>Reviewer {promotion.reviewer_email}</small>
-                {promotion.previous_active_model_id && <small>Previous active {promotion.previous_active_model_id}</small>}
-                {promotion.notes && <p>{promotion.notes}</p>}
+                <small>{artifact.uri}</small>
+                <small>sha256 {artifact.content_hash.slice(0, 12)}</small>
               </div>
             )) : (
-              <p className="emptyState">Adapter promotions and rollbacks will appear after a reviewer activates a passed model.</p>
+              <p className="emptyState">Worker-produced datasets, manifests, and adapter artifacts will appear here.</p>
             )}
           </div>
           <h3>Adapter Runtime Deployments</h3>
@@ -619,7 +678,117 @@ export function LearningReviewRoute({
               <p className="emptyState">Adapter runtime deployments will appear after a candidate deployment is queued.</p>
             )}
           </div>
-          <h3>Adapter Candidate</h3>
+          <h3>Evaluation Runs</h3>
+          <button className="textButton fullWidthAction" onClick={runLearningEvaluation} disabled={learningLoading.runEvaluation}>
+            {learningLoading.runEvaluation ? <span className="loadingSpinner" aria-hidden="true" /> : <CheckCircle2 size={16} />}
+            Run dataset evaluation
+          </button>
+          <div className="evaluationList">
+            {learningEvaluations.length ? learningEvaluations.map((run) => (
+              <div className={`evaluationRow ${run.passed ? 'passed' : 'review'}`} key={run.id}>
+                <span>
+                  <strong>{run.passed ? 'Passed' : 'Needs review'}</strong>
+                  <small>{formatDate(run.created_at)}</small>
+                </span>
+                <div className="evaluationMetrics">
+                  <span>Quality <strong>{metricValue(run.metrics.quality_score)}</strong></span>
+                  <span>Avg judge <strong>{metricValue(run.metrics.average_judge_score)}</strong></span>
+                  <span>Sources <strong>{metricValue(run.metrics.source_type_coverage)}</strong></span>
+                  <span>Assets <strong>{metricValue(run.metrics.asset_coverage)}</strong></span>
+                </div>
+                {run.notes && <p>{run.notes}</p>}
+              </div>
+            )) : (
+              <p className="emptyState">Run an evaluation after creating a dataset snapshot.</p>
+            )}
+          </div>
+          <h3>Promotion Audit</h3>
+          <div className="promotionList">
+            {learningPromotions.length ? learningPromotions.map((promotion) => (
+              <div className={`promotionRow ${promotion.action}`} key={promotion.id}>
+                <span>
+                  <strong>{promotion.action === 'promote' ? 'Adapter promoted' : 'Rollback completed'}</strong>
+                  <small>{promotion.model_version_id} · {formatDate(promotion.created_at)}</small>
+                </span>
+                <small>Evaluation {promotion.evaluation_run_id} · Dataset {promotion.dataset_id}</small>
+                <small>Reviewer {promotion.reviewer_email}</small>
+                {promotion.previous_active_model_id && <small>Previous active {promotion.previous_active_model_id}</small>}
+                {promotion.notes && <p>{promotion.notes}</p>}
+              </div>
+            )) : (
+              <p className="emptyState">Adapter promotions and rollbacks will appear after a reviewer activates a passed model.</p>
+            )}
+          </div>
+          <h3>Model and Prompt Versions</h3>
+          <div className="versionList">
+            {learningModels.map((model) => {
+              const promotionEvaluation = passedEvaluationForModel(model.id)
+              const latestDeployment = latestDeploymentForModel(model.id)
+              const latestVerifiedDeployment = latestVerifiedDeploymentForModel(model.id)
+              const promotionRecord = learningPromotions.find((promotion) => promotion.model_version_id === model.id)
+              const canPromoteModel = model.status !== 'active' && Boolean(promotionEvaluation && latestVerifiedDeployment)
+              const canRollbackModel = model.status === 'retired' && Boolean(promotionEvaluation)
+              const canDeployModel = model.status === 'candidate' && Boolean(model.adapter_path)
+              return (
+                <div className="versionRow" key={model.id}>
+                  <strong>{model.model_name}</strong>
+                  <small>{model.provider} · {model.status}</small>
+                  {model.adapter_path && <small>Adapter {model.adapter_path}</small>}
+                  {latestDeployment && (
+                    <small>
+                      Latest deployment {latestDeployment.runtime_provider} · {latestDeployment.status} · health{' '}
+                      {latestDeployment.health_status ?? 'not checked'}
+                    </small>
+                  )}
+                  {latestVerifiedDeployment && (
+                    <small>
+                      Verified deployment {latestVerifiedDeployment.served_model_name} · {latestVerifiedDeployment.serving_provider} ·{' '}
+                      {formatDate(deploymentDisplayDate(latestVerifiedDeployment))}
+                    </small>
+                  )}
+                  {!latestVerifiedDeployment && model.status === 'candidate' && (
+                    <small>Deployment gate requires a verified deployment for this candidate.</small>
+                  )}
+                  {promotionEvaluation ? (
+                    <small>Evaluation gate passed by {promotionEvaluation.id}</small>
+                  ) : model.status !== 'active' ? (
+                    <small>Evaluation gate requires a passing evaluation for this model.</small>
+                  ) : null}
+                  {promotionRecord && <small>Promotion recorded as {promotionRecord.id}</small>}
+                  {model.notes && <p>{model.notes}</p>}
+                  {(canPromoteModel || canRollbackModel || canDeployModel) && (
+                    <div className="versionActions">
+                      {canDeployModel && (
+                        <button className="textButton" onClick={() => deployLearningAdapter(model)} disabled={learningLoading.deployAdapter}>
+                          <Upload size={16} />
+                          Deploy adapter
+                        </button>
+                      )}
+                      {canPromoteModel && (
+                        <button className="textButton" onClick={() => promoteLearningAdapter(model)} disabled={learningLoading.promoteAdapter}>
+                          <CheckCircle2 size={16} />
+                          Promote adapter
+                        </button>
+                      )}
+                      {canRollbackModel && (
+                        <button className="outlineButton" onClick={() => rollbackLearningAdapter(model)} disabled={learningLoading.rollbackAdapter}>
+                          Roll back to this model
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {learningPrompts.map((prompt) => (
+              <div className="versionRow" key={prompt.id}>
+                <strong>{prompt.assistant} / {prompt.version}</strong>
+                <small>{prompt.status}</small>
+                {prompt.notes && <p>{prompt.notes}</p>}
+              </div>
+            ))}
+          </div>
+          <h3>Manual Adapter Candidate</h3>
           <div className="learningAdapterGrid">
             <label className="field">
               <span>Provider</span>
@@ -646,89 +815,83 @@ export function LearningReviewRoute({
               Register adapter
             </button>
           </div>
-          <h3>Dataset Snapshots</h3>
-          <div className="datasetList">
-            {learningDatasets.length ? learningDatasets.map((snapshot) => (
-              <div className="datasetRow" key={snapshot.id}>
-                <span>
-                  <strong>{snapshot.name}</strong>
-                  <small>{snapshot.example_count} examples · {formatDate(snapshot.created_at)}</small>
-                </span>
-                <button className="iconTextButton" onClick={() => downloadLearningSnapshot(snapshot)}>
-                  <Download size={16} />
-                  JSONL
-                </button>
-              </div>
-            )) : (
-              <p className="emptyState">Create a snapshot after approving examples.</p>
-            )}
-          </div>
-          <h3>Evaluation Runs</h3>
-          <button className="textButton fullWidthAction" onClick={runLearningEvaluation} disabled={learningLoading.runEvaluation}>
-            {learningLoading.runEvaluation ? <span className="loadingSpinner" aria-hidden="true" /> : <CheckCircle2 size={16} />}
-            Run dataset evaluation
-          </button>
-          <div className="evaluationList">
-            {learningEvaluations.length ? learningEvaluations.map((run) => (
-              <div className={`evaluationRow ${run.passed ? 'passed' : 'review'}`} key={run.id}>
-                <span>
-                  <strong>{run.passed ? 'Passed' : 'Needs review'}</strong>
-                  <small>{formatDate(run.created_at)}</small>
-                </span>
-                <div className="evaluationMetrics">
-                  <span>Quality <strong>{metricValue(run.metrics.quality_score)}</strong></span>
-                  <span>Avg judge <strong>{metricValue(run.metrics.average_judge_score)}</strong></span>
-                  <span>Sources <strong>{metricValue(run.metrics.source_type_coverage)}</strong></span>
-                  <span>Assets <strong>{metricValue(run.metrics.asset_coverage)}</strong></span>
-                </div>
-                {run.notes && <p>{run.notes}</p>}
-              </div>
-            )) : (
-              <p className="emptyState">Run an evaluation after creating a dataset snapshot.</p>
-            )}
-          </div>
-          <h3>Async Learning Jobs</h3>
-          <div className="learningAdapterGrid">
-            <label className="field adapterNotesField">
-              <span>PEFT adapter job name</span>
-              <input value={peftAdapterName} onChange={(event) => setPeftAdapterName(event.target.value)} />
-            </label>
-            <button className="textButton fullWidthAction" onClick={queuePeftTuningJob} disabled={learningLoading.queuePeftTuning}>
-              {learningLoading.queuePeftTuning ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
-              Queue PEFT tuning job
-            </button>
-          </div>
-          <div className="jobList">
-            {learningJobs.length ? learningJobs.map((job) => (
-              <div className={`jobRow ${job.status}`} key={job.id}>
-                <span>
-                  <strong>{job.job_type.replace(/_/g, ' ')}</strong>
-                  <small>{job.status} · {formatDate(job.updated_at)}</small>
-                </span>
-                <small>{job.subject}</small>
-                {job.error && <p>{job.error}</p>}
-                {typeof job.output_refs.dispatch === 'string' && <p>{job.output_refs.dispatch}</p>}
-              </div>
-            )) : (
-              <p className="emptyState">Learning jobs will appear after review, dataset, evaluation, or PEFT queue actions.</p>
-            )}
-          </div>
-          <h3>Learning Artifacts</h3>
-          <div className="artifactList">
-            {learningArtifacts.length ? learningArtifacts.map((artifact) => (
-              <div className="artifactRow" key={artifact.id}>
-                <span>
-                  <strong>{artifact.artifact_type.replace(/_/g, ' ')}</strong>
-                  <small>{artifact.job_id} · {formatDate(artifact.created_at)}</small>
-                </span>
-                <small>sha256 {artifact.content_hash.slice(0, 12)}</small>
-              </div>
-            )) : (
-              <p className="emptyState">Worker-produced datasets, manifests, and adapter artifacts will appear here.</p>
-            )}
-          </div>
         </section>
       </div>
+      </div>
+      {selectedLearningExample && (
+        <div className="modalOverlay" role="presentation">
+          <section
+            aria-labelledby="learning-example-detail-title"
+            aria-modal="true"
+            className="modalPanel learningExampleDialog"
+            role="dialog"
+          >
+            <div>
+              <h3 id="learning-example-detail-title">Learning example details</h3>
+              <p className="modalContext">
+                <strong>{selectedLearningExample.source_type.replace(/_/g, ' ')}</strong>
+                <small>
+                  {selectedLearningExample.equipment_id ?? 'company-wide'} · {formatDate(selectedLearningExample.created_at)}
+                </small>
+              </p>
+            </div>
+            <div className="learningExampleDetailGrid">
+              <span>
+                <small>Judge score</small>
+                <strong>
+                  {Math.round(selectedLearningExample.judge_score * 100)}% · {selectedLearningExample.judge_label.replace(/_/g, ' ')}
+                </strong>
+              </span>
+              <span>
+                <small>Judge provider</small>
+                <strong>
+                  {selectedLearningExample.judge_used_live_provider ? 'Live LLM' : 'Fallback'} · {selectedLearningExample.judge_provider}
+                </strong>
+              </span>
+              <span>
+                <small>Status</small>
+                <strong>{selectedLearningExample.approved ? 'Approved' : 'Review'}</strong>
+              </span>
+            </div>
+            <div className="learningExampleDetailBlock">
+              <h4>Instruction</h4>
+              <p>{selectedLearningExample.instruction}</p>
+            </div>
+            <div className="learningExampleDetailBlock">
+              <h4>Expected output</h4>
+              <blockquote>{selectedLearningExample.expected_output}</blockquote>
+            </div>
+            {selectedLearningExample.judge_rationale && (
+              <div className="learningExampleDetailBlock">
+                <h4>Judge rationale</h4>
+                <p>{selectedLearningExample.judge_rationale}</p>
+              </div>
+            )}
+            <div className="modalActions">
+              <button className="outlineButton" onClick={() => setSelectedLearningExample(null)}>
+                Close
+              </button>
+              <button
+                className="outlineButton"
+                disabled={learningJudgingExampleId === selectedLearningExample.id}
+                onClick={() => judgeLearningExample(selectedLearningExample)}
+              >
+                {learningJudgingExampleId === selectedLearningExample.id ? <span className="loadingSpinner" aria-hidden="true" /> : null}
+                {learningJudgingExampleId === selectedLearningExample.id ? 'Judging...' : 'Judge'}
+              </button>
+              <button
+                className={selectedLearningExample.approved ? 'outlineButton' : 'textButton'}
+                onClick={() => {
+                  toggleLearningApproval(selectedLearningExample)
+                  setSelectedLearningExample({ ...selectedLearningExample, approved: !selectedLearningExample.approved })
+                }}
+              >
+                {selectedLearningExample.approved ? 'Remove approval' : 'Approve'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   )
 }

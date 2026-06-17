@@ -1057,7 +1057,13 @@ const learningJob = {
   requested_by: 'reliability@plant.local',
   correlation_id: 'LJOB-1',
   input_refs: { approved_only: true },
-  output_refs: { dataset_id: 'LDS-1', example_count: 1 },
+  output_refs: {
+    adapter_output_dir: 'backend/data/learning_adapters/LJOB-1/adapter',
+    dataset_id: 'LDS-1',
+    example_count: 1,
+    registered_model_version_id: 'model-adapter-candidate',
+    training_status: 'adapter_candidate_registered',
+  },
   error: null,
   retry_count: 0,
   created_at: '2026-06-13T09:06:00+05:30',
@@ -3025,6 +3031,27 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
     expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
     expect(screen.getByText(/Review approved human feedback/)).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Examples & judgments' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: 'Refresh examples' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create JSONL snapshot' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Create Snapshot' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Dataset Snapshots' })).toBeInTheDocument()
+    const approvedControlsTable = screen.getByRole('table', { name: 'Approved Controls' })
+    expect(within(approvedControlsTable).getByText('82% · training worthy')).toBeInTheDocument()
+    expect(within(approvedControlsTable).getByText('Live LLM')).toBeInTheDocument()
+    expect(within(approvedControlsTable).getByText('openai')).toBeInTheDocument()
+    expect(within(approvedControlsTable).getByText(/Root cause: loose foundation bolt resonance/)).toBeInTheDocument()
+    fireEvent.click(within(approvedControlsTable).getByRole('button', { name: 'View details' }))
+    const learningExampleDialog = await screen.findByRole('dialog', { name: 'Learning example details' })
+    expect(within(learningExampleDialog).getByText('Improve future maintenance recommendations from accepted engineer feedback.')).toBeInTheDocument()
+    expect(within(learningExampleDialog).getByText(/Outcome: vibration normalized/)).toBeInTheDocument()
+    expect(within(learningExampleDialog).getByText(/Specific, outcome-backed feedback/)).toBeInTheDocument()
+    fireEvent.click(within(learningExampleDialog).getByRole('button', { name: 'Close' }))
+    expect(screen.getByRole('tab', { name: 'Adapter lifecycle' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Qdrant migration' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Qdrant migration' }))
+    expect(screen.getByRole('tab', { name: 'Qdrant migration' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText(/Qdrant migration is only required when the embedding profile/)).toBeInTheDocument()
     expect(screen.getByText('RAG vector DB')).toBeInTheDocument()
     expect(screen.getByText('qdrant · ready')).toBeInTheDocument()
     expect(screen.getByText('Active embedding')).toBeInTheDocument()
@@ -3034,6 +3061,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByRole('button', { name: 'Run Qdrant migration' })).toBeInTheDocument()
     expect(screen.getByText('Migration')).toBeInTheDocument()
     expect(screen.getByText('Current')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Adapter lifecycle' }))
     expect(screen.getByText('Serving LLM')).toBeInTheDocument()
     expect(screen.getByText('learning active model · openai')).toBeInTheDocument()
     expect(screen.getByText('model-local-qwen2.5-current')).toBeInTheDocument()
@@ -3042,18 +3070,20 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByText('disabled · 7 days')).toBeInTheDocument()
     expect(screen.getByText('PEFT trainer')).toBeInTheDocument()
     expect(screen.getByText('prepared_artifacts · not configured')).toBeInTheDocument()
-    expect(screen.getByText('82% · training worthy')).toBeInTheDocument()
-    expect(screen.getByText('Live LLM judge · openai')).toBeInTheDocument()
-    expect(screen.getByText(/Specific, outcome-backed feedback/)).toBeInTheDocument()
     expect(screen.getByText('Passed')).toBeInTheDocument()
     expect(screen.getByText('Quality')).toBeInTheDocument()
     expect(screen.getByText('dataset snapshot')).toBeInTheDocument()
     expect(screen.getByText(/completed ·/)).toBeInTheDocument()
+    expect(screen.getByText('Training adapter candidate registered')).toBeInTheDocument()
+    expect(screen.getByText('Registered model model-adapter-candidate')).toBeInTheDocument()
+    expect(screen.getByText('Adapter output backend/data/learning_adapters/LJOB-1/adapter')).toBeInTheDocument()
     expect(screen.getByText('peft training manifest')).toBeInTheDocument()
+    expect(screen.getByText('artifact://learning/LJOB-1/training_manifest.json')).toBeInTheDocument()
     expect(screen.getByText('sha256 abcdef123456')).toBeInTheDocument()
     expect(screen.getByText('Promotion Audit')).toBeInTheDocument()
     expect(screen.getByText('Adapter promoted')).toBeInTheDocument()
-    expect(screen.getByText(/Promotion gate passed by evaluation LEVAL-1/)).toBeInTheDocument()
+    expect(screen.getByText(/Evaluation gate passed by LEVAL-1/)).toBeInTheDocument()
+    expect(screen.getByText(/Promotion recorded as LPROMO-1/)).toBeInTheDocument()
     expect(screen.getByText(/Verified deployment qwen2\.5-7b-instruct-lora-candidate · openai/)).toBeInTheDocument()
     expect(screen.getByText('Adapter Runtime Deployments')).toBeInTheDocument()
     expect(screen.getByText('verified')).toBeInTheDocument()
@@ -3066,10 +3096,12 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByText('active/candidate/promoted model reference')).toBeInTheDocument()
     expect(learningArtifactCleanupRequests.at(-1)).toMatchObject({ dry_run: true })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Judge' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Examples & judgments' }))
+    const reviewControlsTable = screen.getByRole('table', { name: 'Approved Controls' })
+    fireEvent.click(within(reviewControlsTable).getByRole('button', { name: 'Judge' }))
     expect(await screen.findByText('Judge scored feedback at 91%')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove approval' }))
+    fireEvent.click(within(reviewControlsTable).getByRole('button', { name: 'Remove approval' }))
     expect(await screen.findByText('feedback example removed from approved set')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh examples' }))
@@ -3077,10 +3109,11 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create JSONL snapshot' }))
     expect(await screen.findByText('Created dataset snapshot with 1 approved example')).toBeInTheDocument()
-    expect(screen.getByText('Latest dataset snapshot')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Download JSONL' })).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'JSONL' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('maintenance-wizard-learning-snapshot').length).toBeGreaterThan(0)
+    expect(screen.getByText('Latest')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Download JSONL' }).length).toBeGreaterThan(0)
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Adapter lifecycle' }))
     fireEvent.change(screen.getByLabelText('Adapter path'), { target: { value: 'file:///models/qwen2.5-lora' } })
     fireEvent.click(screen.getByRole('button', { name: 'Register adapter' }))
     expect(await screen.findByText('Registered adapter candidate qwen2.5-7b-instruct-lora-candidate')).toBeInTheDocument()
@@ -3107,6 +3140,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       artifact_uri: 'file:///models/qwen2.5-lora',
     })
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Qdrant migration' }))
     fireEvent.click(screen.getByRole('button', { name: 'Preview migration' }))
     expect(await screen.findByText('Previewed RAG migration to maintenance_wizard_documents_v1')).toBeInTheDocument()
     expect(screen.getByText('Migration preview')).toBeInTheDocument()
@@ -3116,6 +3150,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       await screen.findByText('Reindexed 14 RAG chunks and synced 1 approved learning example (synced) with status completed'),
     ).toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Adapter lifecycle' }))
     fireEvent.click(screen.getByRole('button', { name: 'Promote adapter' }))
     expect(await screen.findByText('Promoted adapter qwen2.5-7b-instruct-lora-candidate with audit record LPROMO-NEW')).toBeInTheDocument()
   }, 10_000)
@@ -3153,6 +3188,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refresh examples' }))
 
     expect(screen.getByRole('button', { name: 'Refresh examples' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('tab', { name: 'Qdrant migration' }))
     const migrationButton = screen.getByRole('button', { name: 'Run Qdrant migration' })
     expect(migrationButton).toBeEnabled()
     expect(migrationButton.querySelector('.loadingSpinner')).toBeNull()
