@@ -353,7 +353,7 @@ export function TechnicianExecutionCard({
     },
     {
       title: 'Capture observations',
-      detail: assistant ? assistant.next_prompt : 'Use Neo to record abnormal conditions, measurements, and evidence from the asset.',
+      detail: assistant ? assistant.next_prompt : 'Use Trinity to record abnormal conditions, measurements, and evidence from the asset.',
       state: assistant ? 'done' : ['INPRG'].includes(effectiveStatus) ? 'current' : 'pending',
     },
     {

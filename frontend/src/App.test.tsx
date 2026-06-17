@@ -1084,10 +1084,10 @@ const learningDeployment = {
   id: 'LDEPLOY-1',
   model_version_id: 'model-adapter-candidate',
   job_id: 'LJOB-DEPLOY-0',
-  runtime_provider: 'lm_studio',
+  runtime_provider: 'llama_cpp',
   serving_provider: 'openai',
   served_model_name: 'qwen2.5-7b-instruct-lora-candidate',
-  base_url: 'http://localhost:1234/v1',
+  base_url: 'http://127.0.0.1:8080/v1',
   artifact_uri: 'file:///models/qwen2.5-lora',
   artifact_hash: 'abcdef1234567890',
   status: 'verified',
@@ -1191,7 +1191,7 @@ function learningSummaryPayload(
         base_model: 'Qwen2.5',
         adapter_path: null,
         status: 'active',
-        notes: 'Local LM Studio model used by Neo, Morpheus, and Smith.',
+      notes: 'Local OpenAI-compatible runtime used by Neo, Morpheus, and Smith.',
         created_at: '2026-06-13T09:00:00+05:30',
       },
     ],
@@ -1215,7 +1215,7 @@ function learningSummaryPayload(
       provider: 'openai',
       openai_model: 'qwen2.5-7b-instruct',
       ollama_model: 'llama3.1',
-      openai_base_url: 'http://localhost:1234/v1',
+      openai_base_url: 'http://127.0.0.1:8080/v1',
       ollama_base_url: 'http://localhost:11434',
       source: 'learning_active_model',
       active_model_version_id: 'model-local-qwen2.5-current',
@@ -1306,18 +1306,26 @@ function neoWelcomeFor(user = userFor()): NeoChatResponse {
   if (user.role === 'maintenance_technician') {
     return {
       answer:
-        'I’m Neo. Vinoth, immediate attention: 1 open work order is assigned to you.\n\n### Primary Work Order: WO-8304 (APPR)\nThis work order is approved. Confirm lockout/tagout, then ask me to start it before field execution.\n1. Safety: verify permits and stored-energy release.\n2. Execute: Reduce load if vibration persists.\n3. Evidence: record readings and photos.\n4. Coding: use problem code BRGVIB.\n5. Closeout: summarize cause, action taken, residual risk, and follow-up.',
+        'Current plant priorities focus on plant risk and production exposure.\n1. P1: Assets at risk: 4 critical/high-risk assets: review highest-risk diagnosis before approving new work.',
       table: {
-        title: 'Your Assigned Work',
-        columns: ['Work order', 'Asset', 'Status', 'Priority'],
-        rows: [{ 'Work order': 'WO-8304', Asset: 'RM-DRIVE-01', Status: 'APPR', Priority: 1 }],
+        title: 'Plant Priority Updates',
+        columns: ['Priority', 'Focus', 'Plant impact', 'Signal', 'Recommendation'],
+        rows: [
+          {
+            Priority: 'P1',
+            Focus: 'Assets at risk',
+            'Plant impact': '4 critical/high-risk assets',
+            Signal: 'RM-DRIVE-01 is critical risk with low health.',
+            Recommendation: 'Review highest-risk diagnosis before approving new work.',
+          },
+        ],
       },
       action: {
         type: 'neo_welcome',
-        label: 'Loaded technician attention',
+        label: 'Loaded command center priorities',
         status: 'completed',
-        target_id: 'WO-8304',
-        detail: '1 open assigned work order.',
+        target_id: 'Assets at risk',
+        detail: '1 command center priority item.',
       },
       used_live_provider: false,
       provider: 'deterministic',
@@ -1343,18 +1351,27 @@ function neoWelcomeFor(user = userFor()): NeoChatResponse {
     }
   }
   return {
-    answer:
-      'I’m Neo. Dhruv, immediate attention: 1 work order waiting for approval, 1 follow-up item, and 1 urgent open item.',
+      answer:
+      'Current plant priorities focus on plant risk and production exposure.\n1. P1: Overdue emergency work: 1 priority-1 open work item: escalate owner progress before shift handoff.',
     table: {
-      title: 'Supervisor Attention',
-      columns: ['Work order', 'Asset', 'Status', 'Priority'],
-      rows: [{ 'Work order': 'WO-8311', Asset: 'BF-BLOWER-02', Status: 'WAPPR', Priority: 2 }],
+      title: 'Plant Priority Updates',
+      columns: ['Priority', 'Focus', 'Plant impact', 'Signal', 'Recommendation'],
+      rows: [
+        {
+          Priority: 'P1',
+          Focus: 'Overdue emergency work',
+          'Plant impact': '1 priority-1 open work item',
+          Signal: 'Exposure touches RM-DRIVE-01.',
+          Recommendation: 'Escalate owner progress before shift handoff.',
+        },
+      ],
     },
     action: {
       type: 'neo_welcome',
-      label: 'Loaded supervisor attention',
+      label: 'Loaded command center priorities',
       status: 'completed',
-      detail: '1 supervisor attention item.',
+      target_id: 'Overdue emergency work',
+      detail: '1 command center priority item.',
     },
     used_live_provider: false,
     provider: 'deterministic',
@@ -1557,7 +1574,7 @@ beforeEach(() => {
           ...learningDeployment,
           id: 'LDEPLOY-NEW',
           job_id: 'LJOB-DEPLOY-1',
-          runtime_provider: body.runtime_provider ?? 'lm_studio',
+          runtime_provider: body.runtime_provider ?? 'llama_cpp',
           served_model_name: body.served_model_name,
           base_url: body.base_url ?? null,
           artifact_uri: body.artifact_uri ?? null,
@@ -1868,14 +1885,14 @@ beforeEach(() => {
         if (initialContext) {
           const blocked = selectedOrder.material_readiness === 'blocked' || selectedOrder.material_blocker_status === 'blocked'
           const initialAnswer = blocked
-            ? `Vinoth, WO-8304 is waiting for material. Drive end spherical roller bearing is not ready; expected availability is 2026-07-03. Do not start field execution until the blocker is resolved.`
-            : `Vinoth, WO-8304 is approved and ready for technician execution. Review the current work order context before recording observations.`
+            ? `WO-8304 is blocked before field execution.\n1. P1: WO-8304: Drive end spherical roller bearing is not ready: confirm ETA before starting work.`
+            : `WO-8304 is the next assigned execution focus.\n1. P1: WO-8304: approved and ready for technician execution: verify readiness before recording observations.`
           const response = assistantStreamResponse(
             {
               work_order_id: selectedOrder.id,
               next_prompt: initialAnswer,
               live_directions: [initialAnswer],
-              recommendations: ['Use Neo to record the next relevant observation.'],
+              recommendations: ['Use Trinity to record the next relevant observation.'],
               safety_reminders: ['Apply lockout/tagout.'],
               suggested_problem_code: selectedOrder.problem_code,
               suggested_failure_class: selectedOrder.failure_class,
@@ -1894,7 +1911,7 @@ beforeEach(() => {
         const response = assistantStreamResponse(
           {
             work_order_id: 'WO-8304',
-            next_prompt: 'Neo recommends verifying torque and documenting completion.',
+            next_prompt: 'Trinity recommends verifying torque and documenting completion.',
             live_directions: ['Verify torque on bolted connections.', 'Record before and after vibration readings.'],
             recommendations: ['Set problem code LWTQCONNECT.'],
             safety_reminders: ['Apply lockout/tagout.'],
@@ -1905,7 +1922,7 @@ beforeEach(() => {
             used_live_provider: false,
             provider: 'mock',
           },
-          ['Neo recommends verifying torque ', 'and documenting completion.'],
+          ['Trinity recommends verifying torque ', 'and documenting completion.'],
         )
         if (assistantResponseDelayMs > 0) {
           return delayedResponse(response, init, assistantResponseDelayMs)
@@ -1938,7 +1955,7 @@ beforeEach(() => {
         const approvalQueue = body.queue_name === 'waiting_approval'
         const summary = approvalQueue
           ? 'Dhruv, waiting for approval: WO-8311 needs supervisor approval before execution.'
-          : 'Dhruv, Neo reviewed 2 work orders and found 2 follow-ups.'
+          : 'Dhruv, Trinity reviewed 2 work orders and found 2 follow-ups.'
         const response = assistantStreamResponse(
           {
             summary,
@@ -1953,7 +1970,7 @@ beforeEach(() => {
             used_live_provider: false,
             provider: 'mock',
           },
-          approvalQueue ? ['Dhruv, waiting for approval: WO-8311 needs supervisor approval.'] : ['Dhruv, Neo reviewed 2 work orders ', 'and found 2 follow-ups.'],
+          approvalQueue ? ['Dhruv, waiting for approval: WO-8311 needs supervisor approval.'] : ['Dhruv, Trinity reviewed 2 work orders ', 'and found 2 follow-ups.'],
         )
         if (assistantResponseDelayMs > 0) {
           return delayedResponse(response, init, assistantResponseDelayMs)
@@ -2196,8 +2213,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Incident priority')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Neo' })).toBeInTheDocument()
     expect(screen.getByText('Dashboard AI assistant')).toBeInTheDocument()
-    const supervisorTable = await screen.findByLabelText('Supervisor Attention results table')
-    expect(within(supervisorTable).getByText('Waiting for approval')).toBeInTheDocument()
+    const supervisorTable = await screen.findByLabelText('Plant Priority Updates results table')
+    expect(within(supervisorTable).getByText('Overdue emergency work')).toBeInTheDocument()
+    expect(within(supervisorTable).getByText('1 priority-1 open work item')).toBeInTheDocument()
     expect(within(supervisorTable).queryByText('WAPPR')).not.toBeInTheDocument()
     expect(screen.getByText('Priority Assets (5)')).toBeInTheDocument()
     const navigation = screen.getByLabelText('Maintenance navigation')
@@ -2319,6 +2337,19 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     ).toBe(true)
   })
 
+  it('shows Morpheus diagnosis on asset summary for maintenance supervisors', async () => {
+    render(<App />)
+    await signIn('supervisor@plant.local')
+
+    fireEvent.click(within(screen.getByLabelText('Maintenance navigation')).getByRole('button', { name: 'Assets' }))
+    const assetsTable = await screen.findByLabelText('Company assets table')
+    fireEvent.click(within(assetsTable).getByRole('button', { name: /Hot Strip Mill Main Drive Motor/ }))
+
+    expect(await screen.findByRole('heading', { name: 'Hot Strip Mill Main Drive Motor' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Diagnosis and recommendation' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run Morpheus' })).toBeInTheDocument()
+  })
+
   it('opens structured maintenance insights and scopes reports to the selected asset', async () => {
     maintenanceInsightsDelayMs = 50
     const createObjectUrl = vi.fn(() => 'blob:maintenance-insights')
@@ -2401,22 +2432,21 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Command Center' }))
 
     const transcript = screen.getByLabelText('Neo chat transcript')
-    expect(await within(transcript).findByText(/Vinoth, immediate attention: 1 open work order is assigned to you/i)).toBeInTheDocument()
-    expect(within(transcript).getByRole('heading', { name: 'Primary Work Order: WO-8304 (Approved)' })).toBeInTheDocument()
-    expect(within(transcript).getByText(/Closeout: summarize cause/)).toBeInTheDocument()
-    expect(transcript.textContent).not.toContain('Loaded technician attention')
+    expect(await within(transcript).findByText(/Current plant priorities focus on plant risk/i)).toBeInTheDocument()
+    expect(within(transcript).getByText(/P1: Assets at risk:/i)).toBeInTheDocument()
+    expect(transcript.textContent).not.toContain('Loaded command center priorities')
     expect(transcript.textContent).not.toContain('Updated table')
     expect(transcript.textContent).not.toContain('row(s)')
-    expect(transcript.textContent).not.toContain('APPR')
-    expect(screen.getByRole('heading', { name: 'Your Assigned Work' })).toBeInTheDocument()
-    const welcomeTable = screen.getByLabelText('Your Assigned Work results table')
-    expect(within(welcomeTable).getByText('WO-8304')).toBeInTheDocument()
-    expect(within(welcomeTable).getByText('RM-DRIVE-01')).toBeInTheDocument()
-    expect(within(welcomeTable).getByText('Approved')).toBeInTheDocument()
-    expect(within(welcomeTable).queryByText('APPR')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Plant Priority Updates' })).toBeInTheDocument()
+    const welcomeTable = screen.getByLabelText('Plant Priority Updates results table')
+    expect(within(welcomeTable).getByText('Assets at risk')).toBeInTheDocument()
+    expect(within(welcomeTable).getByText('4 critical/high-risk assets')).toBeInTheDocument()
+    expect(within(welcomeTable).getByText(/RM-DRIVE-01 is critical risk/)).toBeInTheDocument()
+    expect(within(welcomeTable).queryByText('WO-8304')).not.toBeInTheDocument()
+    expect(within(welcomeTable).queryByText('WMATL')).not.toBeInTheDocument()
   })
 
-  it('loads selected material-blocked technician context from Neo instead of a static start message', async () => {
+  it('loads selected material-blocked technician context from Trinity instead of a static start message', async () => {
     apiWorkOrders = [
       {
         ...(workOrders[0] as WorkOrder),
@@ -2443,9 +2473,10 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
 
-    const transcript = screen.getByLabelText('Neo technician chat')
-    expect(await within(transcript).findByText(/WO-8304 is waiting for material/)).toBeInTheDocument()
-    expect(transcript.textContent).toContain('expected availability is 2026-07-03')
+    const transcript = screen.getByLabelText('Trinity technician chat')
+    expect(await within(transcript).findByText(/WO-8304 is blocked before field execution/)).toBeInTheDocument()
+    expect(transcript.textContent).toContain('P1: WO-8304')
+    expect(transcript.textContent).toContain('confirm ETA before starting work')
     expect(transcript.textContent).not.toContain('Let’s start the work order')
     expect(within(screen.getByLabelText('Technician execution workflow')).getByText('Waiting for material')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Start work' })).toBeDisabled()
@@ -2482,19 +2513,19 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1)
     })
-    expect(within(screen.getByLabelText('Neo technician chat')).getByText(/Thinking/)).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Trinity technician chat')).getByText(/Thinking/)).toBeInTheDocument()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(7_100)
     })
     expect(
-      within(screen.getByLabelText('Neo technician chat')).getByText(/Waiting for the LLM response/),
+      within(screen.getByLabelText('Trinity technician chat')).getByText(/Waiting for the LLM response/),
     ).toBeInTheDocument()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(8_100)
     })
-    const transcript = screen.getByLabelText('Neo technician chat')
+    const transcript = screen.getByLabelText('Trinity technician chat')
     expect(
       within(transcript).queryByText(/could not get a live LLM response within \d+ seconds/),
     ).not.toBeInTheDocument()
@@ -2503,7 +2534,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       await vi.advanceTimersByTimeAsync(5_000)
       await Promise.resolve()
     })
-    expect(transcript.textContent).toContain('Vinoth, WO-8304')
+    expect(transcript.textContent).toContain('WO-8304 is the next assigned execution focus')
   })
 
   it('keeps waiting for a submitted technician query past 15 seconds while the stream is still pending', async () => {
@@ -2511,7 +2542,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     await signIn('technician@plant.local')
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
-    expect(await within(screen.getByLabelText('Neo technician chat')).findByText(/approved and ready for technician execution/)).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Trinity technician chat')).findByText(/P1: WO-8304: approved and ready for technician execution/)).toBeInTheDocument()
 
     vi.useFakeTimers()
     assistantResponseDelayMs = 20_000
@@ -2519,13 +2550,13 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       target: { value: 'Connections 3 and 5 were loose.' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    expect(within(screen.getByLabelText('Neo technician chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Trinity technician chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15_100)
     })
 
-    const transcript = screen.getByLabelText('Neo technician chat')
+    const transcript = screen.getByLabelText('Trinity technician chat')
     expect(within(transcript).queryByText(/could not get a live LLM response within \d+ seconds/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
 
@@ -2534,7 +2565,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       await Promise.resolve()
     })
 
-    expect(transcript.textContent).toContain('Neo recommends verifying torque')
+    expect(transcript.textContent).toContain('Trinity recommends verifying torque')
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled()
   })
 
@@ -2543,7 +2574,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     await signIn('technician@plant.local')
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
-    expect(await within(screen.getByLabelText('Neo technician chat')).findByText(/approved and ready for technician execution/)).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Trinity technician chat')).findByText(/P1: WO-8304: approved and ready for technician execution/)).toBeInTheDocument()
 
     vi.useFakeTimers()
     assistantResponseDelayMs = 70_000
@@ -2556,7 +2587,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       await vi.advanceTimersByTimeAsync(60_100)
     })
 
-    const transcript = screen.getByLabelText('Neo technician chat')
+    const transcript = screen.getByLabelText('Trinity technician chat')
     expect(within(transcript).getByText(/could not get a live LLM response within 60 seconds/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled()
   })
@@ -2645,9 +2676,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
     const workOrdersHeading = screen.getByRole('heading', { name: 'Assigned and follow-up work' })
     expect(workOrdersHeading).toBeInTheDocument()
-    expect(within(centerPane).queryByText('Neo is available to technician and supervisor accounts.')).not.toBeInTheDocument()
+    expect(within(centerPane).queryByText('Trinity is available to technician and supervisor accounts.')).not.toBeInTheDocument()
     expect(within(centerPane).queryByText('Select a work order to use the assistant.')).not.toBeInTheDocument()
-    expect(within(rightPane).queryByText('Neo is available to technician and supervisor accounts.')).not.toBeInTheDocument()
+    expect(within(rightPane).queryByText('Trinity is available to technician and supervisor accounts.')).not.toBeInTheDocument()
 
     expect(screen.queryByLabelText('Assign WO-8297')).not.toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'Planning' }))
@@ -2803,14 +2834,15 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(await screen.findByText('Assigned and follow-up work')).toBeInTheDocument()
     const centerPane = screen.getByLabelText('Work order center pane')
     const rightPane = screen.getByLabelText('Work order right pane')
-    const neoHeading = within(centerPane).getByRole('heading', { name: 'Neo' })
+    const neoHeading = within(centerPane).getByRole('heading', { name: 'Trinity' })
     const workOrdersHeading = screen.getByRole('heading', { name: 'Assigned and follow-up work' })
     expect(neoHeading).toBeInTheDocument()
     expect(Boolean(neoHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-    expect(within(centerPane).getByText('Technician AI assistant with shared LLM configuration')).toBeInTheDocument()
+    expect(within(centerPane).getByText('Prioritized work list with short summary and next recommendation')).toBeInTheDocument()
     expect(within(centerPane).getByRole('heading', { name: 'Assigned Schedule' })).toBeInTheDocument()
     expect(within(centerPane).queryByLabelText('Maintenance planning and dispatch board')).not.toBeInTheDocument()
-    expect(within(rightPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
+    expect(within(rightPane).queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
+    expect(within(centerPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
     const executionWorkflow = within(centerPane).getByLabelText('Technician execution workflow')
     expect(within(executionWorkflow).getByRole('heading', { name: 'Technician Execution' })).toBeInTheDocument()
     expect(within(executionWorkflow).getByText('Approved')).toBeInTheDocument()
@@ -2823,7 +2855,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(within(executionWorkflow).getByText('Submit completion')).toBeInTheDocument()
     expect(within(centerPane).getByRole('button', { name: 'WO-8304' })).toBeInTheDocument()
     expect(within(centerPane).queryByRole('button', { name: 'WO-8297' })).not.toBeInTheDocument()
-    expect(await within(screen.getByLabelText('Neo technician chat')).findByText(/approved and ready for technician execution/)).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Trinity technician chat')).findByText(/P1: WO-8304: approved and ready for technician execution/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Start WO-8304' }))
     await screen.findByText('WO-8304 started')
     expect(await within(screen.getByLabelText('Technician execution workflow')).findByText('In progress')).toBeInTheDocument()
@@ -2836,14 +2868,14 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       target: { value: 'Connections 3 and 5 were loose.' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    expect(within(screen.getByLabelText('Neo technician chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
-    expect(await within(screen.getByLabelText('Neo technician chat')).findByText(/Thinking/)).toBeInTheDocument()
-    expect(await within(screen.getByLabelText('Neo technician chat')).findByText(/Neo recommends verifying torque/)).toBeInTheDocument()
+    expect(within(screen.getByLabelText('Trinity technician chat')).getByText('Connections 3 and 5 were loose.')).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Trinity technician chat')).findByText(/Thinking/)).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Trinity technician chat')).findByText(/Trinity recommends verifying torque/)).toBeInTheDocument()
     const updatedWorkflow = screen.getByLabelText('Technician execution workflow')
     expect(await within(updatedWorkflow).findByText('Set problem code LWTQCONNECT.')).toBeInTheDocument()
     expect(within(updatedWorkflow).getByText(/Connections were tightened to spec./)).toBeInTheDocument()
-    expect(screen.getByLabelText('Neo technician chat').textContent).not.toContain('Verify torque on bolted connections.')
-    expect(screen.getByLabelText('Neo technician chat').textContent).not.toContain('Problem code: LWTQCONNECT')
+    expect(screen.getByLabelText('Trinity technician chat').textContent).not.toContain('Verify torque on bolted connections.')
+    expect(screen.getByLabelText('Trinity technician chat').textContent).not.toContain('Problem code: LWTQCONNECT')
     expect(screen.getAllByText('LLM fallback · mock').length).toBeGreaterThanOrEqual(1)
     const submitCompleted = within(updatedWorkflow).getByRole('button', { name: 'Submit completed work' })
     expect(submitCompleted).toBeEnabled()
@@ -2858,22 +2890,23 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(await screen.findByText('Assigned and follow-up work')).toBeInTheDocument()
     const centerPane = screen.getByLabelText('Work order center pane')
     const rightPane = screen.getByLabelText('Work order right pane')
-    const neoHeading = within(centerPane).getByRole('heading', { name: 'Neo' })
+    const neoHeading = within(centerPane).getByRole('heading', { name: 'Trinity' })
     const workOrdersHeading = screen.getByRole('heading', { name: 'Assigned and follow-up work' })
     expect(neoHeading).toBeInTheDocument()
     expect(Boolean(neoHeading.compareDocumentPosition(workOrdersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-    expect(within(centerPane).getByText('Supervisor AI assistant with shared LLM configuration')).toBeInTheDocument()
-    expect(within(rightPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
+    expect(within(centerPane).getByText('Prioritized work list with short summary and next recommendation')).toBeInTheDocument()
+    expect(within(rightPane).queryByRole('heading', { name: 'Trinity' })).not.toBeInTheDocument()
+    expect(within(centerPane).queryByRole('heading', { name: 'Neo' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Assign WO-8304')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approve WO-8297' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve WO-8275' })).not.toBeInTheDocument()
-    expect(await within(screen.getByLabelText('Neo supervisor chat')).findByText(/Neo reviewed 2 work orders/)).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Trinity supervisor chat')).findByText(/Trinity reviewed 2 work orders/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    expect(within(screen.getByLabelText('Neo supervisor chat')).getByText('Summarize follow-up actions for completed work orders.')).toBeInTheDocument()
-    expect(await within(screen.getByLabelText('Neo supervisor chat')).findByText(/Thinking/)).toBeInTheDocument()
-    expect(await screen.findByText(/Neo reviewed 2 work orders/)).toBeInTheDocument()
-    const supervisorTranscript = screen.getByLabelText('Neo supervisor chat')
+    expect(within(screen.getByLabelText('Trinity supervisor chat')).getByText('Summarize follow-up actions for completed work orders.')).toBeInTheDocument()
+    expect(await within(screen.getByLabelText('Trinity supervisor chat')).findByText(/Thinking/)).toBeInTheDocument()
+    expect(await screen.findByText(/Trinity reviewed 2 work orders/)).toBeInTheDocument()
+    const supervisorTranscript = screen.getByLabelText('Trinity supervisor chat')
     expect(supervisorTranscript.textContent).not.toContain('Review WO-8297 brake shoe replacement planning.')
     expect(supervisorTranscript.textContent).not.toContain('Risk: WO-8304 remains priority 1 and Approved.')
     expect(supervisorTranscript.textContent).not.toContain('APPR')
@@ -2885,8 +2918,8 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     await signIn('supervisor@plant.local')
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
-    const transcript = await screen.findByLabelText('Neo supervisor chat')
-    expect(await within(transcript).findByText(/Neo reviewed 2 work orders/)).toBeInTheDocument()
+    const transcript = await screen.findByLabelText('Trinity supervisor chat')
+    expect(await within(transcript).findByText(/Trinity reviewed 2 work orders/)).toBeInTheDocument()
     expect(supervisorAssistantRequests[0].question).toContain('Address Dhruv by name, not by role.')
 
     const question = 'what are the work orders pending for my approval'
@@ -2900,20 +2933,20 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     })
   })
 
-  it('lets supervisor Neo approve an explicit work order command through the action tool', async () => {
+  it('lets supervisor Trinity approve an explicit work order command through the action tool', async () => {
     render(<App />)
     await signIn('supervisor@plant.local')
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
-    const transcript = await screen.findByLabelText('Neo supervisor chat')
-    expect(await within(transcript).findByText(/Neo reviewed 2 work orders/)).toBeInTheDocument()
+    const transcript = await screen.findByLabelText('Trinity supervisor chat')
+    expect(await within(transcript).findByText(/Trinity reviewed 2 work orders/)).toBeInTheDocument()
     const assistantRequestCount = supervisorAssistantRequests.length
 
     fireEvent.change(screen.getByLabelText('Supervisor question'), { target: { value: 'Approve WO-8311' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
     expect(await within(transcript).findByText(/Dhruv, approved WO-8311/)).toBeInTheDocument()
-    expect(within(transcript).getByText('Neo action')).toBeInTheDocument()
+    expect(within(transcript).getByText('Trinity action')).toBeInTheDocument()
     expect(supervisorAssistantRequests).toHaveLength(assistantRequestCount)
     expect(await screen.findByText('WO-8311 approved')).toBeInTheDocument()
     const approveCall = vi
@@ -3117,7 +3150,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByText('Adapter promoted')).toBeInTheDocument()
     expect(screen.getByText(/Evaluation gate passed by LEVAL-1/)).toBeInTheDocument()
     expect(screen.getByText(/Promotion recorded as LPROMO-1/)).toBeInTheDocument()
-    expect(screen.getByText(/Verified deployment qwen2\.5-7b-instruct-lora-candidate · openai/)).toBeInTheDocument()
+    expect(screen.getByText(/Runtime-loaded alias qwen2\.5-7b-instruct-lora-candidate · openai/)).toBeInTheDocument()
     expect(screen.getByText('Adapter Runtime Deployments')).toBeInTheDocument()
     const initialDeploymentTable = screen.getByRole('table', { name: 'Adapter runtime deployments' })
     expect(within(initialDeploymentTable).getByText('verified')).toBeInTheDocument()
@@ -3153,10 +3186,10 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       'PEFT Tuning Job',
       'Learning Job Trail',
       'Learning Artifacts',
-      'Model and Prompt Versions',
+      'Adapter and Prompt Versions',
       'Adapter Runtime Deployments',
       'Promotion Audit',
-      'Manual Adapter Candidate',
+      'Local Adapter Candidate',
     ].map((name) => screen.getByRole('heading', { name }))
     lifecycleHeadings.slice(0, -1).forEach((heading, index) => {
       expect(Boolean(heading.compareDocumentPosition(lifecycleHeadings[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
@@ -3171,7 +3204,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByRole('table', { name: 'Promotion audit' })).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Adapter path'), { target: { value: 'file:///models/qwen2.5-lora' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Register adapter' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Register local adapter candidate' }))
     expect(await screen.findByText('Registered adapter candidate qwen2.5-7b-instruct-lora-candidate')).toBeInTheDocument()
 
     fireEvent.click(validationButton)
@@ -3182,7 +3215,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
     fireEvent.change(screen.getByLabelText('Runtime provider'), { target: { value: 'vllm' } })
     fireEvent.change(screen.getByLabelText('Runtime base URL'), { target: { value: 'http://localhost:8001/v1' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Deploy adapter' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Deploy adapter to runtime' }))
     expect(await screen.findByText('Deployment job LJOB-DEPLOY-1 requested with status queued')).toBeInTheDocument()
     expect(await screen.findByText('deploying')).toBeInTheDocument()
     expect(within(screen.getByRole('table', { name: 'Adapter runtime deployments' })).getByText('pending')).toBeInTheDocument()
@@ -3207,8 +3240,8 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Adapter lifecycle' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Promote adapter' }))
-    expect(await screen.findByText('Promoted adapter qwen2.5-7b-instruct-lora-candidate with audit record LPROMO-NEW')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Promote runtime-loaded adapter' }))
+    expect(await screen.findByText('Promoted runtime-loaded adapter qwen2.5-7b-instruct-lora-candidate with audit record LPROMO-NEW')).toBeInTheDocument()
   }, 10_000)
 
   it('explains when refreshing learning examples finds no training sources', async () => {
@@ -3264,7 +3297,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Judge' }))
 
     expect(await screen.findByRole('button', { name: 'Judging...' })).toBeDisabled()
-    expect(screen.getByText('Judging feedback example. Live LM Studio checks can take up to 15 seconds before falling back.')).toBeInTheDocument()
+    expect(screen.getByText('Judging feedback example. Live LLM checks can take up to 15 seconds before falling back.')).toBeInTheDocument()
     expect(await screen.findByText('Judge scored feedback at 91%')).toBeInTheDocument()
   })
 

@@ -17,10 +17,10 @@ Use this sequence in the Learning and Tuning view when preparing an adapter from
 9. **Queue PEFT tuning job**: Create the async `peft_tuning` job; the backend stores the dataset and training manifest and publishes the job for the learning worker when async learning is enabled.
 10. **Monitor Async Learning Jobs**: Watch the job move through queued, published, running, completed, or failed states so you know whether the worker processed it.
 11. **Review Learning Artifacts**: Confirm dataset, manifest, trainer log, adapter manifest, adapter registry, and adapter artifact records were created for the job.
-12. **Confirm candidate registration**: After successful trainer output, verify that the worker registered a candidate model version with the adapter path from `adapter_manifest.json`.
-13. **Deploy adapter**: Queue a runtime deployment check so the configured serving runtime, such as LM Studio, Ollama, or vLLM, proves it can answer using the candidate model name.
+12. **Confirm candidate registration**: After successful trainer output, verify that the worker registered a local adapter candidate with the adapter path from `adapter_manifest.json`.
+13. **Deploy adapter to runtime**: Queue a runtime deployment check so the configured serving runtime, such as llama.cpp, LM Studio, Ollama, or vLLM, proves it can answer using the candidate adapter alias.
 14. **Run dataset evaluation**: Run the evaluation gate against the dataset, candidate model, and prompt version to confirm the candidate passes quality thresholds.
-15. **Promote adapter**: Promote only a candidate with a registered adapter path, verified runtime deployment, and passing evaluation so live LLM calls can resolve the active learning model.
+15. **Promote adapter**: Promotion now performs or verifies runtime deployment first, then activates only a candidate with a registered adapter path, runtime-loaded deployment, and passing evaluation so live LLM calls resolve the loaded adapter alias.
 16. **Rollback if needed**: Use rollback controls to return serving to a previous active model version if the promoted adapter performs poorly.
 
 Click-only operation requires the local stack to already be running with NATS, the backend, and the learning worker. Actual adapter training also requires `LEARNING_PEFT_TRAINER_COMMAND` and trainer dependencies to be configured before the job is queued; otherwise the worker prepares dataset and manifest artifacts but does not train an adapter.
@@ -38,7 +38,7 @@ The learning worker invokes `LEARNING_PEFT_TRAINER_COMMAND` without a shell and 
 | `MW_PEFT_BASE_MODEL` | Yes | Base model recorded in the PEFT job. |
 | `MW_PEFT_JOB_ID` | No | Job id supplied by the worker for manifest traceability. |
 
-The trainer must exit nonzero on failure and write `adapter_manifest.json` on success. The backend registers the result as a `candidate` model version only; evaluation and promotion remain separate reviewer-controlled gates.
+The trainer must exit nonzero on failure and write `adapter_manifest.json` on success. The backend registers the result as a local `candidate` adapter version only; evaluation, runtime deployment, and promotion remain separate reviewer-controlled gates.
 
 ## Installing Optional Dependencies
 
@@ -77,6 +77,45 @@ MW_PEFT_MAX_SEQ_LENGTH=2048
 ```
 
 Set `MW_PEFT_MODEL_SOURCE` when `MW_PEFT_BASE_MODEL` is a serving identifier rather than a trainable Hugging Face model id. LM Studio GGUF names and Ollama model tags are serving identifiers; this trainer expects a Hugging Face repo id such as `Qwen/Qwen2.5-7B-Instruct` or a local Transformers model directory.
+
+## Runtime Deployment
+
+Promotion must prove that the adapter is actually loaded by the serving runtime. A manual record is kept for audit, but it no longer satisfies the promotion gate.
+
+### llama.cpp Adapter Runtime
+
+The default local adapter path uses llama.cpp because `llama-server` can serve a GGUF base model with a GGUF LoRA adapter and expose OpenAI-compatible `/v1/chat/completions`. Configure:
+
+```bash
+LEARNING_RUNTIME_DEPLOYER_DEFAULT=llama_cpp
+LEARNING_ADAPTER_DEPLOYER_COMMAND="bash scripts/peft/deploy_llama_cpp_adapter.sh"
+LEARNING_ADAPTER_DEPLOYER_TIMEOUT_SECONDS=120
+OPENAI_BASE_URL=http://127.0.0.1:8080/v1
+OPENAI_MODEL=maintenance-wizard-qwen-lora
+LLAMA_CPP_BASE_MODEL_PATH=
+LLAMA_CPP_HF_REPO=Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
+LLAMA_CPP_HF_FILE=
+LLAMA_CPP_ADAPTER_GGUF_PATH=/path/to/trained-adapter.gguf
+LLAMA_CPP_HOST=127.0.0.1
+LLAMA_CPP_PORT=8080
+```
+
+If the trainer produced a PEFT adapter directory rather than a GGUF adapter file, set `LLAMA_CPP_CONVERT_LORA_SCRIPT` to `llama.cpp/convert_lora_to_gguf.py`. The deployer converts the adapter into `${MW_ADAPTER_ARTIFACT_URI}/adapter.gguf`, starts `llama-server` with `--model` or `--hf-repo`, `--lora`, and `--alias`, then the backend probes the OpenAI-compatible endpoint using the candidate alias. The base GGUF must match the model used to train the adapter; the local adapter generated in this project was trained from `Qwen/Qwen2.5-0.5B-Instruct`.
+
+Use `LLAMA_CPP_EXTRA_ARGS` for local performance flags such as context size, GPU layer offload, or Metal tuning. The script intentionally requires explicit model and adapter paths so the app never guesses at large local model files.
+
+### Optional LM Studio Fused-Model Runtime
+
+LM Studio remains a valid OpenAI-compatible runtime for fused or imported model files. Its OpenAI-compatible API can prove that a served alias responds, but the `lms load` CLI loads model files or model keys. It does not attach a raw PEFT adapter folder directly. If your training flow exports a fused model file, configure:
+
+```bash
+LEARNING_RUNTIME_DEPLOYER_DEFAULT=lm_studio
+LEARNING_ADAPTER_DEPLOYER_COMMAND="bash scripts/peft/deploy_lmstudio_fused_model.sh"
+OPENAI_BASE_URL=http://localhost:1234/v1
+MW_ADAPTER_DEPLOY_MODEL_SOURCE=/path/to/fused-adapter-model.gguf
+```
+
+The deployer loads `MW_ADAPTER_DEPLOY_MODEL_SOURCE` into LM Studio using the candidate's served adapter alias, then the backend probes `OPENAI_BASE_URL` with that alias. If the probe fails, promotion fails and the previous active runtime remains in use.
 
 ## Adapter Manifest
 

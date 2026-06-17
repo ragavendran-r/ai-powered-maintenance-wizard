@@ -179,6 +179,63 @@ def test_rca_workspace_drafts_closes_and_feeds_learning():
     assert any(example["source_type"] == "rca_case" and example["source_id"] == "RCA-9001" for example in examples)
 
 
+def test_rca_stream_removes_repeated_fishbone_branches(monkeypatch):
+    import app.services.rca as rca_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            assert "Limit Fishbone to 4 unique branches" in system_prompt
+            yield LLMTextResponse(
+                content=(
+                    "### Probable Cause\n"
+                    "- Inlet guide vane actuator response drift.\n"
+                    "### Evidence\n"
+                    "- Shift log shows outlet pressure oscillation.\n"
+                    "### 5-Why\n"
+                    "- Why did outlet pressure oscillate? Feedback lagged command.\n"
+                    "- Why did outlet pressure oscillate? Feedback lagged command.\n"
+                    "### Fishbone\n"
+                    "- Inlet Guide Vane Feedback Lag\n"
+                    "- Inlet Guide Vane Feedback Lagging Command\n"
+                    "- Inlet Guide Vane Feedback Lagging Command Position Feedback Drift\n"
+                    "- Inlet Guide Vane Feedback Lagging Command Position Feedback Drift Feedback Drift Feedback\n"
+                    "### Corrective Actions\n"
+                    "- Inspect actuator linkage.\n"
+                    "### Missing Checks\n"
+                    "- Verify position transmitter calibration.\n"
+                ),
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(rca_module, "configured_llm_client", lambda: FakeClient())
+    response = client.post(
+        "/api/rca-cases/morpheus-draft/stream",
+        headers=auth_headers("reliability@plant.local"),
+        json={
+            "case_id": "RCA-9001",
+            "question": "Draft RCA with hypotheses, 5-Why, fishbone, and missing checks.",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.text
+    token_payloads = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ") and json.loads(line.removeprefix("data: ")).get("type") == "token"
+    ]
+    streamed_text = "\n".join(str(event.get("content", "")) for event in token_payloads)
+    assert "Inlet Guide Vane Feedback Lag" in body
+    assert "Feedback Drift Feedback Drift Feedback" not in body
+    assert streamed_text.count("Why did outlet pressure oscillate") == 1
+
+
 def test_embedding_profile_id_changes_with_model_version_and_dimensions():
     first = embedding_profile_id("deterministic_hash", "maintenance-hash-v1", "1", 64, "Cosine")
     second = embedding_profile_id("deterministic_hash", "maintenance-hash-v2", "2", 64, "Cosine")
@@ -299,6 +356,50 @@ def test_asset_reliability_prediction_stream_requires_live_llm():
     assert '"type": "done"' not in response.text
 
 
+def test_asset_reliability_prediction_stream_removes_repeated_drivers(monkeypatch):
+    import app.services.assets as assets_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            assert "Do not repeat the same driver" in system_prompt
+            yield LLMTextResponse(
+                content=(
+                    "### Failure Prediction\n"
+                    "- Probability 0.95, critical risk, RUL 4 days.\n"
+                    "### Why\n"
+                    "- High bearing temperature rolling-baseline anomaly contributes 49%.\n"
+                    "- High bearing temperature rolling-baseline anomaly contributes 47%.\n"
+                    "- High bearing temperature rolling-baseline anomaly contributes 49%.\n"
+                    "- Bearing vibration is above baseline.\n"
+                    "### Next Actions\n"
+                    "- Inspect bearing housing temperature and vibration.\n"
+                ),
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(assets_module, "configured_llm_client", lambda: FakeClient())
+    response = client.get("/api/assets/RM-DRIVE-01/reliability/stream", headers=auth_headers())
+
+    assert response.status_code == 200, response.text
+    body = response.text
+    token_payloads = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ") and json.loads(line.removeprefix("data: ")).get("type") == "token"
+    ]
+    streamed_text = "\n".join(str(event.get("content", "")) for event in token_payloads)
+    assert "High bearing temperature rolling-baseline anomaly" in streamed_text
+    assert streamed_text.count("High bearing temperature rolling-baseline anomaly") == 1
+    assert "Bearing vibration is above baseline" in streamed_text
+    assert '"type": "done"' in body
+
+
 def test_repository_initializes_once_under_concurrent_access(monkeypatch):
     calls = 0
 
@@ -366,6 +467,17 @@ def test_operator_can_read_but_cannot_diagnose_or_ingest():
     with client.stream("POST", "/api/diagnose/stream", json={"equipment_id": "RM-DRIVE-01"}, headers=headers) as stream_response:
         assert stream_response.status_code == 403
     assert ingest_response.status_code == 403
+
+
+def test_supervisor_can_run_morpheus_diagnosis():
+    headers = auth_headers("supervisor@plant.local")
+
+    response = client.post("/api/diagnose", json={"equipment_id": "RM-DRIVE-01"}, headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["equipment_id"] == "RM-DRIVE-01"
+    assert payload["diagnosis"]
 
 
 def test_reliability_engineer_can_ingest_and_view_streaming_status():
@@ -890,7 +1002,7 @@ def test_technician_assistant_suggests_problem_code_from_observation():
     assert payload["suggested_problem_code"] == "BRGVIB"
     assert payload["live_directions"] == []
     assert payload["recommendations"] == []
-    assert "Sorry, Neo could not get a live LLM response" in payload["completion_summary"]
+    assert "Sorry, Trinity could not get a live LLM response" in payload["completion_summary"]
     assert payload["evidence"]
 
     forbidden_response = client.post(
@@ -917,8 +1029,8 @@ def test_technician_assistant_streams_sse_response():
     assert '"type": "meta"' in body
     assert '"type": "token"' in body
     assert '"type": "done"' in body
-    assert "Neo" in body
-    assert "Sorry, Neo could not get a live LLM response" in body
+    assert "Trinity" in body
+    assert "Sorry, Trinity could not get a live LLM response" in body
     assert "LWTQCONNECT" not in body
 
     forbidden_response = client.post(
@@ -944,7 +1056,7 @@ def test_technician_assistant_stream_uses_stream_llm_timeout(monkeypatch):
             captured["prompt"] = prompt
             captured["system_prompt"] = system_prompt
             captured["timeout_seconds"] = timeout_seconds
-            yield LLMTextResponse(content="Neo bounded guidance.", used_live_provider=True, provider="openai")
+            yield LLMTextResponse(content="Trinity bounded guidance.", used_live_provider=True, provider="openai")
 
     monkeypatch.setattr(assistant_module, "configured_llm_client", lambda: FakeClient())
     with client.stream(
@@ -960,7 +1072,7 @@ def test_technician_assistant_stream_uses_stream_llm_timeout(monkeypatch):
     assert "Technician name: Vinoth" in captured["prompt"]
     assert "Address the technician by this name; do not address them by role." in captured["prompt"]
     assert "address them by name and not by role" in captured["system_prompt"]
-    assert "Neo bounded guidance" in body
+    assert "Trinity bounded guidance" in body
 
 
 def test_technician_assistant_uses_apology_when_material_question_has_no_llm():
@@ -975,7 +1087,7 @@ def test_technician_assistant_uses_apology_when_material_question_has_no_llm():
         assert response.status_code == 200
         body = "".join(response.iter_text())
 
-    assert "Sorry, Neo could not get a live LLM response" in body
+    assert "Sorry, Trinity could not get a live LLM response" in body
     assert "Drive end spherical roller bearing" not in body
     assert "Safety:" not in body
 
@@ -990,7 +1102,7 @@ def test_technician_assistant_uses_apology_for_off_topic_query_without_llm():
         assert response.status_code == 200
         body = "".join(response.iter_text())
 
-    assert "Sorry, Neo could not get a live LLM response" in body
+    assert "Sorry, Trinity could not get a live LLM response" in body
     assert "Verify the current load" not in body
     assert "Live LLM" not in body
 
@@ -1006,7 +1118,7 @@ def test_supervisor_assistant_reviews_follow_up_queue_and_drafts_order():
 
     assert response.status_code == 200
     payload = response.json()
-    assert "Sorry, Neo could not get a live LLM response" in payload["summary"]
+    assert "Sorry, Trinity could not get a live LLM response" in payload["summary"]
     assert payload["follow_up_actions"] == []
     assert "WO-8297" in payload["referenced_work_orders"]
     assert payload["draft_work_order"] is None
@@ -1035,7 +1147,7 @@ def test_supervisor_assistant_streams_sse_response():
     assert '"type": "meta"' in body
     assert '"type": "token"' in body
     assert '"type": "done"' in body
-    assert "Neo" in body
+    assert "Trinity" in body
     assert "WO-8297" in body
 
     forbidden_response = client.post(
@@ -1094,7 +1206,7 @@ def test_supervisor_assistant_uses_apology_for_off_topic_query_without_llm():
         assert response.status_code == 200
         body = "".join(response.iter_text())
 
-    assert "Sorry, Neo could not get a live LLM response" in body
+    assert "Sorry, Trinity could not get a live LLM response" in body
     assert "supervisor review only" not in body
 
 
@@ -1113,7 +1225,7 @@ def test_supervisor_assistant_stream_uses_stream_llm_timeout(monkeypatch):
             captured["prompt"] = prompt
             captured["system_prompt"] = system_prompt
             captured["timeout_seconds"] = timeout_seconds
-            yield LLMTextResponse(content="Neo supervisor bounded review.", used_live_provider=True, provider="openai")
+            yield LLMTextResponse(content="Trinity supervisor bounded review.", used_live_provider=True, provider="openai")
 
     monkeypatch.setattr(assistant_module, "configured_llm_client", lambda: FakeClient())
     with client.stream(
@@ -1128,7 +1240,7 @@ def test_supervisor_assistant_stream_uses_stream_llm_timeout(monkeypatch):
     assert captured["timeout_seconds"] == 60.0
     assert "Supervisor name: Dhruv" in captured["prompt"]
     assert "address them by name and not by role" in captured["system_prompt"]
-    assert "Neo supervisor bounded review" in body
+    assert "Trinity supervisor bounded review" in body
 
 
 def test_streaming_status_is_disabled_by_default():
@@ -1444,7 +1556,11 @@ def test_neo_welcome_streams_llm_context_and_done_event(monkeypatch):
         def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
             captured["prompt"] = prompt
             captured["timeout_seconds"] = timeout_seconds
-            yield LLMTextResponse(content="Dhruv, supervisor welcome streamed from the LLM.", used_live_provider=True, provider="openai")
+            yield LLMTextResponse(
+                content="Plant priorities focus on risk and production impact.\n1. P1: Assets at risk: 4 critical/high-risk assets: review highest-risk diagnosis first.",
+                used_live_provider=True,
+                provider="openai",
+            )
 
     monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
     with client.stream(
@@ -1457,13 +1573,15 @@ def test_neo_welcome_streams_llm_context_and_done_event(monkeypatch):
         body = "".join(response.iter_text())
 
     assert captured["timeout_seconds"] == 15.0
-    assert "Supervisor Attention" in captured["prompt"]
-    assert "User: Dhruv (maintenance_supervisor)" in captured["prompt"]
-    assert "Address the user by the name Dhruv; do not address them by role." in captured["prompt"]
+    assert "Plant Priority Updates" in captured["prompt"]
+    assert "Command Center plant priority updates" in captured["prompt"]
+    assert "Final answer:" in captured["prompt"]
+    assert "Sentence 1" not in captured["prompt"]
     assert '"type": "meta"' in body
-    assert "Dhruv, supervisor welcome streamed from the LLM." in body
+    assert "Assets at risk" in body
+    assert "WO-8311 and WO-8321 need approval" not in body
     assert '"type": "done"' in body
-    assert '"title": "Supervisor Attention"' in body
+    assert '"title": "Plant Priority Updates"' in body
     assert '"provider": "openai"' in body
 
 
@@ -1519,39 +1637,165 @@ def test_neo_user_table_supports_role_filters_with_llm_answer():
     assert payload["provider"] == "mock"
 
 
-def test_neo_welcome_highlights_assigned_technician_work():
-    response = client.get("/api/neo/welcome", headers=auth_headers("technician@plant.local"))
+def test_neo_welcome_highlights_assigned_technician_work(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            assert "WO-8304" in prompt
+            return LLMTextResponse(
+                content="Ragav, WO-8304 is assigned to you and is waiting on blocked material before field work can start.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    response = client.get("/api/neo/welcome?context=work_execution", headers=auth_headers("technician@plant.local"))
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "mock"
+    assert payload["provider"] == "openai"
     assert payload["action"]["type"] == "neo_welcome"
     assert payload["action"]["target_id"] == "WO-8304"
-    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
-    assert "Primary Work Order: WO-8304" not in payload["answer"]
+    assert "WO-8304" in payload["answer"]
     assert payload["table"]["title"] == "Your Assigned Work"
     assert {row["Work order"] for row in payload["table"]["rows"]} == {"WO-8304"}
 
 
-def test_neo_welcome_highlights_supervisor_approvals_and_followups():
-    response = client.get("/api/neo/welcome", headers=auth_headers("supervisor@plant.local"))
+def test_neo_command_center_prioritizes_plant_risk_categories(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            assert "Command Center plant priority updates" in prompt
+            assert "Assets at risk" in prompt
+            assert "Overdue emergency work" in prompt
+            assert "Do not list work orders" in system_prompt
+            return LLMTextResponse(
+                content="Plant priorities focus on production exposure.\n1. P1: Assets at risk: 4 critical/high-risk assets: review highest-risk diagnosis first.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    response = client.get("/api/neo/welcome", headers=auth_headers("technician@plant.local"))
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "mock"
+    assert payload["provider"] == "openai"
+    assert payload["table"]["title"] == "Plant Priority Updates"
+    assert payload["action"]["target_id"] == "Assets at risk"
+    assert "Assets at risk" in payload["answer"]
+    assert "WO-8304" not in payload["answer"]
+    assert {row["Focus"] for row in payload["table"]["rows"]} >= {"Assets at risk", "Overdue emergency work", "Production impact"}
+
+
+def test_neo_command_center_replaces_malformed_live_priority_text(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            return LLMTextResponse(
+                content="P1\n- RM-DRIVE-01\n- Confirm spare ETA; reason\n- Drive end bearing is out of stock; P2",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    response = client.get("/api/neo/welcome", headers=auth_headers("technician@plant.local"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "grounded_priority_guard"
+    assert "Assets at risk" in payload["answer"]
+    assert "Impact:" in payload["answer"]
+    assert "Focus:" in payload["answer"]
+    assert "WO-8304" not in payload["answer"]
+    assert "; reason" not in payload["answer"]
+    assert payload["table"]["title"] == "Plant Priority Updates"
+
+
+def test_neo_welcome_highlights_supervisor_approvals_and_followups(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            assert "WO-8311" in prompt
+            return LLMTextResponse(
+                content="Dhruv, review WO-8311 first because it is waiting for approval.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    response = client.get("/api/neo/welcome?context=work_execution", headers=auth_headers("supervisor@plant.local"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "openai"
     assert payload["table"]["title"] == "Supervisor Attention"
-    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
+    assert "waiting for approval" in payload["answer"]
     assert any(row["Work order"] == "WO-8311" for row in payload["table"]["rows"])
 
 
-def test_neo_welcome_is_read_only_for_operator_attention():
-    response = client.get("/api/neo/welcome", headers=auth_headers("operator@plant.local"))
+def test_neo_pending_tasks_request_returns_role_aware_queue(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            assert "show my pending tasks" in prompt
+            assert "Role-aware queue" in prompt
+            assert "Final answer:" in prompt
+            assert "Relevant work-order context" not in prompt
+            assert "WO-8311" in prompt
+            return LLMTextResponse(
+                content="Your pending queue starts with WO-8311 for approval, then WO-8321 and the blocked WO-8304 material follow-up.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "show my pending tasks"},
+        headers=auth_headers("supervisor@plant.local"),
+    )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "mock"
+    assert payload["provider"] == "openai"
+    assert payload["action"]["type"] == "neo_welcome"
+    assert "WO-8311" in payload["answer"]
+    assert payload["table"]["title"] == "Supervisor Attention"
+    assert any(row["Work order"] == "WO-8311" for row in payload["table"]["rows"])
+
+
+def test_neo_welcome_is_read_only_for_operator_attention(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            assert "read-only" in prompt
+            return LLMTextResponse(
+                content="Casey, read-only operator attention starts with RM-DRIVE-01 because it is high risk; monitor indications and report field observations.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    response = client.get("/api/neo/welcome?context=work_execution", headers=auth_headers("operator@plant.local"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "openai"
     assert payload["table"]["title"] == "Operator Attention"
-    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
+    assert "read-only" in payload["answer"]
     assert payload["action"]["status"] == "completed"
 
 
@@ -1636,6 +1880,78 @@ def test_neo_blocks_explicit_start_when_material_is_not_ready():
     assert payload["action"]["status"] == "not_allowed"
     assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
     assert repository.get_work_order("WO-8304")["status"] == "WMATL"
+
+
+def test_neo_can_clear_material_blocker_with_tool_action(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    before = repository.get_work_order("WO-8275")
+    assert before["status"] == "WMATL"
+    assert before["material_readiness"] == "pending"
+
+    class FakeClient:
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            assert "WO-8275 material readiness was updated to ready" in prompt
+            return LLMTextResponse(
+                content="WO-8275 material is now ready, blockers are cleared, and the work order can move forward for approval.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "Update WO-8275 as material received and no blockers"},
+        headers=auth_headers("supervisor@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "openai"
+    assert payload["action"]["type"] == "update_work_order_material"
+    assert payload["action"]["status"] == "completed"
+    updated = repository.get_work_order("WO-8275")
+    assert updated["material_readiness"] == "ready"
+    assert updated["material_blocker_status"] == "reserved"
+    assert updated["material_blocker_note"] is None
+    assert updated["status"] == "APPR"
+
+
+def test_neo_blocks_material_tool_for_operator():
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "Update WO-8275 as material received and no blockers"},
+        headers=auth_headers("operator@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action"]["type"] == "update_work_order_material"
+    assert payload["action"]["status"] == "not_allowed"
+
+
+def test_neo_can_assign_work_order_with_tool_action(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            assert "WO-8311 was assigned to Vinoth" in prompt
+            return LLMTextResponse(content="WO-8311 is now assigned to Vinoth.", used_live_provider=True, provider="openai")
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "Assign WO-8311 to Vinoth"},
+        headers=auth_headers("supervisor@plant.local"),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "openai"
+    assert payload["action"]["type"] == "assign_work_order"
+    assert repository.get_work_order("WO-8311")["assigned_to"] == "Vinoth"
 
 
 def test_neo_can_create_work_order_for_critical_asset_when_role_allows():
@@ -2108,16 +2424,52 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
         headers=headers,
     )
     assert promotion_response.status_code == 400
-    assert "verified runtime deployment" in promotion_response.json()["detail"]
+    assert "runtime-loaded deployment" in promotion_response.json()["detail"]
 
-    deployment_response = client.post(
+    manual_deployment_response = client.post(
         f"/api/learning/model-versions/{model['id']}/deploy",
         json={
             "runtime_provider": "manual",
             "served_model_name": "qwen2.5-7b-instruct-lora-served",
-            "base_url": "http://localhost:1234/v1",
+            "base_url": "http://127.0.0.1:8080/v1",
             "artifact_uri": model["adapter_path"],
-            "notes": "Manual LM Studio deployment verified by reviewer.",
+            "notes": "Manual runtime deployment verified by reviewer.",
+        },
+        headers=headers,
+    )
+    assert manual_deployment_response.status_code == 200
+    manual_deployment_job = manual_deployment_response.json()
+    with pytest.raises(RuntimeError, match="Manual deployment records cannot prove"):
+        process_learning_job_message(
+            {
+                "schema_version": "1",
+                "job_id": manual_deployment_job["id"],
+                "job_type": "adapter_deployment",
+                "requested_by": "admin@plant.local",
+                "correlation_id": manual_deployment_job["correlation_id"],
+                "input_refs": manual_deployment_job["input_refs"],
+            },
+            manual_deployment_job["subject"],
+        )
+
+    class RuntimeProbeResponse:
+        def raise_for_status(self):
+            return None
+
+        @property
+        def status_code(self):
+            return 200
+
+    monkeypatch.setattr("app.services.adapter_runtime.httpx.post", lambda *args, **kwargs: RuntimeProbeResponse())
+
+    deployment_response = client.post(
+        f"/api/learning/model-versions/{model['id']}/deploy",
+        json={
+            "runtime_provider": "llama_cpp",
+            "served_model_name": "qwen2.5-7b-instruct-lora-served",
+            "base_url": "http://127.0.0.1:8080/v1",
+            "artifact_uri": model["adapter_path"],
+            "notes": "llama.cpp deployment verified by runtime probe.",
         },
         headers=headers,
     )
@@ -2144,11 +2496,11 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
     deployments_response = client.get("/api/learning/model-deployments", headers=headers)
     assert deployments_response.status_code == 200
     deployments = deployments_response.json()
-    deployment = next(item for item in deployments if item["model_version_id"] == model["id"])
+    deployment = next(item for item in deployments if item["model_version_id"] == model["id"] and item["status"] == "verified")
     assert deployment["status"] == "verified"
-    assert deployment["health_status"] == "manual_verified"
+    assert deployment["health_status"] == "healthy"
     assert deployment["served_model_name"] == "qwen2.5-7b-instruct-lora-served"
-    assert deployment["base_url"] == "http://localhost:1234/v1"
+    assert deployment["base_url"] == "http://127.0.0.1:8080/v1"
     assert deployment["artifact_uri"] == model["adapter_path"]
 
     promotion_response = client.post(
@@ -2170,7 +2522,7 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
             llm_provider="openai",
             openai_model="env-model",
             openai_api_key="unused",
-            openai_base_url="http://localhost:1234/v1",
+            openai_base_url="http://127.0.0.1:8080/v1",
             ollama_model="env-ollama",
             ollama_base_url="http://localhost:11434",
             llm_use_active_learning_model=True,
@@ -2183,8 +2535,8 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
     assert serving.openai_base_url == deployment["base_url"]
     assert serving.active_model_version_id == model["id"]
     assert serving.deployment_id == deployment["id"]
-    assert serving.runtime_provider == "manual"
-    assert serving.health_status == "manual_verified"
+    assert serving.runtime_provider == "llama_cpp"
+    assert serving.health_status == "healthy"
     assert serving.adapter_path == model["adapter_path"]
 
     mock_serving = active_llm_serving_config(
@@ -2192,7 +2544,7 @@ def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
             llm_provider="mock",
             openai_model="env-model",
             openai_api_key=None,
-            openai_base_url="http://localhost:1234/v1",
+            openai_base_url="http://127.0.0.1:8080/v1",
             ollama_model="env-ollama",
             ollama_base_url="http://localhost:11434",
             llm_use_active_learning_model=True,

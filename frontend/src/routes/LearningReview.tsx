@@ -641,7 +641,7 @@ export function LearningReviewRoute({
         )}
         {learningSummary?.serving_model?.active_model_version_id && (
           <span>
-            <small>Active version</small>
+            <small>Active adapter version</small>
             <strong>{learningSummary.serving_model.active_model_version_id}</strong>
           </span>
         )}
@@ -906,14 +906,14 @@ export function LearningReviewRoute({
             )}
             {artifactTablePage.error && <p className="emptyState">{artifactTablePage.error}</p>}
           </div>
-          <h3>Model and Prompt Versions</h3>
+          <h3>Adapter and Prompt Versions</h3>
           <div className="versionList">
             {learningModels.map((model) => {
               const promotionEvaluation = passedEvaluationForModel(model.id)
               const latestDeployment = latestDeploymentForModel(model.id)
               const latestVerifiedDeployment = latestVerifiedDeploymentForModel(model.id)
               const promotionRecord = learningPromotions.find((promotion) => promotion.model_version_id === model.id)
-              const canPromoteModel = model.status !== 'active' && Boolean(promotionEvaluation && latestVerifiedDeployment)
+              const canPromoteModel = model.status !== 'active' && Boolean(promotionEvaluation && model.adapter_path)
               const canRollbackModel = model.status === 'retired' && Boolean(promotionEvaluation)
               const canDeployModel = model.status === 'candidate' && Boolean(model.adapter_path)
               return (
@@ -923,18 +923,18 @@ export function LearningReviewRoute({
                   {model.adapter_path && <small>Adapter {model.adapter_path}</small>}
                   {latestDeployment && (
                     <small>
-                      Latest deployment {latestDeployment.runtime_provider} · {latestDeployment.status} · health{' '}
+                      Runtime deployment {latestDeployment.runtime_provider} · {latestDeployment.status} · health{' '}
                       {latestDeployment.health_status ?? 'not checked'}
                     </small>
                   )}
                   {latestVerifiedDeployment && (
                     <small>
-                      Verified deployment {latestVerifiedDeployment.served_model_name} · {latestVerifiedDeployment.serving_provider} ·{' '}
+                      Runtime-loaded alias {latestVerifiedDeployment.served_model_name} · {latestVerifiedDeployment.serving_provider} ·{' '}
                       {formatDate(deploymentDisplayDate(latestVerifiedDeployment))}
                     </small>
                   )}
                   {!latestVerifiedDeployment && model.status === 'candidate' && (
-                    <small>Deployment gate requires a verified deployment for this candidate.</small>
+                    <small>Promotion requires a runtime-loaded adapter deployment for this candidate.</small>
                   )}
                   {promotionEvaluation ? (
                     <small>Evaluation gate passed by {promotionEvaluation.id}</small>
@@ -948,13 +948,13 @@ export function LearningReviewRoute({
                       {canDeployModel && (
                         <button className="textButton" onClick={() => deployLearningAdapter(model)} disabled={learningLoading.deployAdapter}>
                           <Upload size={16} />
-                          Deploy adapter
+                          Deploy adapter to runtime
                         </button>
                       )}
                       {canPromoteModel && (
                         <button className="textButton" onClick={() => promoteLearningAdapter(model)} disabled={learningLoading.promoteAdapter}>
                           <CheckCircle2 size={16} />
-                          Promote adapter
+                          Promote runtime-loaded adapter
                         </button>
                       )}
                       {canRollbackModel && (
@@ -991,12 +991,12 @@ export function LearningReviewRoute({
               <table className="lifecycleTable lifecycleDeploymentTable" aria-label="Adapter runtime deployments">
                 <thead>
                   <tr>
-                    <th>Served model</th>
-                    <th>Runtime</th>
+                    <th>Served adapter alias</th>
+                    <th>Runtime target</th>
                     <th>Status</th>
                     <th>Health</th>
-                    <th>Model version</th>
-                    <th>Artifact</th>
+                    <th>Adapter version</th>
+                    <th>Adapter artifact</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1036,7 +1036,7 @@ export function LearningReviewRoute({
                 <thead>
                   <tr>
                     <th>Action</th>
-                    <th>Model</th>
+                    <th>Adapter version</th>
                     <th>Evaluation</th>
                     <th>Reviewer</th>
                     <th>Notes</th>
@@ -1069,7 +1069,7 @@ export function LearningReviewRoute({
             {renderLifecyclePagination('promotions', promotionTablePage)}
             {promotionTablePage.error && <p className="emptyState">{promotionTablePage.error}</p>}
           </div>
-          <h3>Manual Adapter Candidate</h3>
+          <h3>Local Adapter Candidate</h3>
           <div className="learningAdapterGrid">
             <label className="field">
               <span>Provider</span>
@@ -1093,7 +1093,7 @@ export function LearningReviewRoute({
             </label>
             <button className="textButton" onClick={registerLearningAdapter} disabled={learningLoading.registerAdapter || !adapterModelName.trim()}>
               {learningLoading.registerAdapter ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
-              Register adapter
+              Register local adapter candidate
             </button>
           </div>
         </section>

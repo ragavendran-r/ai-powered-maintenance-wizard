@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import json
+import re
 from collections.abc import Iterator
 from typing import Callable, Optional, TypeVar
 
@@ -8,6 +9,10 @@ from pydantic import BaseModel, Field, ValidationError
 
 
 T = TypeVar("T", bound=BaseModel)
+
+STREAM_REPEAT_LINE_LIMIT = 3
+STREAM_REPEAT_PHRASE_LIMIT = 12
+STREAM_REPEAT_PHRASE_MIN_LENGTH = 8
 
 
 class LLMContext(BaseModel):
@@ -28,6 +33,50 @@ class LLMTextResponse(BaseModel):
 
 class LLMProviderError(RuntimeError):
     pass
+
+
+class _StreamRepetitionGuard:
+    def __init__(self):
+        self._buffer = ""
+        self._line_counts: dict[str, int] = {}
+        self._phrase_counts: dict[str, int] = {}
+        self.triggered = False
+
+    def accept(self, delta: str) -> bool:
+        self._buffer += delta
+        for line in self._completed_lines():
+            normalized = _normalize_repetition_text(line)
+            if not normalized:
+                continue
+            self._line_counts[normalized] = self._line_counts.get(normalized, 0) + 1
+            if self._line_counts[normalized] >= STREAM_REPEAT_LINE_LIMIT:
+                self.triggered = True
+                return False
+
+        phrase = _normalize_repetition_text(self._recent_phrase())
+        if len(phrase) >= STREAM_REPEAT_PHRASE_MIN_LENGTH:
+            self._phrase_counts[phrase] = self._phrase_counts.get(phrase, 0) + 1
+            if self._phrase_counts[phrase] >= STREAM_REPEAT_PHRASE_LIMIT:
+                self.triggered = True
+                return False
+        return True
+
+    def _completed_lines(self) -> list[str]:
+        if "\n" not in self._buffer:
+            return []
+        parts = self._buffer.split("\n")
+        self._buffer = parts[-1]
+        return parts[:-1]
+
+    def _recent_phrase(self) -> str:
+        words = re.findall(r"\w+", self._buffer.lower())
+        return " ".join(words[-6:])
+
+
+def _normalize_repetition_text(value: str) -> str:
+    normalized = re.sub(r"\s+", " ", value.strip().lower())
+    normalized = normalized.strip("-:*# ")
+    return normalized
 
 
 class LLMClient(ABC):
@@ -193,6 +242,7 @@ class OpenAIClient(LLMClient):
             ) as response:
                 response.raise_for_status()
                 yielded = False
+                repetition_guard = _StreamRepetitionGuard()
                 for line in response.iter_lines():
                     if not line.startswith("data:"):
                         continue
@@ -202,6 +252,8 @@ class OpenAIClient(LLMClient):
                     payload = json.loads(data)
                     delta = payload["choices"][0].get("delta", {}).get("content", "")
                     if delta:
+                        if not repetition_guard.accept(delta):
+                            break
                         yielded = True
                         yield LLMTextResponse(content=delta, used_live_provider=True, provider="openai")
                 if not yielded:
@@ -332,12 +384,15 @@ class OllamaClient(LLMClient):
             ) as response:
                 response.raise_for_status()
                 yielded = False
+                repetition_guard = _StreamRepetitionGuard()
                 for line in response.iter_lines():
                     if not line:
                         continue
                     payload = json.loads(line)
                     delta = payload.get("message", {}).get("content", "")
                     if delta:
+                        if not repetition_guard.accept(delta):
+                            break
                         yielded = True
                         yield LLMTextResponse(content=delta, used_live_provider=True, provider="ollama")
                     if payload.get("done"):

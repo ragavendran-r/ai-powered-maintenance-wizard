@@ -2027,7 +2027,7 @@ def get_verified_learning_model_deployment(model_version_id: str) -> Optional[di
         SELECT * FROM learning_model_deployments
         WHERE model_version_id = ?
           AND status = 'verified'
-          AND health_status IN ('healthy', 'manual_verified')
+          AND health_status IN ('healthy', 'ok', 'ready')
         ORDER BY health_checked_at DESC, created_at DESC
         LIMIT 1
         """,

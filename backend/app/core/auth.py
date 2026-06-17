@@ -19,7 +19,7 @@ READ_ROLES = {
     "planner",
     "operator",
 }
-DECISION_ROLES = {"admin", "maintenance_engineer", "reliability_engineer", "planner"}
+DECISION_ROLES = {"admin", "maintenance_engineer", "maintenance_supervisor", "reliability_engineer", "planner"}
 WORK_ORDER_ACTION_ROLES = {
     "admin",
     "maintenance_engineer",

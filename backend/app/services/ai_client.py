@@ -103,7 +103,16 @@ def active_llm_serving_config(settings: Optional[Settings] = None) -> LLMServing
             ollama_model = served_model_name or str(model.get("model_name") or settings.ollama_model)
             ollama_base_url = str(deployment.get("base_url") or settings.ollama_base_url)
     elif model.get("adapter_path") and getattr(settings, "learning_runtime_deployment_required", True):
-        warning = "active learning adapter has no verified runtime deployment; using registered model name"
+        return LLMServingConfig(
+            **{
+                **default.public_dict(),
+                "warning": "active learning adapter has no runtime-loaded deployment; using environment model",
+                "active_model_version_id": str(model["id"]),
+                "adapter_path": model.get("adapter_path"),
+                "base_model": model.get("base_model"),
+                "status": str(model.get("status") or "active"),
+            }
+        )
 
     if provider == "openai":
         openai_model = openai_model if deployment else str(model.get("model_name") or settings.openai_model)

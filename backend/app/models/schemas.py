@@ -963,6 +963,11 @@ class LearningModelDeployment(BaseModel):
 class LearningModelPromotionRequest(BaseModel):
     model_version_id: str
     evaluation_run_id: str
+    runtime_provider: Optional[str] = None
+    served_model_name: Optional[str] = None
+    base_url: Optional[str] = None
+    artifact_uri: Optional[str] = None
+    artifact_hash: Optional[str] = None
     notes: Optional[str] = None
 
 

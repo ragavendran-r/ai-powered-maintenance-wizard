@@ -456,18 +456,20 @@ function technicianInitialContextPrompt(workOrder: WorkOrder, userName?: string)
   if (materialBlockReason) {
     return [
       nameInstruction,
-      `Open selected work order ${workOrder.id} for technician context.`,
+      'Open Work Execution with a prioritized technician action list.',
+      `Top assigned item: ${workOrder.id} ${workOrder.title}.`,
       `Current status is ${statusLabel}, and field execution is blocked by material availability.`,
       `Material blocker: ${materialBlockReason}.`,
-      'Explain the blocker, expected availability or substitute limitations if supplied, and the next permissible technician action without starting field execution.',
+      'Return one short lead sentence and numbered P1/P2 action items in this format: P1: WO-1234: why it matters: next permissible technician action. Each item must include the work order ID and must not start field execution while blocked.',
     ].join(' ')
   }
   return [
     nameInstruction,
-    `Open selected work order ${workOrder.id} for technician context.`,
+    'Open Work Execution with a prioritized technician action list.',
+    `Top assigned item: ${workOrder.id} ${workOrder.title}.`,
     `Current status is ${statusLabel}.`,
-    'Summarize the immediate technician context from the work order, material plan, asset evidence, and approved learning notes.',
-    'Ask for the next observation only if field execution is allowed.',
+    'Use the work order, material plan, asset evidence, and approved learning notes to rank what the technician should focus on first.',
+    'Return one short lead sentence and numbered P1/P2 action items in this format: P1: WO-1234: why it matters: next action. Each item must include the work order ID.',
   ].join(' ')
 }
 
@@ -503,10 +505,10 @@ function supervisorInitialContextPrompt(workOrder: WorkOrder | undefined, workOr
     : 'No selected work order.'
   return [
     userName ? `Address ${userName} by name, not by role.` : 'Address the signed-in supervisor by name, not by role.',
-    'Open supervisor Work Execution initial context.',
+    'Open supervisor Work Execution with a prioritized action list.',
     selected,
     `Queue context: ${approvals.length} waiting approval, ${followUps.length} follow-up, ${materialBlocked.length} material-blocked.`,
-    'Write the initial supervisor welcome/context from this work execution queue.',
+    'Rank waiting approval, material blockers, follow-ups, and urgent open work. Return one short lead sentence and numbered P1/P2/P3 action items in this format: P1: WO-1234: why it needs focus: next supervisor decision. Each item must include a work order ID.',
   ].join(' ')
 }
 
@@ -530,7 +532,7 @@ function technicianTimeoutFallbackResponse(workOrder: WorkOrder, _prompt: string
     safety_reminders: [],
     suggested_problem_code: workOrder.problem_code,
     suggested_failure_class: workOrder.failure_class,
-    completion_summary: `${workOrder.id} Neo query timed out before a live LLM answer was received.`,
+    completion_summary: `${workOrder.id} Trinity query timed out before a live LLM answer was received.`,
     evidence: [],
     used_live_provider: false,
     provider: 'timeout_fallback',
@@ -685,8 +687,8 @@ export function App() {
   const [adapterBaseModel, setAdapterBaseModel] = useState('qwen2.5-7b-instruct')
   const [adapterPath, setAdapterPath] = useState('')
   const [adapterNotes, setAdapterNotes] = useState('Offline PEFT adapter candidate trained from approved judge-qualified examples.')
-  const [deploymentRuntimeProvider, setDeploymentRuntimeProvider] = useState('lm_studio')
-  const [deploymentBaseUrl, setDeploymentBaseUrl] = useState('http://localhost:1234/v1')
+  const [deploymentRuntimeProvider, setDeploymentRuntimeProvider] = useState('llama_cpp')
+  const [deploymentBaseUrl, setDeploymentBaseUrl] = useState('http://127.0.0.1:8080/v1')
   const [peftAdapterName, setPeftAdapterName] = useState('maintenance-wizard-qwen-lora')
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserName, setNewUserName] = useState('')
@@ -836,8 +838,8 @@ export function App() {
     setAdapterBaseModel('qwen2.5-7b-instruct')
     setAdapterPath('')
     setAdapterNotes('Offline PEFT adapter candidate trained from approved judge-qualified examples.')
-    setDeploymentRuntimeProvider('lm_studio')
-    setDeploymentBaseUrl('http://localhost:1234/v1')
+    setDeploymentRuntimeProvider('llama_cpp')
+    setDeploymentBaseUrl('http://127.0.0.1:8080/v1')
     setPeftAdapterName('maintenance-wizard-qwen-lora')
     setNeoMessages([
       {
@@ -1103,7 +1105,7 @@ export function App() {
 
   async function judgeLearningExample(example: LearningExample) {
     setLearningJudgingExampleId(example.id)
-    setLearningMessage(`Judging ${example.source_type.replace(/_/g, ' ')} example. Live LM Studio checks can take up to 15 seconds before falling back.`)
+    setLearningMessage(`Judging ${example.source_type.replace(/_/g, ' ')} example. Live LLM checks can take up to 15 seconds before falling back.`)
     try {
       const updated = await api.judgeLearningExample(example.id)
       setLearningExamples((items) => items.map((item) => (item.id === updated.id ? updated : item)))
@@ -2947,13 +2949,17 @@ export function App() {
       const promotion = await api.promoteLearningModelVersion({
         model_version_id: model.id,
         evaluation_run_id: evaluation.id,
+        runtime_provider: deploymentRuntimeProvider.trim() || undefined,
+        served_model_name: model.model_name,
+        base_url: deploymentBaseUrl.trim() || undefined,
+        artifact_uri: model.adapter_path?.trim() || undefined,
         notes: `Promoted from Learning Review by ${currentUser?.email ?? 'reviewer'}.`,
       })
       const summary = await api.learningSummary()
       setLearningSummary(summary)
-      setLearningMessage(`Promoted adapter ${model.model_name} with audit record ${promotion.id}`)
+      setLearningMessage(`Promoted runtime-loaded adapter ${model.model_name} with audit record ${promotion.id}`)
     } catch {
-      setLearningMessage('Adapter promotion was rejected by the evaluation gate')
+      setLearningMessage('Adapter promotion requires a passing evaluation and runtime-loaded deployment')
     } finally {
       setLearningActionLoading('promoteAdapter', false)
     }
@@ -2975,9 +2981,9 @@ export function App() {
       })
       const summary = await api.learningSummary()
       setLearningSummary(summary)
-      setLearningMessage(`Rolled back to ${model.model_name} with audit record ${promotion.id}`)
+      setLearningMessage(`Rolled back to adapter version ${model.model_name} with audit record ${promotion.id}`)
     } catch {
-      setLearningMessage('Model rollback was rejected by the evaluation gate')
+      setLearningMessage('Adapter rollback was rejected by the evaluation or runtime deployment gate')
     } finally {
       setLearningActionLoading('rollbackAdapter', false)
     }

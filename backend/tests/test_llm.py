@@ -328,6 +328,46 @@ def test_openai_text_stream_allows_per_call_timeout_override(monkeypatch):
     assert [chunk.content for chunk in chunks] == ["Short bounded response."]
 
 
+def test_openai_text_stream_stops_repeated_lines(monkeypatch):
+    class FakeStreamResponse:
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"### Monitoring Thresholds\\n"}}]}'
+            for _ in range(20):
+                yield 'data: {"choices":[{"delta":{"content":"Hydraulic oil temperature:\\n"}}]}'
+            yield "data: [DONE]"
+
+    class FakeStream:
+        def __enter__(self):
+            return FakeStreamResponse()
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    monkeypatch.setattr(httpx, "stream", lambda *args, **kwargs: FakeStream())
+    chunks = list(
+        OpenAIClient(
+            "test-key",
+            "test-model",
+            "https://example.test/v1",
+            2.0,
+            structured_max_tokens=300,
+            text_max_tokens=250,
+            stream_timeout_seconds=45,
+        ).stream_text(
+            "prompt",
+            "system",
+            lambda provider, reason: LLMTextResponse(content=reason, provider=provider),
+            max_tokens=900,
+        )
+    )
+
+    assert "".join(chunk.content for chunk in chunks).count("Hydraulic oil temperature:") == 2
+    assert all(chunk.used_live_provider for chunk in chunks)
+
+
 def test_openai_client_parses_generic_structured_response(monkeypatch):
     def fake_post(*args, **kwargs):
         return httpx.Response(

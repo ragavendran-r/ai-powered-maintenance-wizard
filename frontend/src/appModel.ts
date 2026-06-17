@@ -56,8 +56,8 @@ export const roleOptions: UserRole[] = [
 
 export const diagnosisAssistantName = 'Morpheus'
 export const reliabilityAssistantName = 'Smith'
-export const technicianAssistantName = 'Neo'
-export const supervisorAssistantName = 'Neo'
+export const technicianAssistantName = 'Trinity'
+export const supervisorAssistantName = 'Trinity'
 
 export const fallbackWorkOrders: WorkOrder[] = [
   {
@@ -341,7 +341,7 @@ export function mergeLearningDeployments(
 export function isVerifiedDeployment(deployment: LearningModelDeployment) {
   const status = deployment.status.toLowerCase()
   const healthStatus = (deployment.health_status ?? '').toLowerCase()
-  return ['healthy', 'ok', 'ready', 'verified'].includes(healthStatus) || ['healthy', 'verified'].includes(status)
+  return status === 'verified' && ['healthy', 'ok', 'ready'].includes(healthStatus)
 }
 
 export function deploymentStatusClass(value?: string | null) {

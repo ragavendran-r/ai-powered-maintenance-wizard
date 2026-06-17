@@ -38,6 +38,7 @@ export const permissionsByRole: Record<UserRole, readonly Permission[]> = {
     'approveWorkOrders',
     'assignWorkOrders',
     'createWorkOrders',
+    'decisionSupport',
     'supervisorAssistant',
   ],
   reliability_engineer: [

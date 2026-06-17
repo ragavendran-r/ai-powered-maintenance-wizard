@@ -810,13 +810,16 @@ def neo_chat(
 
 
 @app.get("/api/neo/welcome", response_model=NeoChatResponse)
-def neo_role_welcome(current_user: UserPublic = Depends(require_roles(*READ_ROLES))):
-    response = neo_welcome(current_user)
+def neo_role_welcome(
+    context: str = Query(default="command_center", pattern="^(command_center|work_execution)$"),
+    current_user: UserPublic = Depends(require_roles(*READ_ROLES)),
+):
+    response = neo_welcome(current_user, context)
     record_assistant_interaction(
         assistant="neo",
         interaction_type="role_aware_welcome",
         current_user=current_user,
-        prompt=f"Load role-aware welcome for {current_user.role}",
+        prompt=f"Load {context} priorities for {current_user.role}",
         response=response.answer,
         provider=response.provider,
         used_live_provider=response.used_live_provider,
@@ -836,9 +839,12 @@ def neo_role_welcome(current_user: UserPublic = Depends(require_roles(*READ_ROLE
 
 
 @app.get("/api/neo/welcome/stream")
-def neo_role_welcome_stream(current_user: UserPublic = Depends(require_roles(*READ_ROLES))):
+def neo_role_welcome_stream(
+    context: str = Query(default="command_center", pattern="^(command_center|work_execution)$"),
+    current_user: UserPublic = Depends(require_roles(*READ_ROLES)),
+):
     def events():
-        for event in stream_neo_welcome(current_user):
+        for event in stream_neo_welcome(current_user, context):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from collections.abc import Iterator
 from typing import Any, Optional
@@ -176,11 +177,11 @@ def stream_draft_case(request: RcaMorpheusDraftRequest, current_user: UserPublic
             yield {"type": "done", "response": response.model_dump(mode="json")}
             return
         chunks.append(chunk.content)
-        yield {"type": "token", "content": chunk.content, "provider": provider, "used_live_provider": True}
 
-    streamed_answer = "".join(chunks).strip()
+    streamed_answer = _sanitize_repeated_markdown("".join(chunks).strip())
     if streamed_answer:
         draft = _draft_from_streamed_answer(context, streamed_answer, provider, used_live_provider)
+        yield {"type": "token", "content": streamed_answer, "provider": provider, "used_live_provider": True}
     else:
         draft = _fallback_draft(context, provider, "stream returned no content")
         yield {"type": "token", "content": draft.summary, "provider": provider, "used_live_provider": False}
@@ -407,8 +408,9 @@ def _stream_system_prompt() -> str:
         "readable RCA draft in Markdown, not JSON. Use only the supplied work-order logs, failure "
         "history, alerts, SOP/manual evidence, and prior RCA cases. Use these sections: "
         "### Probable Cause, ### Evidence, ### 5-Why, ### Fishbone, ### Corrective Actions, and "
-        "### Missing Checks. Use short bullets. Do not mention table names, row counts, JSON, schemas, "
-        "or backend fields. Avoid inventing closed facts; mark unknowns as missing checks."
+        "### Missing Checks. Use short bullets. Do not repeat the same fishbone branch, signal, cause, "
+        "or phrase. Limit Fishbone to 4 unique branches. Do not mention table names, row counts, JSON, "
+        "schemas, or backend fields. Avoid inventing closed facts; mark unknowns as missing checks."
     )
 
 
@@ -453,6 +455,7 @@ def _draft_from_streamed_answer(
     provider: str,
     used_live_provider: bool,
 ) -> _RcaLlmDraft:
+    answer = _sanitize_repeated_markdown(answer)
     probable = _extract_section_first_line(answer, "Probable Cause") or _fallback_probable_cause(context)
     missing = _extract_section_bullets(answer, "Missing Checks") or _fallback_missing_checks(context)
     corrective = _extract_section_bullets(answer, "Corrective Actions")[:4]
@@ -492,6 +495,77 @@ def _draft_from_streamed_answer(
         used_live_provider=used_live_provider,
         provider=provider,
     )
+
+
+def _sanitize_repeated_markdown(answer: str) -> str:
+    lines = answer.splitlines()
+    cleaned: list[str] = []
+    section = ""
+    seen_by_section: dict[str, set[str]] = {}
+    previous_keys_by_section: dict[str, list[str]] = {}
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        heading = re.match(r"^\s*#{1,6}\s+(.+?)\s*$", line)
+        if heading:
+            section = heading.group(1).strip().lower()
+            cleaned.append(line)
+            continue
+        if not line.strip():
+            if cleaned and cleaned[-1].strip():
+                cleaned.append("")
+            continue
+        key = _repetition_key(line)
+        if not key:
+            cleaned.append(line)
+            continue
+        seen = seen_by_section.setdefault(section, set())
+        previous_keys = previous_keys_by_section.setdefault(section, [])
+        if key in seen:
+            continue
+        if section in {"fishbone", "why", "5-why"} and _is_cumulative_repetition(key, previous_keys):
+            continue
+        if _has_repeated_phrase(key):
+            continue
+        seen.add(key)
+        previous_keys.append(key)
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
+
+
+def _repetition_key(text: str) -> str:
+    value = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", text).strip().lower()
+    value = re.sub(r"\b\d+(?:\.\d+)?\b", "#", value)
+    value = re.sub(r"[^a-z0-9#]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _is_cumulative_repetition(key: str, previous_keys: list[str]) -> bool:
+    key_tokens = key.split()
+    if len(key_tokens) < 4:
+        return False
+    key_token_set = set(key_tokens)
+    for previous in previous_keys[-6:]:
+        previous_tokens = previous.split()
+        if len(previous_tokens) < 3:
+            continue
+        previous_token_set = set(previous_tokens)
+        overlap = len(key_token_set & previous_token_set) / max(len(previous_token_set), 1)
+        if key.startswith(previous) and overlap >= 0.75:
+            return True
+        if previous.startswith(key) and overlap >= 0.75:
+            return True
+    return False
+
+
+def _has_repeated_phrase(key: str) -> bool:
+    tokens = key.split()
+    for size in (2, 3):
+        if len(tokens) < size * 2:
+            continue
+        phrases = [" ".join(tokens[index:index + size]) for index in range(len(tokens) - size + 1)]
+        if len(phrases) - len(set(phrases)) >= 2:
+            return True
+    return False
 
 
 def _fallback_draft(context: dict[str, Any], provider: str, reason: str) -> _RcaLlmDraft:
