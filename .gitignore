@@ -20,5 +20,6 @@ backend/data/*.db
 backend/data/*.db-*
 backend/data/learning_artifacts/
 backend/data/learning_adapters/
+backend/data/runtime/
 .local-stack/
 .local-k8s/

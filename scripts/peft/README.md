@@ -33,7 +33,7 @@ MW_PEFT_MODEL_SOURCE=Qwen/Qwen2.5-7B-Instruct
 MW_PEFT_QUANTIZATION=4bit
 ```
 
-Use `MW_PEFT_MODEL_SOURCE` when the serving adapter alias differs from the trainable Hugging Face model id. For example, llama.cpp may serve a trained adapter alias as `maintenance-wizard-qwen-lora`, while training should load `Qwen/Qwen2.5-7B-Instruct` or a local Transformers model directory. GGUF files, llama.cpp aliases, and LM Studio aliases are serving artifacts, not PEFT training sources.
+Use `MW_PEFT_MODEL_SOURCE` when the serving adapter alias differs from the trainable Hugging Face model id. For example, llama.cpp may serve the regenerated local adapter alias as `maintenance-wizard-qwen-lora-LJOB-7B7B7B7B7B7B`, while training should load `Qwen/Qwen2.5-7B-Instruct` or a local Transformers model directory. GGUF files, llama.cpp aliases, and LM Studio aliases are serving artifacts, not PEFT training sources.
 
 For Apple Silicon, CPU-only hosts, or environments without CUDA bitsandbytes, use regular LoRA:
 
@@ -70,15 +70,23 @@ The manifest also includes dataset hash, job id, LoRA parameters, training param
 
 ## Runtime Deployment Helpers
 
-The default local runtime helper is `deploy_llama_cpp_adapter.sh`. It expects either a local GGUF base model path or a llama.cpp Hugging Face GGUF repo, plus either a preconverted GGUF LoRA adapter or a path to `llama.cpp/convert_lora_to_gguf.py`:
+For manual local serving and smoke tests, use `start_llama_cpp_qwen_adapter.sh`. It reads `.env`, validates the Qwen2.5 GGUF base model and adapter settings, optionally converts a PEFT adapter directory to GGUF, starts `llama-server`, and checks the OpenAI-compatible `/v1/models` endpoint:
+
+```bash
+scripts/peft/start_llama_cpp_qwen_adapter.sh --check
+scripts/peft/start_llama_cpp_qwen_adapter.sh
+scripts/peft/start_llama_cpp_qwen_adapter.sh --status
+```
+
+The default Learning Review runtime deployment helper is `deploy_llama_cpp_adapter.sh`. It expects either a local GGUF base model path or a llama.cpp Hugging Face GGUF repo, plus either a preconverted GGUF LoRA adapter or a path to `llama.cpp/convert_lora_to_gguf.py`:
 
 ```bash
 LEARNING_RUNTIME_DEPLOYER_DEFAULT=llama_cpp
 LEARNING_ADAPTER_DEPLOYER_COMMAND="bash scripts/peft/deploy_llama_cpp_adapter.sh"
 OPENAI_BASE_URL=http://127.0.0.1:8080/v1
 LLAMA_CPP_BASE_MODEL_PATH=
-LLAMA_CPP_HF_REPO=Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
-LLAMA_CPP_HF_FILE=
+LLAMA_CPP_HF_REPO=Qwen/Qwen2.5-7B-Instruct-GGUF
+LLAMA_CPP_HF_FILE=qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf
 LLAMA_CPP_ADAPTER_GGUF_PATH=/path/to/trained-adapter.gguf
 ```
 

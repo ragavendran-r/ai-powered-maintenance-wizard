@@ -66,6 +66,8 @@ class TrainerConfig:
     optim: str
     bf16: bool
     fp16: bool
+    use_cpu: bool
+    torch_dtype: str
     gradient_checkpointing: bool
     trust_remote_code: bool
     overwrite_output_dir: bool
@@ -185,6 +187,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--bf16", action="store_true", default=env_bool("MW_PEFT_BF16", False))
     parser.add_argument("--fp16", action="store_true", default=env_bool("MW_PEFT_FP16", False))
+    parser.add_argument("--use-cpu", action="store_true", default=env_bool("MW_PEFT_USE_CPU", False))
+    parser.add_argument(
+        "--torch-dtype",
+        choices=("auto", "float32", "float16", "bfloat16"),
+        default=os.environ.get("MW_PEFT_TORCH_DTYPE", "auto"),
+        help="Torch dtype used when loading the base model.",
+    )
     parser.add_argument(
         "--gradient-checkpointing",
         action="store_true",
@@ -293,6 +302,8 @@ def load_config(args: argparse.Namespace) -> TrainerConfig:
         optim=optim,
         bf16=args.bf16,
         fp16=args.fp16,
+        use_cpu=args.use_cpu,
+        torch_dtype=args.torch_dtype,
         gradient_checkpointing=args.gradient_checkpointing,
         trust_remote_code=args.trust_remote_code,
         overwrite_output_dir=args.overwrite_output_dir,
@@ -352,6 +363,13 @@ def run_training(config: TrainerConfig) -> None:
 
     print(f"Loading base model from {config.model_source}")
     model_kwargs: dict[str, Any] = {"trust_remote_code": config.trust_remote_code}
+    if config.torch_dtype != "auto":
+        dtype_by_name = {
+            "float32": torch.float32,
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
+        }
+        model_kwargs["torch_dtype"] = dtype_by_name[config.torch_dtype]
     if config.quantization == "4bit":
         model_kwargs["quantization_config"] = transformers.BitsAndBytesConfig(
             load_in_4bit=True,
@@ -402,6 +420,7 @@ def run_training(config: TrainerConfig) -> None:
         optim=config.optim,
         bf16=config.bf16,
         fp16=config.fp16,
+        use_cpu=config.use_cpu,
         report_to=[] if config.report_to == ("none",) else list(config.report_to),
         seed=config.seed,
         remove_unused_columns=False,
@@ -543,6 +562,8 @@ def build_adapter_manifest(config: TrainerConfig, adapter_dir: Path, example_cou
             "optim": config.optim,
             "bf16": config.bf16,
             "fp16": config.fp16,
+            "use_cpu": config.use_cpu,
+            "torch_dtype": config.torch_dtype,
             "gradient_checkpointing": config.gradient_checkpointing,
             "seed": config.seed,
         },
