@@ -4946,9 +4946,9 @@ def test_learning_example_judge_endpoint_calls_configured_live_llm(monkeypatch):
                                 "```json\n"
                                 + json.dumps(
                                     {
-                                        "score": 0.93,
-                                        "label": "training_worthy",
-                                        "reason": "Live judge verified that the example is specific, grounded, and safe.",
+                                        "score": 93,
+                                        "label": "Training Worthy",
+                                        "explanation": "Live judge verified that the example is specific, grounded, and safe.",
                                         "strengths": ["Specific asset context", "Outcome-backed"],
                                         "risks": [],
                                         "used_live_provider": True,
@@ -4984,7 +4984,7 @@ def test_learning_example_judge_endpoint_calls_configured_live_llm(monkeypatch):
     assert calls[0]["url"] == "http://llm.test/v1/chat/completions"
     assert calls[0]["payload"]["model"] == "judge-test-model"
     assert calls[0]["payload"]["max_tokens"] == 192
-    assert calls[0]["timeout"] == 45.0
+    assert calls[0]["timeout"] == 90.0
     assert calls[0]["payload"]["response_format"]["type"] == "json_object"
     assert "LLM-as-a-Judge" in calls[0]["payload"]["messages"][0]["content"]
     assert "Score whether this maintenance example" in calls[0]["payload"]["messages"][1]["content"]

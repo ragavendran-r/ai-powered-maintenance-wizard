@@ -103,6 +103,7 @@ import { UsersRoute } from './routes/Users'
 import { ReportsRoute } from './routes/Reports'
 
 const WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS = 60_000
+const LEARNING_JUDGE_REQUEST_TIMEOUT_MS = 95_000
 const TOAST_TIMEOUT_MS = 4_500
 const PLANNING_TABLE_PAGE_SIZE = 5
 
@@ -1182,15 +1183,22 @@ export function App() {
   async function judgeLearningExample(example: LearningExample) {
     setLearningJudgingExampleId(example.id)
     setLearningMessage(learningJudgeProgressMessage(example.source_type))
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), LEARNING_JUDGE_REQUEST_TIMEOUT_MS)
     try {
-      const updated = await api.judgeLearningExample(example.id)
+      const updated = await api.judgeLearningExample(example.id, controller.signal)
       setLearningExamples((items) => items.map((item) => (item.id === updated.id ? updated : item)))
       const summary = await api.learningSummary()
       setLearningSummary(summary)
       setLearningMessage(`Judge scored ${updated.source_type} at ${Math.round(updated.judge_score * 100)}%`)
-    } catch {
-      setLearningMessage('Learning judge could not score the example')
+    } catch (error) {
+      setLearningMessage(
+        isAbortError(error)
+          ? `Learning judge did not return within ${Math.round(LEARNING_JUDGE_REQUEST_TIMEOUT_MS / 1000)} seconds. Confirm the local LLM queue is clear and retry.`
+          : 'Learning judge could not score the example',
+      )
     } finally {
+      window.clearTimeout(timeoutId)
       setLearningJudgingExampleId(null)
     }
   }

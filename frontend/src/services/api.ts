@@ -1435,9 +1435,10 @@ export const api = {
     }),
   learningDatasets: () => request<LearningDatasetSnapshot[]>('/api/learning/datasets'),
   learningDatasetJsonl: (datasetId: string) => textRequest(`/api/learning/datasets/${datasetId}/jsonl`),
-  judgeLearningExample: (exampleId: string) =>
+  judgeLearningExample: (exampleId: string, signal?: AbortSignal) =>
     request<LearningExample>(`/api/learning/examples/${exampleId}/judge`, {
       method: 'POST',
+      signal,
     }),
   registerLearningModelVersion: (payload: {
     provider: string

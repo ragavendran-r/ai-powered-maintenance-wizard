@@ -75,6 +75,8 @@ OPENAI_BASE_URL=http://localhost:1234/v1
 OPENAI_MODEL=qwen2.5-7b-instruct
 LLM_TIMEOUT_SECONDS=15
 LLM_STREAM_TIMEOUT_SECONDS=60
+LLM_JUDGE_TIMEOUT_SECONDS=90
+LLM_JUDGE_MAX_TOKENS=192
 LLM_STRUCTURED_MAX_TOKENS=300
 LLM_TEXT_MAX_TOKENS=600
 LLM_RCA_DRAFT_TIMEOUT_SECONDS=45
@@ -143,7 +145,7 @@ Local 7B inference can be slow when the app asks for long responses, sends large
 - Use `Qwen2.5 7B Instruct GGUF` with `Q4_K_M` or another 4-bit quantization.
 - Load the model with high GPU offload, for example `lms load <downloaded-model-id> --identifier qwen2.5-7b-instruct --gpu=max`.
 - Keep LM Studio context length at `4096` unless a specific workflow needs more retrieved context.
-- Keep `.env` at `LLM_TIMEOUT_SECONDS=15`, `LLM_STREAM_TIMEOUT_SECONDS=60`, `LLM_STRUCTURED_MAX_TOKENS=300`, and `LLM_TEXT_MAX_TOKENS=600`. Non-streaming LLM calls use `LLM_TIMEOUT_SECONDS`; Neo technician and supervisor Work Execution streams use `LLM_STREAM_TIMEOUT_SECONDS` so a queued local model does not get aborted before its first live token.
+- Keep `.env` at `LLM_TIMEOUT_SECONDS=15`, `LLM_STREAM_TIMEOUT_SECONDS=60`, `LLM_JUDGE_TIMEOUT_SECONDS=90`, `LLM_JUDGE_MAX_TOKENS=192`, `LLM_STRUCTURED_MAX_TOKENS=300`, and `LLM_TEXT_MAX_TOKENS=600`. Most non-streaming structured calls use `LLM_TIMEOUT_SECONDS`; Learning Review Judge uses `LLM_JUDGE_TIMEOUT_SECONDS`; Neo technician and supervisor Work Execution streams use `LLM_STREAM_TIMEOUT_SECONDS` so a queued local model does not get aborted before its first live token.
 - Keep RCA drafts on their scoped settings: `LLM_RCA_DRAFT_STREAM_ENABLED=true`, `LLM_RCA_DRAFT_TIMEOUT_SECONDS=45`, `LLM_RCA_DRAFT_MAX_TOKENS=700`, and `LLM_RCA_DRAFT_RESPONSE_FORMAT=json_schema`. RCA drafts stream the provider response, then validate the accumulated JSON before storing it. The non-streaming timeout and response format remain available as a fallback switch.
 - Keep retrieved context small; Neo uses only the most relevant evidence snippets for general questions.
 - Neo streams dashboard welcome, dashboard chat, technician, and supervisor answers from its `/stream` endpoints, so the UI can render tokens as Qwen produces them instead of waiting for the whole answer.

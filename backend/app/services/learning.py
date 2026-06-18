@@ -7,6 +7,7 @@ import os
 import shlex
 import ssl
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -46,8 +47,6 @@ from app.services.vector_store import (
 APPROVED_FEEDBACK_STATUSES = {"accepted", "corrected"}
 MAX_EXAMPLE_TEXT_CHARS = 1800
 TRAINING_WORTHY_SCORE = 0.65
-JUDGE_TIMEOUT_SECONDS = 45.0
-JUDGE_MAX_TOKENS = 192
 LEARNING_JOB_SUBJECTS = {
     "refresh_examples": "example.created",
     "judge_example": "judge.requested",
@@ -1207,15 +1206,26 @@ def rejudge_learning_example(example_id: str) -> Optional[dict[str, Any]]:
 def judge_learning_example(example: dict[str, Any]) -> LearningJudgeResult:
     prompt = _judge_prompt(example)
     settings = get_settings()
-    return configured_llm_client().complete_model(
+    timeout_seconds = max(settings.llm_timeout_seconds, settings.llm_judge_timeout_seconds)
+    client = configured_llm_client()
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="learning-judge")
+    future = executor.submit(
+        client.complete_model,
         prompt,
         LearningJudgeResult,
         _judge_system_prompt(),
         lambda provider, reason: _fallback_judge(example, provider, reason),
-        max_tokens=min(settings.llm_structured_max_tokens, JUDGE_MAX_TOKENS),
-        timeout_seconds=max(settings.llm_timeout_seconds, JUDGE_TIMEOUT_SECONDS),
-        response_format="json_object",
+        min(settings.llm_structured_max_tokens, settings.llm_judge_max_tokens),
+        timeout_seconds,
+        "json_object",
     )
+    try:
+        return future.result(timeout=timeout_seconds + 2)
+    except FutureTimeoutError:
+        future.cancel()
+        return _fallback_judge(example, client.provider_name, f"judge call exceeded {int(timeout_seconds)} seconds")
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def _examples_from_feedback() -> list[dict[str, Any]]:
