@@ -35,6 +35,7 @@ from app.services.ai_client import active_llm_serving_config, configured_llm_cli
 from app.services.adapter_runtime import execute_adapter_deployment
 from app.services.artifact_store import artifact_store_status, store_learning_artifact_file
 from app.services.embeddings import current_embedding_profile, embedding_profile_id, supported_embedding_provider
+from app.services.runtime_env import env_file_values_for
 from app.services.vector_store import (
     plan_qdrant_migration,
     sync_learning_examples_index,
@@ -194,11 +195,14 @@ def peft_trainer_status(settings: Optional[Any] = None) -> dict[str, Any]:
     settings = settings or get_settings()
     command = str(getattr(settings, "learning_peft_trainer_command", "") or "").strip()
     output_dir = getattr(settings, "learning_peft_output_dir", None)
+    peft_env = _peft_env_overrides()
     return {
         "mode": "external_command" if command else "prepared_artifacts",
         "configured": bool(command),
         "timeout_seconds": int(getattr(settings, "learning_peft_trainer_timeout_seconds", 900) or 900),
         "output_dir": str(output_dir) if output_dir else None,
+        "model_source": peft_env.get("MW_PEFT_MODEL_SOURCE") or peft_env.get("MW_PEFT_HF_MODEL_ID"),
+        "quantization": peft_env.get("MW_PEFT_QUANTIZATION"),
     }
 
 
@@ -847,6 +851,18 @@ def prepare_peft_artifacts(job: dict[str, Any]) -> dict[str, Any]:
             "base_model": base_model,
         },
     )
+    repository.update_learning_job_status(
+        job["id"],
+        "running",
+        output_refs={
+            **(job.get("output_refs") or {}),
+            "execution_mode": "prepared_artifacts",
+            "training_status": "dataset_artifacts_prepared",
+            "artifact_dir": str(artifact_dir),
+            "dataset_artifact_id": dataset_artifact["id"],
+            "manifest_artifact_id": manifest_artifact["id"],
+        },
+    )
     trainer_output = _run_external_peft_trainer(
         job=job,
         artifact_dir=artifact_dir,
@@ -891,7 +907,23 @@ def _run_external_peft_trainer(
     output_dir = (_safe_output_root(output_root) / _safe_name(job["id"])) if output_root else artifact_dir / "adapter_output"
     output_dir.mkdir(parents=True, exist_ok=True)
     timeout_seconds = int(getattr(settings, "learning_peft_trainer_timeout_seconds", 900) or 900)
+    trainer_started_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    current_job = repository.get_learning_job(job["id"]) or job
+    repository.update_learning_job_status(
+        job["id"],
+        "running",
+        output_refs={
+            **(current_job.get("output_refs") or {}),
+            "execution_mode": "external_command",
+            "trainer_mode": "external_command",
+            "training_status": "trainer_running",
+            "adapter_output_dir": str(output_dir),
+            "trainer_started_at": trainer_started_at,
+            "trainer_timeout_seconds": timeout_seconds,
+        },
+    )
     env = {
+        **_peft_env_overrides(),
         **os.environ,
         "MW_PEFT_JOB_ID": job["id"],
         "MW_PEFT_DATASET_PATH": str(dataset_path),
@@ -900,7 +932,6 @@ def _run_external_peft_trainer(
         "MW_PEFT_ADAPTER_NAME": adapter_name,
         "MW_PEFT_BASE_MODEL": base_model,
     }
-    started_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     try:
         completed = subprocess.run(
             command_args,
@@ -918,7 +949,7 @@ def _run_external_peft_trainer(
     log_path.write_text(
         "\n".join(
             [
-                f"started_at={started_at}",
+                f"started_at={trainer_started_at}",
                 f"completed_at={datetime.utcnow().isoformat(timespec='seconds')}Z",
                 f"return_code={completed.returncode}",
                 "",
@@ -985,27 +1016,42 @@ def _run_external_peft_trainer(
         "registered_model_version_id": registered_model["id"],
         "artifacts": [log_artifact, registry_artifact],
     }
-    if adapter_manifest_path.exists():
-        manifest_artifact = _register_file_artifact(
-            job_id=job["id"],
-            artifact_type="peft_adapter_manifest",
-            path=adapter_manifest_path,
-            metadata={"model_version_id": registered_model["id"], "adapter_name": adapter_name},
-        )
-        output_refs["artifacts"].append(manifest_artifact)
+    manifest_artifact = _register_file_artifact(
+        job_id=job["id"],
+        artifact_type="peft_adapter_manifest",
+        path=adapter_manifest_path,
+        metadata={"model_version_id": registered_model["id"], "adapter_name": adapter_name},
+    )
+    output_refs["artifacts"].append(manifest_artifact)
     return output_refs
 
 
 def _read_adapter_manifest(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {}
+        raise ValueError("External PEFT trainer completed without writing adapter_manifest.json")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"External PEFT trainer wrote invalid adapter_manifest.json: {exc}") from exc
     if not isinstance(payload, dict):
         raise ValueError("External PEFT trainer adapter_manifest.json must be a JSON object")
+    if not str(payload.get("adapter_path") or "").strip():
+        raise ValueError("External PEFT trainer adapter_manifest.json must include adapter_path")
     return payload
+
+
+def _peft_env_overrides() -> dict[str, str]:
+    return env_file_values_for(
+        prefixes=(
+            "MW_PEFT_",
+            "HF_",
+            "HF_HUB_",
+            "TRANSFORMERS_",
+            "TOKENIZERS_",
+            "ACCELERATE_",
+            "WANDB_",
+        )
+    )
 
 
 def _safe_output_root(path: Any) -> Path:

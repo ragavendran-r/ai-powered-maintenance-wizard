@@ -92,12 +92,16 @@ export function LearningReviewRoute({
   ragMigrationPreview,
   ragTargetCollection,
   refreshLearningExamples,
+  refreshLearningStatus,
   registerLearningAdapter,
   reindexLearningRag,
   rollbackLearningAdapter,
   runLearningEvaluation,
   runLearningRagMigration,
   selectedEmbeddingProfileId,
+  selectedLearningDatasetId,
+  selectedLearningModelId,
+  selectedLearningPromptId,
   setAdapterBaseModel,
   setAdapterModelName,
   setAdapterNotes,
@@ -110,6 +114,9 @@ export function LearningReviewRoute({
   setPeftAdapterName,
   setRagTargetCollection,
   setSelectedEmbeddingProfileId,
+  setSelectedLearningDatasetId,
+  setSelectedLearningModelId,
+  setSelectedLearningPromptId,
   toggleLearningApproval,
 }: {
   activateSelectedEmbeddingProfile: () => void
@@ -142,12 +149,16 @@ export function LearningReviewRoute({
   ragMigrationPreview: LearningRagMigrationPlan | null
   ragTargetCollection: string
   refreshLearningExamples: () => void
+  refreshLearningStatus: () => void
   registerLearningAdapter: () => void
   reindexLearningRag: () => void
   rollbackLearningAdapter: (model: LearningModelVersion) => void
   runLearningEvaluation: () => void
   runLearningRagMigration: () => void
   selectedEmbeddingProfileId: string
+  selectedLearningDatasetId: string
+  selectedLearningModelId: string
+  selectedLearningPromptId: string
   setAdapterBaseModel: (value: string) => void
   setAdapterModelName: (value: string) => void
   setAdapterNotes: (value: string) => void
@@ -160,6 +171,9 @@ export function LearningReviewRoute({
   setPeftAdapterName: (value: string) => void
   setRagTargetCollection: (value: string) => void
   setSelectedEmbeddingProfileId: (value: string) => void
+  setSelectedLearningDatasetId: (value: string) => void
+  setSelectedLearningModelId: (value: string) => void
+  setSelectedLearningPromptId: (value: string) => void
   toggleLearningApproval: (example: LearningExample) => void
 }) {
   const [learningReviewTab, setLearningReviewTab] = useState<LearningReviewTab>('examples')
@@ -225,6 +239,26 @@ export function LearningReviewRoute({
   const vectorProfile = vectorStore?.embedding_profile
   const ragMigrationNeeded = Boolean(vectorStore?.migration_required || (selectedEmbeddingProfile && activeEmbeddingProfile && selectedEmbeddingProfile.id !== activeEmbeddingProfile.id))
   const latestDatasetSnapshot = learningDatasets[0] ?? learningSummary?.recent_snapshots?.[0]
+  const selectedTrainingDataset = learningDatasets.find((snapshot) => snapshot.id === selectedLearningDatasetId)
+    ?? learningSummary?.recent_snapshots?.find((snapshot) => snapshot.id === selectedLearningDatasetId)
+    ?? latestDatasetSnapshot
+  const selectedTrainingModel = learningModels.find((model) => model.id === selectedLearningModelId)
+    ?? learningModels.find((model) => model.status === 'active')
+    ?? learningModels[0]
+  const selectedTrainingPrompt = learningPrompts.find((prompt) => prompt.id === selectedLearningPromptId)
+    ?? learningPrompts.find((prompt) => prompt.assistant === 'neo')
+    ?? learningPrompts[0]
+  const peftTrainerConfigured = Boolean(learningSummary?.peft_trainer?.configured)
+  const peftRunMode = peftTrainerConfigured ? 'Worker will train adapter' : 'Worker will prepare artifacts only'
+  const peftActionLabel = peftTrainerConfigured ? 'Queue PEFT training job' : 'Prepare PEFT dataset artifacts'
+  const latestPeftJob = learningJobs.find((job) => job.job_type === 'peft_tuning')
+  const activePeftJob = learningJobs.find(
+    (job) => job.job_type === 'peft_tuning' && ['queued', 'published', 'running'].includes(job.status),
+  )
+  const currentPeftJob = activePeftJob ?? latestPeftJob
+  const currentPeftStatus = currentPeftJob
+    ? String(currentPeftJob.output_refs.training_status ?? currentPeftJob.output_refs.dispatch ?? currentPeftJob.status).replace(/_/g, ' ')
+    : 'No PEFT job queued'
   const configuredRuntimeModel = learningSummary?.serving_model?.provider === 'ollama'
     ? learningSummary?.serving_model?.ollama_model
     : learningSummary?.serving_model?.openai_model
@@ -284,6 +318,15 @@ export function LearningReviewRoute({
       total: learningSummary?.counts.deployments ?? learningDeploymentRecords.length,
     })
   }, [learningDeploymentRecords, learningSummary?.counts.deployments])
+
+  useEffect(() => {
+    const hasActivePeftJob = learningJobs.some(
+      (job) => job.job_type === 'peft_tuning' && ['queued', 'published', 'running'].includes(job.status),
+    )
+    if (learningReviewTab !== 'adapter' || !hasActivePeftJob) return
+    const intervalId = window.setInterval(refreshLearningStatus, 4000)
+    return () => window.clearInterval(intervalId)
+  }, [learningJobs, learningReviewTab, refreshLearningStatus])
 
   const setTableLoading = (key: LifecycleTableKey, loading: boolean) => {
     const applyLoading = <T,>(setPage: Dispatch<SetStateAction<TablePageState<T>>>) =>
@@ -762,6 +805,22 @@ export function LearningReviewRoute({
           </small>
         </span>
         <span>
+          <small>Run mode</small>
+          <strong>{peftRunMode}</strong>
+        </span>
+        {Boolean(learningSummary?.peft_trainer?.model_source) && (
+          <span>
+            <small>Trainable model source</small>
+            <strong>{String(learningSummary?.peft_trainer?.model_source)}</strong>
+          </span>
+        )}
+        {Boolean(learningSummary?.peft_trainer?.quantization) && (
+          <span>
+            <small>Quantization</small>
+            <strong>{String(learningSummary?.peft_trainer?.quantization)}</strong>
+          </span>
+        )}
+        <span>
           <small>Timeout</small>
           <strong>{String(learningSummary?.peft_trainer?.timeout_seconds ?? 'not checked')}s</strong>
         </span>
@@ -816,14 +875,89 @@ export function LearningReviewRoute({
           </div>
           <h3>PEFT Tuning Job</h3>
           <div className="learningAdapterGrid">
+            <label className="field">
+              <span>Dataset snapshot</span>
+              <select value={selectedTrainingDataset?.id ?? ''} onChange={(event) => setSelectedLearningDatasetId(event.target.value)}>
+                {learningDatasets.map((snapshot) => (
+                  <option key={snapshot.id} value={snapshot.id}>
+                    {snapshot.name} · {snapshot.example_count} examples
+                  </option>
+                ))}
+                {!learningDatasets.length && selectedTrainingDataset && (
+                  <option value={selectedTrainingDataset.id}>{selectedTrainingDataset.name}</option>
+                )}
+              </select>
+            </label>
+            <label className="field">
+              <span>Source model version</span>
+              <select value={selectedTrainingModel?.id ?? ''} onChange={(event) => setSelectedLearningModelId(event.target.value)}>
+                {learningModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.model_name} · {model.status}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Prompt version</span>
+              <select value={selectedTrainingPrompt?.id ?? ''} onChange={(event) => setSelectedLearningPromptId(event.target.value)}>
+                {learningPrompts.map((prompt) => (
+                  <option key={prompt.id} value={prompt.id}>
+                    {prompt.assistant} · {prompt.version}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="peftTrainingSummary">
+              <span>
+                <small>Selected dataset</small>
+                <strong>{selectedTrainingDataset ? `${selectedTrainingDataset.name} · ${selectedTrainingDataset.example_count} examples` : 'Create a dataset snapshot first'}</strong>
+              </span>
+              <span>
+                <small>Selected model</small>
+                <strong>{selectedTrainingModel ? `${selectedTrainingModel.model_name} · ${selectedTrainingModel.status}` : 'Register or keep a model version available'}</strong>
+              </span>
+              <span>
+                <small>Selected prompt</small>
+                <strong>{selectedTrainingPrompt ? `${selectedTrainingPrompt.assistant} · ${selectedTrainingPrompt.version}` : 'Keep a prompt version available'}</strong>
+              </span>
+            </div>
             <label className="field adapterNotesField">
               <span>PEFT adapter job name</span>
               <input value={peftAdapterName} onChange={(event) => setPeftAdapterName(event.target.value)} />
             </label>
             <button className="textButton fullWidthAction" onClick={queuePeftTuningJob} disabled={learningLoading.queuePeftTuning}>
               {learningLoading.queuePeftTuning ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
-              Queue PEFT tuning job
+              {peftActionLabel}
             </button>
+          </div>
+          <div className={`peftCurrentJob ${currentPeftJob?.status ?? 'idle'}`}>
+            <span>
+              <small>Current PEFT training</small>
+              <strong>{currentPeftJob ? `${currentPeftJob.id} · ${currentPeftJob.status}` : 'No active training job'}</strong>
+            </span>
+            <span>
+              <small>Worker status</small>
+              <strong>{currentPeftStatus}</strong>
+            </span>
+            {typeof currentPeftJob?.output_refs.adapter_output_dir === 'string' && (
+              <span>
+                <small>Adapter output</small>
+                <strong>{currentPeftJob.output_refs.adapter_output_dir}</strong>
+              </span>
+            )}
+            {typeof currentPeftJob?.output_refs.trainer_started_at === 'string' && (
+              <span>
+                <small>Trainer started</small>
+                <strong>{formatDate(currentPeftJob.output_refs.trainer_started_at)}</strong>
+              </span>
+            )}
+            {currentPeftJob?.error && (
+              <span>
+                <small>Failure</small>
+                <strong>{currentPeftJob.error}</strong>
+              </span>
+            )}
           </div>
           <h3>Learning Job Trail</h3>
           <div className="jobList">
@@ -1091,7 +1225,7 @@ export function LearningReviewRoute({
               <span>Notes</span>
               <textarea value={adapterNotes} onChange={(event) => setAdapterNotes(event.target.value)} />
             </label>
-            <button className="textButton" onClick={registerLearningAdapter} disabled={learningLoading.registerAdapter || !adapterModelName.trim()}>
+            <button className="textButton" onClick={registerLearningAdapter} disabled={learningLoading.registerAdapter || !adapterModelName.trim() || !adapterPath.trim()}>
               {learningLoading.registerAdapter ? <span className="loadingSpinner" aria-hidden="true" /> : <Sparkles size={16} />}
               Register local adapter candidate
             </button>

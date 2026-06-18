@@ -12,16 +12,17 @@ Use this sequence in the Learning and Tuning view when preparing an adapter from
 4. **Approve examples**: Mark only specific, safe, outcome-backed examples for training; approved examples below the configured judge threshold are excluded from snapshots.
 5. **Create JSONL snapshot**: Freeze the approved, judge-qualified examples into an immutable JSONL dataset snapshot for audit and PEFT training.
 6. **Download JSONL if desired**: Use the latest snapshot's `Download JSONL` action to inspect or archive the exact training data outside the app.
-7. **Confirm PEFT trainer status**: Check that the PEFT trainer card says `external_command · configured` if you expect real adapter training, or `prepared_artifacts · not configured` if you only want dataset and manifest artifacts.
-8. **Enter PEFT adapter job name**: Provide the adapter/job name that the worker passes to the trainer as `MW_PEFT_ADAPTER_NAME`.
-9. **Queue PEFT tuning job**: Create the async `peft_tuning` job; the backend stores the dataset and training manifest and publishes the job for the learning worker when async learning is enabled.
-10. **Monitor Async Learning Jobs**: Watch the job move through queued, published, running, completed, or failed states so you know whether the worker processed it.
-11. **Review Learning Artifacts**: Confirm dataset, manifest, trainer log, adapter manifest, adapter registry, and adapter artifact records were created for the job.
-12. **Confirm candidate registration**: After successful trainer output, verify that the worker registered a local adapter candidate with the adapter path from `adapter_manifest.json`.
-13. **Deploy adapter to runtime**: Queue a runtime deployment check so the configured serving runtime, such as llama.cpp, LM Studio, Ollama, or vLLM, proves it can answer using the candidate adapter alias.
-14. **Run dataset evaluation**: Run the evaluation gate against the dataset, candidate model, and prompt version to confirm the candidate passes quality thresholds.
-15. **Promote adapter**: Promotion now performs or verifies runtime deployment first, then activates only a candidate with a registered adapter path, runtime-loaded deployment, and passing evaluation so live LLM calls resolve the loaded adapter alias.
-16. **Rollback if needed**: Use rollback controls to return serving to a previous active model version if the promoted adapter performs poorly.
+7. **Confirm PEFT trainer status**: Check that the PEFT trainer card says `external_command · configured` and shows the trainable model source if you expect real adapter training, or `prepared_artifacts · not configured` if you only want dataset and manifest artifacts.
+8. **Select training inputs**: In Adapter lifecycle, confirm the dataset snapshot, source model version, and prompt version that will be sent to the worker.
+9. **Enter PEFT adapter job name**: Provide the adapter/job name that the worker passes to the trainer as `MW_PEFT_ADAPTER_NAME`.
+10. **Queue PEFT training job**: Create the async `peft_tuning` job; the backend stores the dataset and training manifest and publishes the job for the learning worker when async learning is enabled.
+11. **Monitor current PEFT training**: Stay on the Adapter lifecycle tab to see the current PEFT job status refresh while the job is queued, published, or running. The UI shows artifact preparation, trainer running, adapter output directory, completion, or failure details.
+12. **Review Learning Artifacts**: Confirm dataset, manifest, trainer log, adapter manifest, adapter registry, and adapter artifact records were created for the job.
+13. **Confirm candidate registration**: After successful trainer output, verify that the worker registered a local adapter candidate with the adapter path from `adapter_manifest.json`.
+14. **Deploy adapter to runtime**: Queue a runtime deployment check so the configured serving runtime, such as llama.cpp, LM Studio, Ollama, or vLLM, proves it can answer using the candidate adapter alias.
+15. **Run dataset evaluation**: Run the evaluation gate against the dataset, candidate model, and prompt version to confirm the candidate passes quality thresholds.
+16. **Promote adapter**: Promotion now performs or verifies runtime deployment first, then activates only a candidate with a registered adapter path, runtime-loaded deployment, and passing evaluation so live LLM calls resolve the loaded adapter alias.
+17. **Rollback if needed**: Use rollback controls to return serving to a previous active model version if the promoted adapter performs poorly.
 
 Click-only operation requires the local stack to already be running with NATS, the backend, and the learning worker. Actual adapter training also requires `LEARNING_PEFT_TRAINER_COMMAND` and trainer dependencies to be configured before the job is queued; otherwise the worker prepares dataset and manifest artifacts but does not train an adapter.
 
@@ -72,11 +73,11 @@ LEARNING_PEFT_TRAINER_COMMAND=.venv-peft/bin/python scripts/peft/train_qwen_lora
 LEARNING_PEFT_TRAINER_TIMEOUT_SECONDS=7200
 LEARNING_PEFT_OUTPUT_DIR=backend/data/learning_adapters
 MW_PEFT_MODEL_SOURCE=Qwen/Qwen2.5-7B-Instruct
-MW_PEFT_QUANTIZATION=4bit
+MW_PEFT_QUANTIZATION=none
 MW_PEFT_MAX_SEQ_LENGTH=2048
 ```
 
-Set `MW_PEFT_MODEL_SOURCE` when `MW_PEFT_BASE_MODEL` is a serving identifier rather than a trainable Hugging Face model id. LM Studio GGUF names and Ollama model tags are serving identifiers; this trainer expects a Hugging Face repo id such as `Qwen/Qwen2.5-7B-Instruct` or a local Transformers model directory.
+Set `MW_PEFT_MODEL_SOURCE` when `MW_PEFT_BASE_MODEL` is a serving identifier rather than a trainable Hugging Face model id. LM Studio GGUF names and Ollama model tags are serving identifiers; this trainer expects a Hugging Face repo id such as `Qwen/Qwen2.5-7B-Instruct` or a local Transformers model directory. Use `MW_PEFT_QUANTIZATION=4bit` only on a CUDA bitsandbytes host; use `none` for CPU or Apple Silicon LoRA.
 
 ## Runtime Deployment
 

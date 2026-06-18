@@ -12,6 +12,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.data import repository
+from app.services.runtime_env import env_file_values_for
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,7 @@ def _run_configured_deployer(
     if not command_args:
         raise ValueError("LEARNING_ADAPTER_DEPLOYER_COMMAND did not contain an executable")
     env = {
+        **_adapter_deployer_env_overrides(),
         **os.environ,
         "MW_ADAPTER_JOB_ID": str(job["id"]),
         "MW_ADAPTER_VERSION_ID": str(model["id"]),
@@ -227,6 +229,10 @@ def _run_configured_deployer(
         "deployer_stdout": completed.stdout[-1000:] if completed.stdout else "",
         "deployer_stderr": completed.stderr[-1000:] if completed.stderr else "",
     }
+
+
+def _adapter_deployer_env_overrides() -> dict[str, str]:
+    return env_file_values_for(prefixes=("LLAMA_CPP_", "OPENAI_"))
 
 
 def _probe_openai_compatible(

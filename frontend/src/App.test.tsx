@@ -1240,10 +1240,12 @@ function learningSummaryPayload(
       retention: { state: 'disabled', retention_days: 7, cleanup_enabled: false },
     },
     peft_trainer: {
-      mode: 'prepared_artifacts',
-      configured: false,
-      timeout_seconds: 900,
+      mode: 'external_command',
+      configured: true,
+      timeout_seconds: 7200,
       output_dir: 'backend/data/learning_adapters',
+      model_source: 'Qwen/Qwen2.5-7B-Instruct',
+      quantization: 'none',
     },
     vector_store: {
       store: 'qdrant',
@@ -3147,7 +3149,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByText('filesystem · ready')).toBeInTheDocument()
     expect(screen.getByText('disabled · 7 days')).toBeInTheDocument()
     expect(screen.getByText('PEFT trainer')).toBeInTheDocument()
-    expect(screen.getByText('prepared_artifacts · not configured')).toBeInTheDocument()
+    expect(screen.getByText('external_command · configured')).toBeInTheDocument()
+    expect(screen.getByText('Worker will train adapter')).toBeInTheDocument()
+    expect(screen.getByText('Qwen/Qwen2.5-7B-Instruct')).toBeInTheDocument()
     expect(screen.getByText('Passed')).toBeInTheDocument()
     expect(screen.getByText('Quality')).toBeInTheDocument()
     expect(screen.getByText('dataset snapshot')).toBeInTheDocument()
@@ -3208,8 +3212,14 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       expect(Boolean(heading.compareDocumentPosition(lifecycleHeadings[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     })
     const validationButton = screen.getByRole('button', { name: 'Run dataset validation' })
-    const peftQueueButton = screen.getByRole('button', { name: 'Queue PEFT tuning job' })
+    const peftQueueButton = screen.getByRole('button', { name: 'Queue PEFT training job' })
     expect(Boolean(validationButton.compareDocumentPosition(peftQueueButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(screen.getByLabelText('Dataset snapshot')).toBeInTheDocument()
+    expect(screen.getByLabelText('Source model version')).toBeInTheDocument()
+    expect(screen.getByLabelText('Prompt version')).toBeInTheDocument()
+    expect(screen.getByText('Current PEFT training')).toBeInTheDocument()
+    expect(screen.getByText('LJOB-1 · completed')).toBeInTheDocument()
+    expect(screen.getByText('adapter candidate registered')).toBeInTheDocument()
     expect(screen.getByRole('table', { name: 'Dataset validation runs' })).toBeInTheDocument()
     expect(screen.getByRole('table', { name: 'Learning job trail' })).toBeInTheDocument()
     expect(screen.getByRole('table', { name: 'Learning artifacts' })).toBeInTheDocument()
@@ -3224,7 +3234,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(await screen.findByText('Evaluation passed with quality 0.81')).toBeInTheDocument()
 
     fireEvent.click(peftQueueButton)
-    expect(await screen.findByText('Queued PEFT tuning job LJOB-PEFT-1 with status queued')).toBeInTheDocument()
+    expect(await screen.findByText('Queued PEFT training job LJOB-PEFT-1 with status queued')).toBeInTheDocument()
+    expect(await screen.findByText('LJOB-PEFT-1 · queued')).toBeInTheDocument()
+    expect(screen.getAllByText('disabled').length).toBeGreaterThan(0)
 
     fireEvent.change(screen.getByLabelText('Runtime provider'), { target: { value: 'vllm' } })
     fireEvent.change(screen.getByLabelText('Runtime base URL'), { target: { value: 'http://localhost:8001/v1' } })

@@ -4269,6 +4269,71 @@ def test_learning_worker_runs_configured_peft_trainer_and_registers_candidate(mo
     }
 
 
+def test_learning_worker_rejects_successful_peft_trainer_without_manifest(monkeypatch, tmp_path):
+    headers = auth_headers()
+    client.post("/api/learning/examples/refresh", headers=headers)
+    dataset = client.post(
+        "/api/learning/datasets",
+        json={"name": "missing-manifest-learning-snapshot", "approved_only": True, "min_judge_score": 0.65},
+        headers=headers,
+    ).json()
+    model = client.post(
+        "/api/learning/model-versions",
+        json={
+            "provider": "openai",
+            "model_name": "qwen2.5-7b-instruct-missing-manifest",
+            "base_model": "qwen2.5-7b-instruct",
+            "adapter_path": None,
+            "status": "candidate",
+        },
+        headers=headers,
+    ).json()
+    peft_job = client.post(
+        "/api/learning/jobs/peft",
+        json={
+            "dataset_id": dataset["id"],
+            "model_version_id": model["id"],
+            "prompt_version_id": "prompt-neo-default",
+            "adapter_name": "maintenance-wizard-missing-manifest-lora",
+            "training_config": {"method": "lora", "epochs": 1},
+        },
+        headers=headers,
+    ).json()
+
+    def fake_trainer_run(command_args, cwd, env, text, capture_output, timeout, check):
+        os.makedirs(env["MW_PEFT_OUTPUT_DIR"], exist_ok=True)
+        return SimpleNamespace(returncode=0, stdout="trainer completed without manifest", stderr="")
+
+    monkeypatch.setattr(
+        "app.services.learning.get_settings",
+        lambda: SimpleNamespace(
+            learning_artifact_dir=tmp_path / "artifacts",
+            learning_peft_trainer_command="fake-peft-trainer",
+            learning_peft_trainer_timeout_seconds=45,
+            learning_peft_output_dir=tmp_path / "adapters",
+        ),
+    )
+    monkeypatch.setattr("app.services.learning.subprocess.run", fake_trainer_run)
+
+    with pytest.raises(ValueError, match="adapter_manifest.json"):
+        process_learning_job_message(
+            {
+                "schema_version": "1",
+                "job_id": peft_job["id"],
+                "job_type": "peft_tuning",
+                "requested_by": "admin@plant.local",
+                "correlation_id": peft_job["correlation_id"],
+                "input_refs": peft_job["input_refs"],
+            },
+            peft_job["subject"],
+        )
+
+    failed_job = repository.get_learning_job(peft_job["id"])
+    assert failed_job["status"] == "failed"
+    assert "adapter_manifest.json" in failed_job["error"]
+    assert repository.list_learning_artifacts(job_id=peft_job["id"])
+
+
 def test_learning_artifact_store_supports_s3_uri_registration(monkeypatch, tmp_path):
     artifact_path = tmp_path / "dataset.jsonl"
     artifact_path.write_text('{"messages":[]}\n', encoding="utf-8")

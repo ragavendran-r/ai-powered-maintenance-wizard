@@ -704,6 +704,9 @@ export function App() {
   const [rcaMessage, setRcaMessage] = useState('')
   const [rcaDraftStreamText, setRcaDraftStreamText] = useState('')
   const [rcaDraftCaseId, setRcaDraftCaseId] = useState('')
+  const [selectedLearningDatasetId, setSelectedLearningDatasetId] = useState('')
+  const [selectedLearningModelId, setSelectedLearningModelId] = useState('')
+  const [selectedLearningPromptId, setSelectedLearningPromptId] = useState('')
   const [selectedEmbeddingProfileId, setSelectedEmbeddingProfileId] = useState('')
   const [ragMigrationPreview, setRagMigrationPreview] = useState<LearningRagMigrationPlan | null>(null)
   const [ragTargetCollection, setRagTargetCollection] = useState('')
@@ -989,9 +992,11 @@ export function App() {
       .catch(() => setUserMessage('Users could not be loaded'))
   }
 
-  function loadLearning() {
-    setLearningLoading({})
-    setLearningMessage('')
+  function loadLearning(options: { silent?: boolean } = {}) {
+    if (!options.silent) {
+      setLearningLoading({})
+      setLearningMessage('')
+    }
     return Promise.all([
       api.learningSummary(),
       api.learningExamplesPage({ limit: 10, offset: 0 }),
@@ -1012,13 +1017,31 @@ export function App() {
         if (!ragTargetCollection && summary.vector_store?.collection) {
           setRagTargetCollection(summary.vector_store.collection)
         }
+        const latestDataset = datasets[0] ?? summary.recent_snapshots[0]
+        if (latestDataset && !selectedLearningDatasetId) {
+          setSelectedLearningDatasetId(latestDataset.id)
+        }
+        const activeModel = summary.model_versions.find((model) => model.status === 'active') ?? summary.model_versions[0]
+        if (activeModel && !selectedLearningModelId) {
+          setSelectedLearningModelId(activeModel.id)
+        }
+        const neoPrompt = summary.prompt_versions.find((item) => item.assistant === 'neo') ?? summary.prompt_versions[0]
+        if (neoPrompt && !selectedLearningPromptId) {
+          setSelectedLearningPromptId(neoPrompt.id)
+        }
         setApiState('connected')
       })
       .catch(() => {
-        setLearningMessage('Learning data could not be loaded')
+        if (!options.silent) {
+          setLearningMessage('Learning data could not be loaded')
+        }
         setApiState('fallback')
       })
-      .finally(() => setLearningLoading({}))
+      .finally(() => {
+        if (!options.silent) {
+          setLearningLoading({})
+        }
+      })
   }
 
   function loadRcaCases() {
@@ -1168,6 +1191,7 @@ export function App() {
         min_judge_score: 0.65,
       })
       setLearningDatasets((items) => [snapshot, ...items])
+      setSelectedLearningDatasetId(snapshot.id)
       const summary = await api.learningSummary()
       setLearningSummary(summary)
       setLearningMessage(`Created dataset snapshot with ${snapshot.example_count} approved example${snapshot.example_count === 1 ? '' : 's'}`)
@@ -1194,6 +1218,10 @@ export function App() {
   }
 
   async function registerLearningAdapter() {
+    if (!adapterModelName.trim() || !adapterPath.trim()) {
+      setLearningMessage('Enter a model name and adapter path before registering a local adapter candidate')
+      return
+    }
     setLearningActionLoading('registerAdapter', true)
     setLearningMessage('')
     try {
@@ -1216,9 +1244,16 @@ export function App() {
   }
 
   async function runLearningEvaluation() {
-    const dataset = learningDatasets[0] ?? learningSummary?.recent_snapshots[0]
-    const model = learningSummary?.model_versions[0]
-    const prompt = learningSummary?.prompt_versions.find((item) => item.assistant === 'neo') ?? learningSummary?.prompt_versions[0]
+    const dataset = learningDatasets.find((item) => item.id === selectedLearningDatasetId)
+      ?? learningSummary?.recent_snapshots.find((item) => item.id === selectedLearningDatasetId)
+      ?? learningDatasets[0]
+      ?? learningSummary?.recent_snapshots[0]
+    const model = learningSummary?.model_versions.find((item) => item.id === selectedLearningModelId)
+      ?? learningSummary?.model_versions.find((item) => item.status === 'active')
+      ?? learningSummary?.model_versions[0]
+    const prompt = learningSummary?.prompt_versions.find((item) => item.id === selectedLearningPromptId)
+      ?? learningSummary?.prompt_versions.find((item) => item.assistant === 'neo')
+      ?? learningSummary?.prompt_versions[0]
     if (!dataset || !model || !prompt) {
       setLearningMessage('Create a dataset snapshot and keep model/prompt versions available before evaluation')
       return
@@ -1243,9 +1278,16 @@ export function App() {
   }
 
   async function queuePeftTuningJob() {
-    const dataset = learningDatasets[0] ?? learningSummary?.recent_snapshots[0]
-    const model = learningSummary?.model_versions[0]
-    const prompt = learningSummary?.prompt_versions.find((item) => item.assistant === 'neo') ?? learningSummary?.prompt_versions[0]
+    const dataset = learningDatasets.find((item) => item.id === selectedLearningDatasetId)
+      ?? learningSummary?.recent_snapshots.find((item) => item.id === selectedLearningDatasetId)
+      ?? learningDatasets[0]
+      ?? learningSummary?.recent_snapshots[0]
+    const model = learningSummary?.model_versions.find((item) => item.id === selectedLearningModelId)
+      ?? learningSummary?.model_versions.find((item) => item.status === 'active')
+      ?? learningSummary?.model_versions[0]
+    const prompt = learningSummary?.prompt_versions.find((item) => item.id === selectedLearningPromptId)
+      ?? learningSummary?.prompt_versions.find((item) => item.assistant === 'neo')
+      ?? learningSummary?.prompt_versions[0]
     if (!dataset || !model || !prompt) {
       setLearningMessage('Create a dataset snapshot and keep model/prompt versions available before queuing PEFT tuning')
       return
@@ -1267,8 +1309,16 @@ export function App() {
         notes: 'Production async PEFT tuning request from Learning Review.',
       })
       const summary = await api.learningSummary()
-      setLearningSummary(summary)
-      setLearningMessage(`Queued PEFT tuning job ${job.id} with status ${job.status}`)
+      setLearningSummary({
+        ...summary,
+        recent_jobs: [job, ...summary.recent_jobs.filter((item) => item.id !== job.id)],
+      })
+      const trainerConfigured = Boolean(learningSummary?.peft_trainer?.configured)
+      setLearningMessage(
+        trainerConfigured
+          ? `Queued PEFT training job ${job.id} with status ${job.status}`
+          : `Prepared PEFT artifact job ${job.id} with status ${job.status}; configure the PEFT trainer to train an adapter`,
+      )
     } catch {
       setLearningMessage('PEFT tuning job could not be queued')
     } finally {
@@ -3342,12 +3392,18 @@ export function App() {
       ragMigrationPreview={ragMigrationPreview}
       ragTargetCollection={ragTargetCollection}
       refreshLearningExamples={refreshLearningExamples}
+      refreshLearningStatus={() => {
+        void loadLearning({ silent: true })
+      }}
       registerLearningAdapter={registerLearningAdapter}
       reindexLearningRag={reindexLearningRag}
       rollbackLearningAdapter={rollbackLearningAdapter}
       runLearningEvaluation={runLearningEvaluation}
       runLearningRagMigration={runLearningRagMigration}
       selectedEmbeddingProfileId={selectedEmbeddingProfileId}
+      selectedLearningDatasetId={selectedLearningDatasetId}
+      selectedLearningModelId={selectedLearningModelId}
+      selectedLearningPromptId={selectedLearningPromptId}
       setAdapterBaseModel={setAdapterBaseModel}
       setAdapterModelName={setAdapterModelName}
       setAdapterNotes={setAdapterNotes}
@@ -3360,6 +3416,9 @@ export function App() {
       setPeftAdapterName={setPeftAdapterName}
       setRagTargetCollection={setRagTargetCollection}
       setSelectedEmbeddingProfileId={setSelectedEmbeddingProfileId}
+      setSelectedLearningDatasetId={setSelectedLearningDatasetId}
+      setSelectedLearningModelId={setSelectedLearningModelId}
+      setSelectedLearningPromptId={setSelectedLearningPromptId}
       toggleLearningApproval={toggleLearningApproval}
     />
   ) : null
