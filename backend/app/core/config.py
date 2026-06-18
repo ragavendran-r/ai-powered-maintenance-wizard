@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     ollama_model: str = Field(default="llama3.1", alias="OLLAMA_MODEL")
     llm_timeout_seconds: float = Field(default=15.0, ge=1.0, alias="LLM_TIMEOUT_SECONDS")
     llm_stream_timeout_seconds: float = Field(default=60.0, ge=1.0, alias="LLM_STREAM_TIMEOUT_SECONDS")
+    llm_judge_timeout_seconds: float = Field(default=90.0, ge=1.0, alias="LLM_JUDGE_TIMEOUT_SECONDS")
+    llm_judge_max_tokens: int = Field(default=192, ge=64, le=2048, alias="LLM_JUDGE_MAX_TOKENS")
     llm_structured_max_tokens: int = Field(default=300, ge=64, le=2048, alias="LLM_STRUCTURED_MAX_TOKENS")
     llm_text_max_tokens: int = Field(default=600, ge=64, le=2048, alias="LLM_TEXT_MAX_TOKENS")
     llm_rca_draft_timeout_seconds: float = Field(default=45.0, ge=1.0, alias="LLM_RCA_DRAFT_TIMEOUT_SECONDS")

@@ -13,10 +13,10 @@ describe('learning status copy', () => {
 
   it('formats learning judge progress from source types', () => {
     expect(learningJudgeProgressMessage('feedback')).toBe(
-      'Judging feedback example. Live LLM checks can take up to 15 seconds before falling back.',
+      'Judging feedback example. Local live LLM checks can take up to 90 seconds before falling back.',
     )
     expect(learningJudgeProgressMessage('assistant_interaction')).toBe(
-      'Judging assistant interaction example. Live LLM checks can take up to 15 seconds before falling back.',
+      'Judging assistant interaction example. Local live LLM checks can take up to 90 seconds before falling back.',
     )
   })
 })

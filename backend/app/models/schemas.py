@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal, Optional
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 
 RiskLevel = Literal["low", "medium", "high", "critical"]
@@ -962,11 +962,42 @@ class LearningExample(BaseModel):
 class LearningJudgeResult(BaseModel):
     score: float = Field(ge=0, le=1)
     label: Literal["training_worthy", "review", "reject"]
-    rationale: str = Field(validation_alias=AliasChoices("rationale", "reason"))
+    rationale: str = Field(validation_alias=AliasChoices("rationale", "reason", "explanation"))
     strengths: list[str] = []
     risks: list[str] = []
     used_live_provider: bool = False
     provider: str = "mock"
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def normalize_score(cls, value):
+        if isinstance(value, str):
+            value = value.strip().rstrip("%")
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return value
+        if numeric > 1:
+            return numeric / 100
+        return numeric
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value):
+        normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "trainingworthy": "training_worthy",
+            "worthy": "training_worthy",
+            "approve": "training_worthy",
+            "approved": "training_worthy",
+            "accept": "training_worthy",
+            "accepted": "training_worthy",
+            "needs_review": "review",
+            "manual_review": "review",
+            "reject": "reject",
+            "rejected": "reject",
+        }
+        return aliases.get(normalized, normalized)
 
 
 class LearningExampleUpdateRequest(BaseModel):

@@ -68,7 +68,7 @@ export function learningRefreshMessage(exampleCount: number) {
 }
 
 export function learningJudgeProgressMessage(sourceType: string) {
-  return `Judging ${sourceType.replace(/_/g, ' ')} example. Live LLM checks can take up to 15 seconds before falling back.`
+  return `Judging ${sourceType.replace(/_/g, ' ')} example. Local live LLM checks can take up to 90 seconds before falling back.`
 }
 
 export const fallbackWorkOrders: WorkOrder[] = [
