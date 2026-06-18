@@ -106,6 +106,10 @@ test.describe('role capability rendering', () => {
     await expect(page.getByText('Monitoring Thresholds').first()).toBeVisible()
     await expect(page.getByText('Main drive proactive PM plan').first()).toBeVisible()
     await expect(page.getByText('Confirm LOTO and permits.')).toBeVisible()
+    if (await page.getByLabel('PM plans pagination').count()) {
+      await expect(page.getByLabel('PM plans pagination')).toContainText(/Rows 1-5 of \d+/)
+    }
+    await page.getByRole('tab', { name: 'Schedule & dispatch' }).click()
     await expect(page.getByLabel('Maintenance planning and dispatch board')).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Planning, Scheduling & Dispatch' })).toBeVisible()
     await page.getByLabel('Select work order for planning').selectOption('WO-8304')

@@ -2056,8 +2056,47 @@ beforeEach(() => {
         ))
         return Promise.resolve(new Response(JSON.stringify(created), { status: 200 }))
       }
+      if (url.includes('/api/pm-plans/page')) {
+        const requestUrl = new URL(url)
+        const limit = Number(requestUrl.searchParams.get('limit') ?? '5')
+        const offset = Number(requestUrl.searchParams.get('offset') ?? '0')
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: apiPmPlans.slice(offset, offset + limit),
+              total: apiPmPlans.length,
+              limit,
+              offset,
+            }),
+            { status: 200 },
+          ),
+        )
+      }
       if (url.includes('/api/pm-plans')) {
         return Promise.resolve(new Response(JSON.stringify(apiPmPlans), { status: 200 }))
+      }
+      if (url.includes('/api/work-orders/planning/board/page')) {
+        const requestUrl = new URL(url)
+        const limit = Number(requestUrl.searchParams.get('limit') ?? '5')
+        const offset = Number(requestUrl.searchParams.get('offset') ?? '0')
+        const planningStatus = requestUrl.searchParams.get('planning_status')
+        const assignedTo = requestUrl.searchParams.get('assigned_to')
+        const rows = apiWorkOrders.filter((order) => (
+          !['COMP', 'CLOSE'].includes(order.status)
+          && (!planningStatus || order.planning_status === planningStatus)
+          && (!assignedTo || order.assigned_to === assignedTo)
+        ))
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: rows.slice(offset, offset + limit),
+              total: rows.length,
+              limit,
+              offset,
+            }),
+            { status: 200 },
+          ),
+        )
       }
       if (url.includes('/api/work-orders')) {
         if (init?.method === 'POST') {
@@ -2752,10 +2791,39 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('lets planners schedule and dispatch approved work orders without assistant panels', async () => {
+    apiPmPlans = [
+      existingPmPlan,
+      ...Array.from({ length: 6 }, (_, index) => ({
+        ...existingPmPlan,
+        id: `PM-71${index}`,
+        title: `Extra PM plan ${index + 1}`,
+        equipment_id: index % 2 === 0 ? 'HYD-SYS-04' : 'CC-PUMP-03',
+        next_due_date: `2026-06-${21 + index}T08:00:00+05:30`,
+        converted_work_order_id: index < 2 ? `WO-91${index}` : null,
+        status: index < 2 ? 'converted' : 'draft',
+      }) as PmPlan),
+    ]
+    apiWorkOrders = [
+      ...workOrders,
+      ...Array.from({ length: 4 }, (_, index) => ({
+        ...workOrders[0],
+        id: `WO-84${index}`,
+        title: `Extra backlog work ${index + 1}`,
+        due_date: `2026-06-${13 + index}T18:00:00+05:30`,
+        planning_status: index % 2 === 0 ? 'unscheduled' : 'planned',
+        planned_start: null,
+        planned_end: null,
+        outage_window: null,
+        dispatch_notes: null,
+        dispatched_at: null,
+      }) as WorkOrder),
+    ]
     await renderAuthenticated('planner@plant.local')
 
     fireEvent.click(await screen.findByRole('button', { name: 'Planning' }))
     const centerPane = screen.getByLabelText('Work order center pane')
+    expect(await within(centerPane).findByLabelText('Planning backlog pagination')).toHaveTextContent('Rows 1-5 of 7')
+    expect(centerPane.querySelectorAll('.workOrderQueuePanel .workOrderRow')).toHaveLength(5)
     expect(screen.queryByLabelText('Work order right pane')).not.toBeInTheDocument()
     const preventiveTab = within(centerPane).getByRole('tab', { name: 'Preventive plans' })
     const dispatchTab = within(centerPane).getByRole('tab', { name: 'Schedule & dispatch' })
@@ -2768,6 +2836,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(within(pmPanel).getByLabelText('Active preventive maintenance plan')).toBeInTheDocument()
     expect(within(pmPanel).getByLabelText('Active preventive maintenance plan')).toHaveTextContent('Existing blower PM plan')
     expect(within(pmPanel).getAllByText('Drive bearing and coupling health PM').length).toBeGreaterThanOrEqual(1)
+    const initialPmPlanTable = within(pmPanel).getByLabelText('Preventive maintenance plans')
+    expect(within(initialPmPlanTable).getAllByRole('row')).toHaveLength(6)
+    expect(within(pmPanel).getByLabelText('PM plans pagination')).toHaveTextContent('Rows 1-5 of 7')
     fireEvent.click(within(pmPanel).getByRole('button', { name: /Morpheus PM draft/i }))
     expect(await within(pmPanel).findByRole('heading', { name: 'Morpheus PM live draft' })).toBeInTheDocument()
     expect(await within(pmPanel).findByText('Monitoring Thresholds')).toBeInTheDocument()
@@ -2778,6 +2849,8 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(within(pmPanel).getAllByText('drive_end_vibration >= 7.1 mm/s').length).toBeGreaterThanOrEqual(2)
     expect(within(pmPanel).getByText('Confirm LOTO and permits.')).toBeInTheDocument()
     const pmPlanTable = within(pmPanel).getByLabelText('Preventive maintenance plans')
+    await within(pmPanel).findByText('Rows 1-5 of 8')
+    expect(within(pmPlanTable).getAllByRole('row')).toHaveLength(6)
     expect(within(pmPlanTable).getByRole('columnheader', { name: 'Work order' })).toBeInTheDocument()
     expect(within(pmPlanTable).getAllByText('Not created').length).toBeGreaterThan(0)
     expect(within(pmPlanTable).queryByRole('button', { name: 'Select' })).not.toBeInTheDocument()

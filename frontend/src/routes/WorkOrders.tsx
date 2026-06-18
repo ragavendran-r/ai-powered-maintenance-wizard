@@ -5,6 +5,7 @@ import type {
   AuthUser,
   MaterialBlockerStatus,
   MaterialReadiness,
+  PaginatedResponse,
   PmPlan,
   PmPlanStatus,
   PmTemplate,
@@ -43,7 +44,11 @@ export function WorkOrdersRoute({
   canTechnicianAssistant,
   completeSelectedWorkOrder,
   dispatchWorkOrder,
+  onPlanningBacklogPageChange,
+  onPmPlanPageChange,
   planWorkOrder,
+  planningBacklogPage,
+  pmPlanTablePage,
   pmPlanLoading,
   pmPlanStreamText,
   pmPlans,
@@ -79,7 +84,11 @@ export function WorkOrdersRoute({
   canTechnicianAssistant: boolean
   completeSelectedWorkOrder: () => void
   dispatchWorkOrder: (workOrderId: string) => void
+  onPlanningBacklogPageChange: (offset: number) => void
+  onPmPlanPageChange: (offset: number) => void
   planWorkOrder: (workOrderId: string, payload: WorkOrderPlanningUpdate) => void
+  planningBacklogPage: PaginatedResponse<WorkOrder>
+  pmPlanTablePage: PaginatedResponse<PmPlan>
   pmPlanLoading: boolean
   pmPlanStreamText: string
   pmPlans: PmPlan[]
@@ -115,6 +124,7 @@ export function WorkOrdersRoute({
   const isPlanningMode = mode === 'planning'
   const canUseAssistant = canTechnicianAssistant || canSupervisorAssistant
   const [planningTab, setPlanningTab] = useState<PlanningTab>('preventive')
+  const displayedWorkOrders = isPlanningMode ? planningBacklogPage.items : workOrders
 
   usePinnedStreamScroll(
     technicianTranscriptRef,
@@ -174,6 +184,8 @@ export function WorkOrdersRoute({
                 convertPmPlanToWorkOrder={convertPmPlanToWorkOrder}
                 draftPreventivePlan={draftPreventivePlan}
                 isLoading={pmPlanLoading}
+                onPageChange={onPmPlanPageChange}
+                planPage={pmPlanTablePage}
                 streamText={pmPlanStreamText}
                 plans={pmPlans}
                 templates={pmTemplates}
@@ -329,7 +341,7 @@ export function WorkOrdersRoute({
             <h2>{isPlanningMode ? 'Planning backlog' : 'Assigned and follow-up work'}</h2>
           </div>
           <WorkOrderTable
-            workOrders={workOrders}
+            workOrders={displayedWorkOrders}
             onOpen={(id) => setSelectedWorkOrderId(id)}
             canAssign={isPlanningMode && canAssignWorkOrders}
             canApprove={canApproveWorkOrders}
@@ -339,6 +351,13 @@ export function WorkOrdersRoute({
             onApprove={approveWorkOrder}
             onStart={startWorkOrder}
           />
+          {isPlanningMode && (
+            <TablePagination
+              label="Planning backlog"
+              onPageChange={onPlanningBacklogPageChange}
+              page={planningBacklogPage}
+            />
+          )}
         </section>
       </section>
       {!isPlanningMode && (
@@ -432,6 +451,50 @@ export type WorkOrderPlanningUpdate = Partial<Pick<
   | 'dispatch_notes'
 >>
 
+function TablePagination<T,>({
+  label,
+  onPageChange,
+  page,
+}: {
+  label: string
+  onPageChange: (offset: number) => void
+  page: PaginatedResponse<T>
+}) {
+  if (page.total <= page.limit) return null
+  const pageIndex = Math.floor(page.offset / page.limit)
+  const pageCount = Math.ceil(page.total / page.limit)
+  const firstRow = page.total === 0 ? 0 : page.offset + 1
+  const lastRow = Math.min(page.total, page.offset + page.items.length)
+
+  return (
+    <div className="tablePagination" aria-label={`${label} pagination`}>
+      <span>
+        Rows {firstRow}-{lastRow} of {page.total}
+      </span>
+      <div>
+        <button
+          aria-label={`Previous ${label.toLowerCase()} page`}
+          className="outlineButton"
+          disabled={pageIndex === 0}
+          onClick={() => onPageChange(Math.max(0, page.offset - page.limit))}
+          type="button"
+        >
+          Previous
+        </button>
+        <button
+          aria-label={`Next ${label.toLowerCase()} page`}
+          className="outlineButton"
+          disabled={pageIndex >= pageCount - 1}
+          onClick={() => onPageChange(page.offset + page.limit)}
+          type="button"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const planningStatusLabels: Record<WorkOrderPlanningStatus, string> = {
   unscheduled: 'Unscheduled',
   planned: 'Planned',
@@ -498,6 +561,8 @@ function PreventiveMaintenancePanel({
   convertPmPlanToWorkOrder,
   draftPreventivePlan,
   isLoading,
+  onPageChange,
+  planPage,
   plans,
   streamText,
   templates,
@@ -506,6 +571,8 @@ function PreventiveMaintenancePanel({
   convertPmPlanToWorkOrder: (planId: string) => void
   draftPreventivePlan: (equipmentId: string, templateId?: string) => void
   isLoading: boolean
+  onPageChange: (offset: number) => void
+  planPage: PaginatedResponse<PmPlan>
   plans: PmPlan[]
   streamText: string
   templates: PmTemplate[]
@@ -543,15 +610,15 @@ function PreventiveMaintenancePanel({
     }
   }, [selectedEquipmentId, selectedTemplateId, templates])
 
-  const displayedPlans = plans
-  const activePlan = displayedPlans.find((plan) => plan.id === activePlanId) ?? displayedPlans[0]
+  const displayedPlans = planPage.items
+  const activePlan = plans.find((plan) => plan.id === activePlanId) ?? displayedPlans[0]
 
   useEffect(() => {
     const previousPlanIds = previousPlanIdsRef.current
-    const nextPlanIds = displayedPlans.map((plan) => plan.id)
-    const newlyAddedPlan = displayedPlans.find((plan) => !previousPlanIds.includes(plan.id))
+    const nextPlanIds = plans.map((plan) => plan.id)
+    const newlyAddedPlan = plans.find((plan) => !previousPlanIds.includes(plan.id))
     previousPlanIdsRef.current = nextPlanIds
-    if (!displayedPlans.length) {
+    if (!plans.length) {
       setActivePlanId('')
       return
     }
@@ -559,10 +626,10 @@ function PreventiveMaintenancePanel({
       setActivePlanId(newlyAddedPlan.id)
       return
     }
-    if (!displayedPlans.some((plan) => plan.id === activePlanId)) {
-      setActivePlanId(displayedPlans[0].id)
+    if (!plans.some((plan) => plan.id === activePlanId)) {
+      setActivePlanId(plans[0].id)
     }
-  }, [activePlanId, displayedPlans])
+  }, [activePlanId, plans])
 
   useEffect(() => {
     if (streamText) {
@@ -676,7 +743,7 @@ function PreventiveMaintenancePanel({
       <div className="pmPlanTablePanel" aria-label="Preventive maintenance plan table">
         <div className="miniHeader">
           <h3>All PM plans</h3>
-          <small>{displayedPlans.length} plan{displayedPlans.length === 1 ? '' : 's'}</small>
+          <small>{planPage.total} plan{planPage.total === 1 ? '' : 's'}</small>
         </div>
         <table className="pmPlanTable" aria-label="Preventive maintenance plans">
           <thead>
@@ -737,6 +804,7 @@ function PreventiveMaintenancePanel({
             )}
           </tbody>
         </table>
+        <TablePagination label="PM plans" onPageChange={onPageChange} page={planPage} />
       </div>
     </section>
   )

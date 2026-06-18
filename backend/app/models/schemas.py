@@ -223,6 +223,13 @@ class WorkOrder(BaseModel):
     spare_reservations: list[WorkOrderSpareReservation] = []
 
 
+class WorkOrderPage(BaseModel):
+    items: list[WorkOrder] = []
+    total: int
+    limit: int
+    offset: int
+
+
 class WorkOrderCreateRequest(BaseModel):
     equipment_id: str
     title: str
@@ -329,6 +336,13 @@ class PmPlan(BaseModel):
     converted_work_order_id: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+class PmPlanPage(BaseModel):
+    items: list[PmPlan] = []
+    total: int
+    limit: int
+    offset: int
 
 
 class PmPlanDraftRequest(BaseModel):
