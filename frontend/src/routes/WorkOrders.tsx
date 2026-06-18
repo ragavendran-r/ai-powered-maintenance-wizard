@@ -658,15 +658,18 @@ function PreventiveMaintenancePanel({
           {activePlan.adjustment_notes.length > 0 && <PmList title="LLM adjustment notes" items={activePlan.adjustment_notes} />}
           {activePlan.spares_strategy.length > 0 && <PmList title="Spares strategy" items={activePlan.spares_strategy} />}
           <div className="plannerActions">
-            <button
-              className="outlineButton"
-              type="button"
-              disabled={isLoading || activePlan.status === 'converted'}
-              onClick={() => convertPmPlanToWorkOrder(activePlan.id)}
-            >
-              Convert to planned work
-            </button>
-            {activePlan.converted_work_order_id && <span className="plannerHint">Created {activePlan.converted_work_order_id}</span>}
+            {activePlan.converted_work_order_id ? (
+              <span className="plannerHint">Created {activePlan.converted_work_order_id}</span>
+            ) : (
+              <button
+                className="outlineButton"
+                type="button"
+                disabled={isLoading}
+                onClick={() => convertPmPlanToWorkOrder(activePlan.id)}
+              >
+                Convert to planned work
+              </button>
+            )}
           </div>
         </article>
       )}
@@ -691,7 +694,14 @@ function PreventiveMaintenancePanel({
               displayedPlans.map((plan) => (
                 <tr className={plan.id === activePlan?.id ? 'selected' : ''} key={plan.id}>
                   <td>
-                    <strong>{plan.id}</strong>
+                    <button
+                      aria-pressed={plan.id === activePlan?.id}
+                      className="linkButton pmPlanIdButton"
+                      onClick={() => setActivePlanId(plan.id)}
+                      type="button"
+                    >
+                      {plan.id}
+                    </button>
                     <small>{plan.title}</small>
                   </td>
                   <td>{plan.equipment_id}</td>
@@ -703,14 +713,18 @@ function PreventiveMaintenancePanel({
                   </td>
                   <td>{plan.converted_work_order_id ?? 'Not created'}</td>
                   <td>
-                    <button
-                      aria-pressed={plan.id === activePlan?.id}
-                      className="outlineButton compactButton"
-                      onClick={() => setActivePlanId(plan.id)}
-                      type="button"
-                    >
-                      {plan.id === activePlan?.id ? 'Active' : 'Select'}
-                    </button>
+                    {plan.converted_work_order_id ? (
+                      <span className="plannerHint" aria-label="No PM plan action available">-</span>
+                    ) : (
+                      <button
+                        className="outlineButton compactButton"
+                        disabled={isLoading}
+                        onClick={() => convertPmPlanToWorkOrder(plan.id)}
+                        type="button"
+                      >
+                        Convert to planned work
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))

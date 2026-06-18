@@ -3789,6 +3789,11 @@ h3 {
   display: block;
 }
 
+.pmPlanIdButton {
+  font-size: inherit;
+  margin-top: 0;
+}
+
 .pmPlanTable td:first-child small {
   color: var(--color-text-muted);
   line-height: 1.3;
