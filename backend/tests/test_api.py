@@ -827,7 +827,54 @@ def test_pm_plan_page_returns_backend_pagination_metadata():
     assert len(payload["items"]) <= 2
 
 
-def test_pm_plan_draft_and_conversion_to_planned_work_order():
+def test_pm_plan_draft_and_conversion_to_planned_work_order(monkeypatch):
+    import app.services.pm_plans as pm_plans_module
+
+    class FakeLivePmClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def complete_model(
+            self,
+            prompt,
+            response_model,
+            system_prompt,
+            fallback_factory,
+            max_tokens=None,
+            timeout_seconds=None,
+            response_format=None,
+        ):
+            return response_model(
+                title="HYD-SYS-04 hydraulic oil temperature PM",
+                cadence_days=30,
+                next_due_days=7,
+                trigger={
+                    "type": "condition",
+                    "description": "Schedule PM when hydraulic temperature or pressure pulsation crosses limits.",
+                },
+                thresholds=["oil_temperature >= 82 C", "pressure_pulsation >= 8 bar"],
+                tasks=[
+                    {
+                        "task": "Inspect hydraulic oil temperature and pressure pulsation trends.",
+                        "owner_role": "Maintenance Technician",
+                        "estimated_minutes": 45,
+                    }
+                ],
+                spares_strategy=["Reserve hydraulic filter and seal kit before dispatch."],
+                adjustment_notes=["Shorten cadence if temperature rise repeats after oil service."],
+                used_live_provider=True,
+                provider="openai",
+            )
+
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            return LLMTextResponse(
+                content="1. Confirm LOTO and hydraulic isolation.\n2. Inspect temperature and pulsation readings.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(pm_plans_module, "configured_llm_client", lambda: FakeLivePmClient())
     headers = auth_headers("planner@plant.local")
 
     templates_response = client.get("/api/pm-templates?equipment_id=HYD-SYS-04", headers=headers)
@@ -876,7 +923,45 @@ def test_pm_plan_draft_and_conversion_to_planned_work_order():
     assert converted["converted_work_order_id"] == work_order["id"]
 
 
-def test_pm_plan_morpheus_draft_stream_persists_plan():
+def test_pm_plan_morpheus_draft_stream_persists_plan(monkeypatch):
+    import app.services.pm_plans as pm_plans_module
+
+    class FakeLivePmClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            if "Write concise technician-ready numbered steps" in prompt:
+                yield LLMTextResponse(
+                    content="### Smith Execution Steps\n",
+                    used_live_provider=True,
+                    provider="openai",
+                )
+                yield LLMTextResponse(
+                    content="1. Inspect bearing housing and verify coupling alignment.\n",
+                    used_live_provider=True,
+                    provider="openai",
+                )
+                return
+            yield LLMTextResponse(
+                content="### PM Plan\nMain drive proactive PM plan\n",
+                used_live_provider=True,
+                provider="openai",
+            )
+            yield LLMTextResponse(
+                content=(
+                    "### Trigger\nStart PM when drive-end vibration crosses the monitored threshold.\n"
+                    "### Monitoring Thresholds\n- drive_end_vibration >= 7.1 mm/s\n"
+                    "### Generated Task List\n- Inspect bearing housing and verify coupling alignment.\n"
+                    "### Spares Strategy\n- Reserve drive-end bearing kit before dispatch.\n"
+                    "### Adjustment Notes\n- Tighten cadence if vibration repeats after correction.\n"
+                ),
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(pm_plans_module, "configured_llm_client", lambda: FakeLivePmClient())
     headers = auth_headers("planner@plant.local")
     with client.stream(
         "POST",
@@ -893,7 +978,7 @@ def test_pm_plan_morpheus_draft_stream_persists_plan():
         if line.startswith("data:")
     ]
     assert events[0]["type"] == "meta"
-    assert events[-1]["type"] == "done"
+    assert events[-1]["type"] == "done", events
     plan = events[-1]["response"]["plan"]
     assert plan["id"].startswith("PM-")
     assert plan["equipment_id"] == "RM-DRIVE-01"

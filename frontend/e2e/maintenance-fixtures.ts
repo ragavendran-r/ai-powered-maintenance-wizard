@@ -604,17 +604,19 @@ function pmDraftStreamBody(response: PmPlanDraftResponse): string {
   const events: PmPlanDraftStreamEvent[] = [
     { type: 'meta', provider: 'openai', used_live_provider: true },
     {
-      type: 'token',
-      content: 'Morpheus is collecting PM planning context, prediction risk, and retrieved maintenance evidence.\n\n',
-      provider: 'openai',
-      used_live_provider: false,
+      type: 'status',
+      message: 'Preparing live PM draft context from prediction risk, maintenance history, spares, feedback, and retrieved evidence.',
     },
+    { type: 'status', message: 'PM context is ready; generating the plan through the live LLM stream.' },
     { type: 'token', content: '### PM Plan\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: 'Main drive proactive PM plan\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '### Monitoring Thresholds\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '- drive_end_vibration >= 7.1 mm/s\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '### Generated Task List\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '- Inspect bearing condition and coupling alignment.\n', provider: 'openai', used_live_provider: true },
+    { type: 'status', message: 'Morpheus PM plan is drafted; Smith is streaming technician-ready execution steps.' },
+    { type: 'token', content: '### Smith Execution Steps\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '1. Inspect bearing condition safely.\n', provider: 'openai', used_live_provider: true },
     { type: 'done', response },
   ]
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
