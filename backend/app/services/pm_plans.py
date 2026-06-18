@@ -52,8 +52,16 @@ def list_templates(equipment_id: Optional[str] = None) -> list[PmTemplate]:
     return [PmTemplate(**item) for item in repository.list_pm_templates(equipment_id)]
 
 
-def list_plans(equipment_id: Optional[str] = None, status: Optional[str] = None) -> list[PmPlan]:
-    return [PmPlan(**item) for item in repository.list_pm_plans(equipment_id=equipment_id, status=status)]
+def list_plans(
+    equipment_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: Optional[int] = 50,
+    offset: int = 0,
+) -> list[PmPlan]:
+    return [
+        PmPlan(**item)
+        for item in repository.list_pm_plans(equipment_id=equipment_id, status=status, limit=limit, offset=offset)
+    ]
 
 
 def draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> PmPlanDraftResponse:

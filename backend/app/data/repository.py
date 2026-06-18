@@ -145,7 +145,58 @@ def list_work_orders(
     follow_up_only: bool = False,
     planning_status: Optional[str] = None,
     open_only: bool = False,
+    limit: Optional[int] = None,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
+    where_sql, params = _work_order_filter_sql(
+        equipment_id=equipment_id,
+        assigned_to=assigned_to,
+        follow_up_only=follow_up_only,
+        planning_status=planning_status,
+        open_only=open_only,
+    )
+    limit_sql = ""
+    if limit is not None:
+        limit_sql = "LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+    rows = _fetch_all(
+        f"""
+        SELECT * FROM work_orders
+        {where_sql}
+        ORDER BY priority ASC, due_date ASC, updated_at DESC
+        {limit_sql}
+        """,
+        tuple(params),
+    )
+    return [_decode_work_order(row, include_logs=False) for row in rows]
+
+
+def count_work_orders(
+    equipment_id: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    follow_up_only: bool = False,
+    planning_status: Optional[str] = None,
+    open_only: bool = False,
+) -> int:
+    where_sql, params = _work_order_filter_sql(
+        equipment_id=equipment_id,
+        assigned_to=assigned_to,
+        follow_up_only=follow_up_only,
+        planning_status=planning_status,
+        open_only=open_only,
+    )
+    row = _fetch_one(f"SELECT COUNT(*) AS total FROM work_orders {where_sql}", tuple(params))
+    return int(row["total"] if row else 0)
+
+
+def _work_order_filter_sql(
+    *,
+    equipment_id: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    follow_up_only: bool = False,
+    planning_status: Optional[str] = None,
+    open_only: bool = False,
+) -> tuple[str, list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
     if equipment_id:
@@ -162,15 +213,7 @@ def list_work_orders(
     if open_only:
         clauses.append("status NOT IN ('COMP', 'CLOSE')")
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    rows = _fetch_all(
-        f"""
-        SELECT * FROM work_orders
-        {where_sql}
-        ORDER BY priority ASC, due_date ASC, updated_at DESC
-        """,
-        tuple(params),
-    )
-    return [_decode_work_order(row, include_logs=False) for row in rows]
+    return where_sql, params
 
 
 def get_work_order(work_order_id: str) -> Optional[dict[str, Any]]:
@@ -549,7 +592,39 @@ def get_pm_template(template_id: str) -> Optional[dict[str, Any]]:
     return _decode_pm_template(row) if row else None
 
 
-def list_pm_plans(equipment_id: Optional[str] = None, status: Optional[str] = None, limit: int = 50) -> list[dict[str, Any]]:
+def list_pm_plans(
+    equipment_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: Optional[int] = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    where_sql, params = _pm_plan_filter_sql(equipment_id=equipment_id, status=status)
+    limit_sql = ""
+    if limit is not None:
+        limit_sql = "LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+    rows = _fetch_all(
+        f"""
+        SELECT * FROM pm_plans
+        {where_sql}
+        ORDER BY
+          CASE status WHEN 'draft' THEN 0 WHEN 'active' THEN 1 WHEN 'converted' THEN 2 ELSE 3 END,
+          next_due_date ASC,
+          updated_at DESC
+        {limit_sql}
+        """,
+        tuple(params),
+    )
+    return [_decode_pm_plan(row) for row in rows]
+
+
+def count_pm_plans(equipment_id: Optional[str] = None, status: Optional[str] = None) -> int:
+    where_sql, params = _pm_plan_filter_sql(equipment_id=equipment_id, status=status)
+    row = _fetch_one(f"SELECT COUNT(*) AS total FROM pm_plans {where_sql}", tuple(params))
+    return int(row["total"] if row else 0)
+
+
+def _pm_plan_filter_sql(equipment_id: Optional[str] = None, status: Optional[str] = None) -> tuple[str, list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
     if equipment_id:
@@ -559,20 +634,7 @@ def list_pm_plans(equipment_id: Optional[str] = None, status: Optional[str] = No
         clauses.append("status = ?")
         params.append(status)
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    params.append(limit)
-    rows = _fetch_all(
-        f"""
-        SELECT * FROM pm_plans
-        {where_sql}
-        ORDER BY
-          CASE status WHEN 'draft' THEN 0 WHEN 'active' THEN 1 WHEN 'converted' THEN 2 ELSE 3 END,
-          next_due_date ASC,
-          updated_at DESC
-        LIMIT ?
-        """,
-        tuple(params),
-    )
-    return [_decode_pm_plan(row) for row in rows]
+    return where_sql, params
 
 
 def get_pm_plan(plan_id: str) -> Optional[dict[str, Any]]:

@@ -709,6 +709,33 @@ def test_planner_board_filters_open_scheduled_work_orders():
     assert all(item["planning_status"] == "planned" for item in payload)
 
 
+def test_planner_board_page_returns_backend_pagination_metadata():
+    headers = auth_headers("planner@plant.local")
+
+    response = client.get("/api/work-orders/planning/board/page?limit=2&offset=0", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["limit"] == 2
+    assert payload["offset"] == 0
+    assert payload["total"] >= len(payload["items"])
+    assert len(payload["items"]) <= 2
+    assert all(item["status"] not in {"COMP", "CLOSE"} for item in payload["items"])
+
+
+def test_pm_plan_page_returns_backend_pagination_metadata():
+    headers = auth_headers("planner@plant.local")
+
+    response = client.get("/api/pm-plans/page?limit=2&offset=0", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["limit"] == 2
+    assert payload["offset"] == 0
+    assert payload["total"] >= len(payload["items"])
+    assert len(payload["items"]) <= 2
+
+
 def test_pm_plan_draft_and_conversion_to_planned_work_order():
     headers = auth_headers("planner@plant.local")
 

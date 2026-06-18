@@ -43,6 +43,7 @@ import {
   type NeoAction,
   type NeoChatResponse,
   type NeoTable,
+  type PaginatedResponse,
   type PmPlan,
   type PmTemplate,
   type PredictionResponse,
@@ -101,6 +102,7 @@ import { ReportsRoute } from './routes/Reports'
 
 const WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS = 60_000
 const TOAST_TIMEOUT_MS = 4_500
+const PLANNING_TABLE_PAGE_SIZE = 5
 
 type MaintenanceInsightSectionKey = 'summary' | 'structuredReports' | 'abnormalAlerts' | 'decisionSummaries' | 'logEntries'
 
@@ -637,12 +639,24 @@ export function App() {
   const [diagnosisUsedLive, setDiagnosisUsedLive] = useState(false)
   const [diagnosisMessage, setDiagnosisMessage] = useState('')
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>(fallbackWorkOrders)
+  const [planningBacklogPage, setPlanningBacklogPage] = useState<PaginatedResponse<WorkOrder>>({
+    items: fallbackWorkOrders.filter((item) => !['COMP', 'CLOSE'].includes(item.status)).slice(0, PLANNING_TABLE_PAGE_SIZE),
+    total: fallbackWorkOrders.filter((item) => !['COMP', 'CLOSE'].includes(item.status)).length,
+    limit: PLANNING_TABLE_PAGE_SIZE,
+    offset: 0,
+  })
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState('WO-8304')
   const [workOrderMessage, setWorkOrderMessage] = useState('')
   const [workOrderDraft, setWorkOrderDraft] = useState<WorkOrderCreateRequest | null>(null)
   const [workOrderSubmitting, setWorkOrderSubmitting] = useState(false)
   const [pmTemplates, setPmTemplates] = useState<PmTemplate[]>([])
   const [pmPlans, setPmPlans] = useState<PmPlan[]>([])
+  const [pmPlanTablePage, setPmPlanTablePage] = useState<PaginatedResponse<PmPlan>>({
+    items: [],
+    total: 0,
+    limit: PLANNING_TABLE_PAGE_SIZE,
+    offset: 0,
+  })
   const [pmPlanLoading, setPmPlanLoading] = useState(false)
   const [pmPlanMessage, setPmPlanMessage] = useState('')
   const [pmPlanStreamText, setPmPlanStreamText] = useState('')
@@ -1442,16 +1456,53 @@ export function App() {
       .catch(() => setWorkOrders(fallbackWorkOrdersForUser(currentUser)))
   }
 
+  function planningBacklogFallbackPage(offset: number, source = workOrders): PaginatedResponse<WorkOrder> {
+    const openWorkOrders = source.filter((item) => !['COMP', 'CLOSE'].includes(item.status))
+    return {
+      items: openWorkOrders.slice(offset, offset + PLANNING_TABLE_PAGE_SIZE),
+      total: openWorkOrders.length,
+      limit: PLANNING_TABLE_PAGE_SIZE,
+      offset,
+    }
+  }
+
+  function pmPlanFallbackPage(offset: number, source = pmPlans): PaginatedResponse<PmPlan> {
+    return {
+      items: source.slice(offset, offset + PLANNING_TABLE_PAGE_SIZE),
+      total: source.length,
+      limit: PLANNING_TABLE_PAGE_SIZE,
+      offset,
+    }
+  }
+
+  function loadPlanningBacklogPage(offset = planningBacklogPage.offset) {
+    return api
+      .workOrderPlanningBoardPage({ limit: PLANNING_TABLE_PAGE_SIZE, offset })
+      .then((page) => setPlanningBacklogPage(page))
+      .catch(() => setPlanningBacklogPage(planningBacklogFallbackPage(offset)))
+  }
+
+  function loadPmPlanTablePage(offset = pmPlanTablePage.offset) {
+    return api
+      .pmPlansPage({ limit: PLANNING_TABLE_PAGE_SIZE, offset })
+      .then((page) => setPmPlanTablePage(page))
+      .catch(() => setPmPlanTablePage(pmPlanFallbackPage(offset)))
+  }
+
   function loadPmPlanning() {
     setPmPlanLoading(true)
     setPmPlanMessage('')
     return Promise.all([
       api.pmTemplates().catch((): PmTemplate[] => []),
       api.pmPlans().catch((): PmPlan[] => []),
+      api.pmPlansPage({ limit: PLANNING_TABLE_PAGE_SIZE, offset: 0 }).catch((): PaginatedResponse<PmPlan> | null => null),
+      api.workOrderPlanningBoardPage({ limit: PLANNING_TABLE_PAGE_SIZE, offset: 0 }).catch((): PaginatedResponse<WorkOrder> | null => null),
     ])
-      .then(([templates, plans]) => {
+      .then(([templates, plans, planPage, backlogPage]) => {
         setPmTemplates(templates)
         setPmPlans(plans)
+        setPmPlanTablePage(planPage ?? pmPlanFallbackPage(0, plans))
+        setPlanningBacklogPage(backlogPage ?? planningBacklogFallbackPage(0))
         setApiState('connected')
       })
       .catch(() => {
@@ -2204,6 +2255,7 @@ export function App() {
       setActiveView('workExecution')
       setWorkOrderDraft(null)
       setWorkOrderMessage(`Created ${created.id}`)
+      void loadPlanningBacklogPage(0)
     } catch {
       setWorkOrderMessage('Work order could not be created')
     } finally {
@@ -2265,6 +2317,7 @@ export function App() {
       }
     } finally {
       setPmPlanLoading(false)
+      void loadPmPlanTablePage(0)
     }
   }
 
@@ -2277,6 +2330,8 @@ export function App() {
       setSelectedWorkOrderId(workOrder.id)
       const plans = await api.pmPlans().catch((): PmPlan[] => [])
       setPmPlans(plans)
+      void loadPmPlanTablePage(pmPlanTablePage.offset)
+      void loadPlanningBacklogPage(planningBacklogPage.offset)
       setPmPlanMessage(`Converted ${planId} to planned work order ${workOrder.id}`)
       setWorkOrderMessage(`Created ${workOrder.id} from preventive maintenance plan`)
     } catch {
@@ -2674,6 +2729,7 @@ export function App() {
       setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
       setSelectedWorkOrderId(updated.id)
       setWorkOrderMessage(`${updated.id} assigned to ${assignedTo}`)
+      void loadPlanningBacklogPage(planningBacklogPage.offset)
     } catch {
       setWorkOrderMessage('Work order assignment could not be saved')
     }
@@ -2685,6 +2741,7 @@ export function App() {
       setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
       setSelectedWorkOrderId(updated.id)
       setWorkOrderMessage(`${updated.id} planning saved`)
+      void loadPlanningBacklogPage(planningBacklogPage.offset)
     } catch {
       setWorkOrderMessage('Work order plan could not be saved')
     }
@@ -2696,6 +2753,7 @@ export function App() {
       setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
       setSelectedWorkOrderId(updated.id)
       setWorkOrderMessage(`${updated.id} dispatched`)
+      void loadPlanningBacklogPage(planningBacklogPage.offset)
     } catch {
       setWorkOrderMessage('Work order dispatch could not be saved')
     }
@@ -2711,6 +2769,7 @@ export function App() {
       ))
       setSelectedWorkOrderId(updated.id)
       setWorkOrderMessage(`${updated.id} approved`)
+      void loadPlanningBacklogPage(planningBacklogPage.offset)
     } catch {
       setWorkOrderMessage('Work order approval could not be saved')
     }
@@ -3516,12 +3575,16 @@ export function App() {
         completeSelectedWorkOrder={completeSelectedWorkOrder}
         dispatchWorkOrder={dispatchWorkOrder}
         planWorkOrder={planWorkOrder}
+        planningBacklogPage={planningBacklogPage}
+        pmPlanTablePage={pmPlanTablePage}
         pmPlanLoading={pmPlanLoading}
         pmPlanStreamText={pmPlanStreamText}
         pmPlans={pmPlans}
         pmTemplates={pmTemplates}
         convertPmPlanToWorkOrder={convertPmPlanToWorkOrder}
         draftPreventivePlan={draftPreventivePlan}
+        onPlanningBacklogPageChange={(offset) => void loadPlanningBacklogPage(offset)}
+        onPmPlanPageChange={(offset) => void loadPmPlanTablePage(offset)}
         runSupervisorAssistant={runSupervisorAssistant}
         runTechnicianAssistant={runTechnicianAssistant}
         selectedWorkOrder={selectedWorkOrder}

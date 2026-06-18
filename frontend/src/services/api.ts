@@ -1564,6 +1564,24 @@ export const api = {
     const query = params.toString()
     return request<WorkOrder[]>(`/api/work-orders/planning/board${query ? `?${query}` : ''}`)
   },
+  workOrderPlanningBoardPage: ({
+    planningStatus,
+    assignedTo,
+    limit = 5,
+    offset = 0,
+  }: {
+    planningStatus?: WorkOrderPlanningStatus
+    assignedTo?: string
+    limit?: number
+    offset?: number
+  } = {}) => {
+    const params = new URLSearchParams()
+    params.set('limit', String(limit))
+    params.set('offset', String(offset))
+    if (planningStatus) params.set('planning_status', planningStatus)
+    if (assignedTo) params.set('assigned_to', assignedTo)
+    return request<PaginatedResponse<WorkOrder>>(`/api/work-orders/planning/board/page?${params.toString()}`)
+  },
   pmTemplates: (equipmentId?: string) => {
     const params = new URLSearchParams()
     if (equipmentId) params.set('equipment_id', equipmentId)
@@ -1575,6 +1593,24 @@ export const api = {
     if (equipmentId) params.set('equipment_id', equipmentId)
     const query = params.toString()
     return request<PmPlan[]>(`/api/pm-plans${query ? `?${query}` : ''}`)
+  },
+  pmPlansPage: ({
+    equipmentId,
+    status,
+    limit = 5,
+    offset = 0,
+  }: {
+    equipmentId?: string
+    status?: PmPlanStatus
+    limit?: number
+    offset?: number
+  } = {}) => {
+    const params = new URLSearchParams()
+    params.set('limit', String(limit))
+    params.set('offset', String(offset))
+    if (equipmentId) params.set('equipment_id', equipmentId)
+    if (status) params.set('status', status)
+    return request<PaginatedResponse<PmPlan>>(`/api/pm-plans/page?${params.toString()}`)
   },
   draftPmPlanWithMorpheus: (payload: {
     equipment_id: string

@@ -75,6 +75,7 @@ from app.models.schemas import (
     PmPlan,
     PmPlanDraftRequest,
     PmPlanDraftResponse,
+    PmPlanPage,
     PmTemplate,
     PredictionRequest,
     RagEmbeddingProfile,
@@ -101,6 +102,7 @@ from app.models.schemas import (
     WorkOrder,
     WorkOrderCreateRequest,
     WorkOrderLogRequest,
+    WorkOrderPage,
     WorkOrderPlanningStatus,
     WorkOrderUpdateRequest,
 )
@@ -486,6 +488,35 @@ def list_work_order_planning_board(
 
 
 @app.get(
+    "/api/work-orders/planning/board/page",
+    response_model=WorkOrderPage,
+    dependencies=[Depends(require_roles(*WORK_ORDER_ASSIGNMENT_ROLES))],
+)
+def list_work_order_planning_board_page(
+    planning_status: Optional[WorkOrderPlanningStatus] = None,
+    assigned_to: Optional[str] = None,
+    limit: int = Query(5, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+):
+    return WorkOrderPage(
+        items=repository.list_work_orders(
+            assigned_to=assigned_to,
+            planning_status=planning_status,
+            open_only=True,
+            limit=limit,
+            offset=offset,
+        ),
+        total=repository.count_work_orders(
+            assigned_to=assigned_to,
+            planning_status=planning_status,
+            open_only=True,
+        ),
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get(
     "/api/pm-templates",
     response_model=list[PmTemplate],
     dependencies=[Depends(require_roles(*PM_PLAN_ROLES))],
@@ -501,6 +532,25 @@ def list_pm_templates(equipment_id: Optional[str] = None):
 )
 def list_pm_plans(equipment_id: Optional[str] = None, status: Optional[str] = None):
     return list_pm_plan_records(equipment_id=equipment_id, status=status)
+
+
+@app.get(
+    "/api/pm-plans/page",
+    response_model=PmPlanPage,
+    dependencies=[Depends(require_roles(*PM_PLAN_ROLES))],
+)
+def list_pm_plans_page(
+    equipment_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = Query(5, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+):
+    return PmPlanPage(
+        items=list_pm_plan_records(equipment_id=equipment_id, status=status, limit=limit, offset=offset),
+        total=repository.count_pm_plans(equipment_id=equipment_id, status=status),
+        limit=limit,
+        offset=offset,
+    )
 
 
 @app.post(
