@@ -1,6 +1,11 @@
-# PEFT Trainer Template
+# PEFT Training and Adapter Deployment
 
 Maintenance Wizard can queue PEFT tuning jobs through Learning Review and the NATS-backed learning worker. The worker prepares an immutable approved JSONL dataset plus `training_manifest.json`, then optionally invokes a trainer command. The bundled template at `scripts/peft/train_qwen_lora.py` provides a concrete local Qwen/SLM LoRA or QLoRA path without adding heavy dependencies to normal backend or frontend tests.
+
+There are two supported modes:
+
+- **Prepared artifacts only**: when `LEARNING_PEFT_TRAINER_COMMAND` is empty, the worker creates the dataset and manifest artifacts, marks the job as prepared, and stops. This was the earlier safe handoff path when a trainable base model or trainer dependencies were not available on the local machine.
+- **External trainer**: when `LEARNING_PEFT_TRAINER_COMMAND` is configured, the worker runs the trainer command, records live status fields while it runs, requires a trainer-written `adapter_manifest.json`, and registers the resulting adapter as a candidate model version.
 
 ## Learning Review Workflow
 
@@ -16,7 +21,7 @@ Use this sequence in the Learning and Tuning view when preparing an adapter from
 8. **Select training inputs**: In Adapter lifecycle, confirm the dataset snapshot, source model version, and prompt version that will be sent to the worker.
 9. **Enter PEFT adapter job name**: Provide the adapter/job name that the worker passes to the trainer as `MW_PEFT_ADAPTER_NAME`.
 10. **Queue PEFT training job**: Create the async `peft_tuning` job; the backend stores the dataset and training manifest and publishes the job for the learning worker when async learning is enabled.
-11. **Monitor current PEFT training**: Stay on the Adapter lifecycle tab to see the current PEFT job status refresh while the job is queued, published, or running. The UI shows artifact preparation, trainer running, adapter output directory, completion, or failure details.
+11. **Monitor current PEFT training**: Stay on the Adapter lifecycle tab to see the current PEFT job status refresh while the job is queued, published, or running. Polling is scoped to this tab only. The UI shows artifact preparation, trainer running, adapter output directory, completion, or failure details.
 12. **Review Learning Artifacts**: Confirm dataset, manifest, trainer log, adapter manifest, adapter registry, and adapter artifact records were created for the job.
 13. **Confirm candidate registration**: After successful trainer output, verify that the worker registered a local adapter candidate with the adapter path from `adapter_manifest.json`.
 14. **Deploy adapter to runtime**: Queue a runtime deployment check so the configured serving runtime, such as llama.cpp, LM Studio, Ollama, or vLLM, proves it can answer using the candidate adapter alias.
@@ -24,7 +29,17 @@ Use this sequence in the Learning and Tuning view when preparing an adapter from
 16. **Promote adapter**: Promotion now performs or verifies runtime deployment first, then activates only a candidate with a registered adapter path, runtime-loaded deployment, and passing evaluation so live LLM calls resolve the loaded adapter alias.
 17. **Rollback if needed**: Use rollback controls to return serving to a previous active model version if the promoted adapter performs poorly.
 
-Click-only operation requires the local stack to already be running with NATS, the backend, and the learning worker. Actual adapter training also requires `LEARNING_PEFT_TRAINER_COMMAND` and trainer dependencies to be configured before the job is queued; otherwise the worker prepares dataset and manifest artifacts but does not train an adapter.
+Click-only operation requires the local stack to already be running with NATS, the backend, and the learning worker. Actual adapter training also requires `LEARNING_PEFT_TRAINER_COMMAND`, trainer dependencies, and a trainable base model source to be configured before the job is queued; otherwise the worker prepares dataset and manifest artifacts but does not train an adapter.
+
+## Adapter Lifecycle Tab
+
+The Adapter lifecycle tab separates training inputs from adapter records:
+
+- The **PEFT Tuning Job** form shows the dataset snapshot, source model version, and prompt version that will be sent to the worker.
+- The **Current PEFT training** panel shows the latest active or completed PEFT job, including worker status from `output_refs.training_status`, adapter output directory, start time, and failure details.
+- The **Learning Artifacts** table shows dataset, training manifest, trainer log, adapter manifest, adapter registry, and adapter artifact records.
+- The **Adapter Candidate Versions** list shows only model versions that represent adapter candidates or non-active historical versions. Default Neo, Morpheus, and Smith prompt rows are not adapter candidates and should not appear there.
+- The **Adapter Runtime Deployments** and **Promotion Audit** tables show whether a candidate was loaded by the runtime and whether it passed the promotion gate.
 
 ## Worker Contract
 
@@ -39,7 +54,23 @@ The learning worker invokes `LEARNING_PEFT_TRAINER_COMMAND` without a shell and 
 | `MW_PEFT_BASE_MODEL` | Yes | Base model recorded in the PEFT job. |
 | `MW_PEFT_JOB_ID` | No | Job id supplied by the worker for manifest traceability. |
 
-The trainer must exit nonzero on failure and write `adapter_manifest.json` on success. The backend registers the result as a local `candidate` adapter version only; evaluation, runtime deployment, and promotion remain separate reviewer-controlled gates.
+The worker also forwards whitelisted `.env` and process environment values for trainer settings, including `MW_PEFT_*`, `HF_*`, `HF_HUB_*`, `TRANSFORMERS_*`, `TOKENIZERS_*`, `ACCELERATE_*`, and `WANDB_*`. Values supplied directly by the worker, such as the job id, dataset path, manifest path, adapter name, base model, and output directory, take precedence for that job.
+
+The trainer must exit nonzero on failure and write `adapter_manifest.json` on success. A successful exit without `adapter_manifest.json` is treated as a failed job because the backend cannot safely register an adapter without the manifest. The backend registers the result as a local `candidate` adapter version only; evaluation, runtime deployment, and promotion remain separate reviewer-controlled gates.
+
+## Worker Status Timeline
+
+For a normal external trainer run, expect these job and output-ref transitions:
+
+1. The API queues a `peft_tuning` job with status `queued`.
+2. The async publisher marks the job `published` when it is sent to the learning NATS subject.
+3. The learning worker marks the job `running` when it starts processing the message.
+4. After dataset and manifest artifacts are created, `output_refs.training_status` becomes `dataset_artifacts_prepared`.
+5. Immediately before launching the external trainer, `output_refs.training_status` becomes `trainer_running`, with `adapter_output_dir`, `trainer_started_at`, and `trainer_timeout_seconds`.
+6. If the trainer writes a valid manifest, the worker records trainer logs, adapter manifest, adapter registry, and adapter artifact records, then completes the job.
+7. If the trainer fails, times out, or omits `adapter_manifest.json`, the worker marks the job failed and preserves the latest output refs so the UI still shows where the run stopped.
+
+In prepared-artifacts-only mode, the job stops after the dataset and manifest handoff and does not register an adapter candidate.
 
 ## Installing Optional Dependencies
 
@@ -79,6 +110,8 @@ MW_PEFT_MAX_SEQ_LENGTH=2048
 
 Set `MW_PEFT_MODEL_SOURCE` when `MW_PEFT_BASE_MODEL` is a serving identifier rather than a trainable Hugging Face model id. LM Studio GGUF names and Ollama model tags are serving identifiers; this trainer expects a Hugging Face repo id such as `Qwen/Qwen2.5-7B-Instruct` or a local Transformers model directory. Use `MW_PEFT_QUANTIZATION=4bit` only on a CUDA bitsandbytes host; use `none` for CPU or Apple Silicon LoRA.
 
+Keep the local `.env` untracked and update `.env.example` when changing defaults. The backend reads the whitelisted PEFT keys from `.env` for trainer subprocesses, so the training trigger can work without exporting every value in the shell that starts the backend or worker.
+
 ## Runtime Deployment
 
 Promotion must prove that the adapter is actually loaded by the serving runtime. A manual record is kept for audit, but it no longer satisfies the promotion gate.
@@ -92,16 +125,23 @@ LEARNING_RUNTIME_DEPLOYER_DEFAULT=llama_cpp
 LEARNING_ADAPTER_DEPLOYER_COMMAND="bash scripts/peft/deploy_llama_cpp_adapter.sh"
 LEARNING_ADAPTER_DEPLOYER_TIMEOUT_SECONDS=120
 OPENAI_BASE_URL=http://127.0.0.1:8080/v1
-OPENAI_MODEL=maintenance-wizard-qwen-lora-LJOB-7B7B7B7B7B7B
-LLAMA_CPP_BASE_MODEL_PATH=
-LLAMA_CPP_HF_REPO=Qwen/Qwen2.5-7B-Instruct-GGUF
-LLAMA_CPP_HF_FILE=qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf
-LLAMA_CPP_ADAPTER_GGUF_PATH=/Users/ragaven/work/ai-powered-maintenance-wizard/backend/data/learning_adapters/LJOB-7B7B7B7B7B7B/adapter/adapter.gguf
+OPENAI_MODEL=maintenance-wizard-qwen-lora-${JOB_ID}
+LLAMA_CPP_BASE_MODEL_PATH=/absolute/path/to/qwen2.5-7b-instruct.gguf
+LLAMA_CPP_HF_REPO=
+LLAMA_CPP_HF_FILE=
+LLAMA_CPP_ADAPTER_GGUF_PATH=
+LLAMA_CPP_CONVERT_LORA_SCRIPT=/absolute/path/to/llama.cpp/convert_lora_to_gguf.py
+LLAMA_CPP_CONVERT_PYTHON=.venv-peft/bin/python
+LLAMA_CPP_ALIAS=
 LLAMA_CPP_HOST=127.0.0.1
 LLAMA_CPP_PORT=8080
 ```
 
-If the trainer produced a PEFT adapter directory rather than a GGUF adapter file, set `LLAMA_CPP_CONVERT_LORA_SCRIPT` to `llama.cpp/convert_lora_to_gguf.py`. The deployer converts the adapter into `${MW_ADAPTER_ARTIFACT_URI}/adapter.gguf`, starts `llama-server` with `--model` or `--hf-repo`, `--lora`, and `--alias`, then the backend probes the OpenAI-compatible endpoint using the candidate alias. The base GGUF must match the model used to train the adapter; the local adapter generated in this project was trained from `Qwen/Qwen2.5-7B-Instruct`.
+Use either `LLAMA_CPP_BASE_MODEL_PATH` for a local GGUF file or `LLAMA_CPP_HF_REPO` plus optional `LLAMA_CPP_HF_FILE` for llama.cpp's Hugging Face loading path. `.env.example` defaults to the Qwen2.5 7B Instruct GGUF family. The base GGUF must match the model used to train the adapter; the bundled trainer defaults to `Qwen/Qwen2.5-7B-Instruct`.
+
+If `LLAMA_CPP_ADAPTER_GGUF_PATH` is empty and the trainer produced a PEFT adapter directory, set `LLAMA_CPP_CONVERT_LORA_SCRIPT` to `llama.cpp/convert_lora_to_gguf.py`. The deployer uses the candidate's `MW_ADAPTER_ARTIFACT_URI`, converts the adapter into `${MW_ADAPTER_ARTIFACT_URI}/adapter.gguf`, starts `llama-server` with `--model` or `--hf-repo`, `--lora`, and `--alias`, then the backend probes the OpenAI-compatible endpoint using the candidate alias.
+
+Normally keep `LLAMA_CPP_ALIAS` empty. During a Learning Review deployment, the backend passes the candidate alias as `MW_ADAPTER_SERVED_MODEL_NAME`, and the deployer gives that value precedence so the final runtime starts with the newly trained adapter alias.
 
 Use `LLAMA_CPP_EXTRA_ARGS` for local performance flags such as context size, GPU layer offload, or Metal tuning. The script intentionally requires explicit model and adapter paths so the app never guesses at large local model files.
 
