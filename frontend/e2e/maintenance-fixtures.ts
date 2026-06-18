@@ -14,6 +14,8 @@ import type {
   PmPlanDraftStreamEvent,
   PmTemplate,
   RcaCase,
+  RcaMorpheusDraftResponse,
+  RcaMorpheusDraftStreamEvent,
   StreamingStatus,
   TechnicianAssistantResponse,
   UserRole,
@@ -612,6 +614,18 @@ function pmDraftStreamBody(response: PmPlanDraftResponse): string {
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
 }
 
+function rcaDraftStreamBody(response: RcaMorpheusDraftResponse): string {
+  const events: RcaMorpheusDraftStreamEvent[] = [
+    { type: 'meta', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '### Probable Cause\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '- Drive-end bearing looseness remains the leading candidate.\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '### Fishbone\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: '- Coupling looseness under load\n', provider: 'openai', used_live_provider: true },
+    { type: 'done', response },
+  ]
+  return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
+}
+
 function reliabilityPredictionStreamBody(): string {
   const answer = [
     '### Failure Prediction',
@@ -897,6 +911,32 @@ export async function installMaintenanceApi(page: Page, initialUser: AuthUser = 
     }
     if (path === '/api/rca-cases') {
       await route.fulfill(json(rcaCases))
+      return
+    }
+    if (path === '/api/rca-cases/morpheus-draft/stream') {
+      await route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: rcaDraftStreamBody({
+          case: {
+            ...rcaCases[0],
+            morpheus_summary: 'Morpheus drafted RCA hypotheses, missing checks, and corrective actions from RAG evidence.',
+            morpheus_fishbone_text: '- Coupling looseness under load',
+            used_live_provider: true,
+            provider: 'openai',
+          },
+          evidence: rcaCases[0].evidence_timeline.map((item) => ({
+            source_type: item.source_type,
+            source_id: item.source_id,
+            title: item.title,
+            excerpt: item.summary,
+            equipment_id: rcaCases[0].equipment_id,
+            timestamp: item.timestamp,
+            relevance_reason: item.relevance,
+          })),
+          message: 'Morpheus drafted RCA hypotheses, evidence, missing checks, and corrective actions.',
+        }),
+      })
       return
     }
     if (path === '/api/pm-templates') {

@@ -3181,6 +3181,27 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     )
   })
 
+  it('streams Morpheus RCA draft content in the Reliability workspace', async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+
+    await renderAuthenticated()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Reliability' }))
+
+    const rcaWorkspace = await screen.findByLabelText('RCA workspace')
+    await waitFor(() => expect(within(rcaWorkspace).getByLabelText('Selected RCA case')).toHaveValue('RCA-9001'))
+    fireEvent.click(within(rcaWorkspace).getByRole('button', { name: 'Morpheus draft selected RCA' }))
+
+    expect(await screen.findByRole('heading', { name: 'Morpheus live draft' })).toBeInTheDocument()
+    expect(await screen.findByText('Drive-end bearing looseness remains the leading candidate.')).toBeInTheDocument()
+    expect(await screen.findAllByText('Seal flush strainer restriction (Primary cause)')).toHaveLength(2)
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'end' }))
+    expect(
+      await screen.findByText('Morpheus drafted RCA hypotheses, evidence, missing checks, and corrective actions. Provider: live openai.'),
+    ).toBeInTheDocument()
+  })
+
   it('lets reviewers score and export LLM-as-a-Judge learning examples', async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView

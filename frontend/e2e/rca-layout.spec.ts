@@ -33,7 +33,7 @@ async function expectFitsViewport(page: Page, selector: string) {
   ).toBeLessThanOrEqual(2)
 }
 
-test('RCA workspace and learning panels stay within the desktop content column', async ({ page }) => {
+test('RCA workspace stays within the desktop content column and streams Morpheus drafts', async ({ page }) => {
   await signInAs(page, 'reliability')
 
   await primaryNavButton(page, 'Reliability').click()
@@ -41,17 +41,14 @@ test('RCA workspace and learning panels stay within the desktop content column',
   await expect(page.locator('.rcaCaseTitle strong', { hasText: 'Drive-end vibration root cause review' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Evidence Timeline' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Learning and Tuning' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Morpheus draft selected RCA' }).click()
+  await expect(page.getByRole('heading', { name: 'Morpheus live draft' })).toBeVisible()
+  await expect(page.getByLabel('Morpheus RCA draft stream')).toContainText('Drive-end bearing looseness remains the leading candidate.')
 
   await expectNoDocumentHorizontalOverflow(page)
   await expectFitsViewport(page, '.reliabilityRouteStack')
   await expectFitsViewport(page, '.rcaWorkspace')
-
-  await primaryNavButton(page, 'Learning and Tuning').click()
-  await expect(page.getByRole('heading', { name: 'Learning and Tuning' })).toBeVisible()
   await expect(
-    page.getByRole('complementary', { name: 'Maintenance navigation' }).getByRole('heading', { name: 'Learning and Tuning' }),
+    page.getByRole('complementary', { name: 'Maintenance navigation' }).getByRole('button', { name: 'Learning and Tuning' }),
   ).toHaveCount(0)
-
-  await expectNoDocumentHorizontalOverflow(page)
-  await expectFitsViewport(page, '.learningView')
 })
