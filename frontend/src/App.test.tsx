@@ -129,6 +129,12 @@ function rcaDraftStreamResponse(response: RcaMorpheusDraftResponse) {
 function pmDraftStreamResponse(response: PmPlanDraftResponse) {
   const events: PmPlanDraftStreamEvent[] = [
     { type: 'meta', provider: 'openai', used_live_provider: true },
+    {
+      type: 'token',
+      content: 'Morpheus is collecting PM planning context, prediction risk, and retrieved maintenance evidence.\n\n',
+      provider: 'openai',
+      used_live_provider: false,
+    },
     { type: 'token', content: '### PM Plan\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: 'Main drive proactive PM plan\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '### Monitoring Thresholds\n', provider: 'openai', used_live_provider: true },
@@ -2798,6 +2804,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(within(pmPanel).getByLabelText('PM plans pagination')).toHaveTextContent('Rows 1-5 of 7')
     fireEvent.click(within(pmPanel).getByRole('button', { name: /Morpheus PM draft/i }))
     expect(await within(pmPanel).findByRole('heading', { name: 'Morpheus PM live draft' })).toBeInTheDocument()
+    expect(await within(pmPanel).findByText(/Morpheus is collecting PM planning context/)).toBeInTheDocument()
     expect(await within(pmPanel).findByText('Monitoring Thresholds')).toBeInTheDocument()
     await waitFor(() => {
       expect(within(pmPanel).getByLabelText('Active preventive maintenance plan')).toHaveTextContent('Main drive proactive PM plan')

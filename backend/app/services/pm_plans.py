@@ -79,15 +79,77 @@ def draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> PmPlanD
 
 def stream_draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> Iterator[dict[str, Any]]:
     llm_client = configured_llm_client()
-    yield {"type": "meta", "provider": llm_client.provider_name, "used_live_provider": llm_client.provider_name in {"openai", "ollama"}}
-    response = draft_plan(request, current_user)
-    for chunk in _chunk_stream_text(_stream_text_from_saved_pm_plan(response.plan)):
+    provider = llm_client.provider_name
+    used_live_provider = provider in {"openai", "ollama"}
+    yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+    yield {
+        "type": "token",
+        "content": "Morpheus is collecting PM planning context, prediction risk, and retrieved maintenance evidence.\n\n",
+        "provider": provider,
+        "used_live_provider": False,
+    }
+    context = _resolve_pm_context(request)
+    if not used_live_provider:
+        draft = llm_client.complete_model(
+            context["prompt"],
+            _PmPlanDraft,
+            _morpheus_system_prompt(),
+            lambda provider, reason: _fallback_from_context(context, provider, reason),
+            max_tokens=1200,
+        )
+        response = _store_pm_plan_response(context, request, current_user, draft)
+        for chunk in _chunk_stream_text(_stream_text_from_saved_pm_plan(response.plan)):
+            yield {
+                "type": "token",
+                "content": chunk,
+                "provider": response.plan.provider,
+                "used_live_provider": response.plan.used_live_provider,
+            }
+        yield {"type": "done", "response": response.model_dump(mode="json")}
+        return
+
+    chunks: list[str] = []
+    emitted_answer = ""
+    for chunk in llm_client.stream_text(
+        context["prompt"],
+        _morpheus_stream_system_prompt(),
+        lambda provider, reason: LLMTextResponse(content=reason, provider=provider),
+        max_tokens=1200,
+    ):
+        provider = chunk.provider
+        used_live_provider = chunk.used_live_provider
+        if not chunk.used_live_provider:
+            draft = _fallback_from_context(context, provider, chunk.content)
+            response = _store_pm_plan_response(context, request, current_user, draft)
+            for fallback_chunk in _chunk_stream_text(_stream_text_from_saved_pm_plan(response.plan)):
+                yield {
+                    "type": "token",
+                    "content": fallback_chunk,
+                    "provider": response.plan.provider,
+                    "used_live_provider": response.plan.used_live_provider,
+                }
+            yield {"type": "done", "response": response.model_dump(mode="json")}
+            return
+        chunks.append(chunk.content)
+        answer_so_far = "".join(chunks).strip()
+        if answer_so_far and answer_so_far.startswith(emitted_answer):
+            delta = answer_so_far[len(emitted_answer):]
+            if delta:
+                emitted_answer = answer_so_far
+                yield {"type": "token", "content": delta, "provider": provider, "used_live_provider": True}
+
+    streamed_answer = "".join(chunks).strip()
+    if streamed_answer:
+        draft = _draft_from_streamed_pm_answer(context, streamed_answer, provider, used_live_provider)
+    else:
+        draft = _fallback_from_context(context, provider, "stream returned no content")
         yield {
             "type": "token",
-            "content": chunk,
-            "provider": response.plan.provider,
-            "used_live_provider": response.plan.used_live_provider,
+            "content": _stream_text_from_pm_draft(draft),
+            "provider": draft.provider,
+            "used_live_provider": draft.used_live_provider,
         }
+    response = _store_pm_plan_response(context, request, current_user, draft)
     yield {"type": "done", "response": response.model_dump(mode="json")}
 
 

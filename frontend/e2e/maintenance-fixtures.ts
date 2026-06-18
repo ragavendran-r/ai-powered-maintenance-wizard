@@ -603,6 +603,12 @@ const embeddingProfile: LearningEmbeddingProfile = {
 function pmDraftStreamBody(response: PmPlanDraftResponse): string {
   const events: PmPlanDraftStreamEvent[] = [
     { type: 'meta', provider: 'openai', used_live_provider: true },
+    {
+      type: 'token',
+      content: 'Morpheus is collecting PM planning context, prediction risk, and retrieved maintenance evidence.\n\n',
+      provider: 'openai',
+      used_live_provider: false,
+    },
     { type: 'token', content: '### PM Plan\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: 'Main drive proactive PM plan\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '### Monitoring Thresholds\n', provider: 'openai', used_live_provider: true },
