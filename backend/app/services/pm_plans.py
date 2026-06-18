@@ -13,7 +13,7 @@ from app.services.ai_client import configured_llm_client
 from app.services.learning import record_assistant_interaction
 from app.services.llm import LLMTextResponse
 from app.services.retrieval import retrieve_evidence
-from app.services.risk import health_summary, predict_failure
+from app.services.risk import prediction_features
 
 
 class _PmTaskDraft(BaseModel):
@@ -67,6 +67,8 @@ def list_plans(
 def draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> PmPlanDraftResponse:
     context = _resolve_pm_context(request)
     llm_client = configured_llm_client()
+    if llm_client.provider_name not in {"openai", "ollama"}:
+        raise HTTPException(status_code=503, detail="Morpheus PM draft requires a live LLM provider")
     draft = llm_client.complete_model(
         context["prompt"],
         _PmPlanDraft,
@@ -74,6 +76,8 @@ def draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> PmPlanD
         lambda provider, reason: _fallback_from_context(context, provider, reason),
         max_tokens=1200,
     )
+    if not draft.used_live_provider:
+        raise HTTPException(status_code=503, detail="Morpheus PM draft did not receive a live LLM response")
     return _store_pm_plan_response(context, request, current_user, draft)
 
 
@@ -83,30 +87,17 @@ def stream_draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> 
     used_live_provider = provider in {"openai", "ollama"}
     yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
     yield {
-        "type": "token",
-        "content": "Morpheus is collecting PM planning context, prediction risk, and retrieved maintenance evidence.\n\n",
-        "provider": provider,
-        "used_live_provider": False,
+        "type": "status",
+        "message": "Preparing live PM draft context from prediction risk, maintenance history, spares, feedback, and retrieved evidence.",
     }
-    context = _resolve_pm_context(request)
     if not used_live_provider:
-        draft = llm_client.complete_model(
-            context["prompt"],
-            _PmPlanDraft,
-            _morpheus_system_prompt(),
-            lambda provider, reason: _fallback_from_context(context, provider, reason),
-            max_tokens=1200,
-        )
-        response = _store_pm_plan_response(context, request, current_user, draft)
-        for chunk in _chunk_stream_text(_stream_text_from_saved_pm_plan(response.plan)):
-            yield {
-                "type": "token",
-                "content": chunk,
-                "provider": response.plan.provider,
-                "used_live_provider": response.plan.used_live_provider,
-            }
-        yield {"type": "done", "response": response.model_dump(mode="json")}
+        yield {
+            "type": "error",
+            "message": "Morpheus PM draft requires a live LLM provider; deterministic PM plan prose is disabled.",
+        }
         return
+    context = _resolve_pm_context(request)
+    yield {"type": "status", "message": "PM context is ready; generating the plan through the live LLM stream."}
 
     chunks: list[str] = []
     emitted_answer = ""
@@ -119,16 +110,10 @@ def stream_draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> 
         provider = chunk.provider
         used_live_provider = chunk.used_live_provider
         if not chunk.used_live_provider:
-            draft = _fallback_from_context(context, provider, chunk.content)
-            response = _store_pm_plan_response(context, request, current_user, draft)
-            for fallback_chunk in _chunk_stream_text(_stream_text_from_saved_pm_plan(response.plan)):
-                yield {
-                    "type": "token",
-                    "content": fallback_chunk,
-                    "provider": response.plan.provider,
-                    "used_live_provider": response.plan.used_live_provider,
-                }
-            yield {"type": "done", "response": response.model_dump(mode="json")}
+            yield {
+                "type": "error",
+                "message": f"Morpheus PM draft did not receive a live LLM stream from {provider}.",
+            }
             return
         chunks.append(chunk.content)
         answer_so_far = "".join(chunks).strip()
@@ -142,14 +127,37 @@ def stream_draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> 
     if streamed_answer:
         draft = _draft_from_streamed_pm_answer(context, streamed_answer, provider, used_live_provider)
     else:
-        draft = _fallback_from_context(context, provider, "stream returned no content")
         yield {
-            "type": "token",
-            "content": _stream_text_from_pm_draft(draft),
-            "provider": draft.provider,
-            "used_live_provider": draft.used_live_provider,
+            "type": "error",
+            "message": "Morpheus PM draft stream returned no live content.",
         }
-    response = _store_pm_plan_response(context, request, current_user, draft)
+        return
+    saved = _save_pm_plan_base(context, request, draft)
+    plan = PmPlan(**saved)
+    yield {"type": "status", "message": "Morpheus PM plan is drafted; Smith is streaming technician-ready execution steps."}
+    smith_chunks: list[str] = []
+    for chunk in llm_client.stream_text(
+        _smith_prompt(plan, context["equipment"], context["evidence"]),
+        _smith_stream_system_prompt(),
+        lambda provider, reason: LLMTextResponse(content=reason, provider=provider, used_live_provider=False),
+        max_tokens=500,
+    ):
+        if not chunk.used_live_provider:
+            yield {
+                "type": "error",
+                "message": f"Smith PM execution steps did not receive a live LLM stream from {chunk.provider}.",
+            }
+            return
+        smith_chunks.append(chunk.content)
+        yield {"type": "token", "content": chunk.content, "provider": chunk.provider, "used_live_provider": True}
+    smith_steps = _lines_to_steps("".join(smith_chunks))
+    if not smith_steps:
+        yield {
+            "type": "error",
+            "message": "Smith PM execution step stream returned no live content.",
+        }
+        return
+    response = _finalize_pm_plan_response(context, request, current_user, saved, smith_steps)
     yield {"type": "done", "response": response.model_dump(mode="json")}
 
 
@@ -158,9 +166,13 @@ def _resolve_pm_context(request: PmPlanDraftRequest) -> dict[str, Any]:
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")
     template = _select_template(request.equipment_id, request.template_id)
-    health_summary(request.equipment_id)
-    prediction = predict_failure(request.equipment_id)
-    evidence = retrieve_evidence(_evidence_query(equipment, template, request), request.equipment_id)[:6]
+    prediction = prediction_features(request.equipment_id)
+    evidence = retrieve_evidence(
+        _evidence_query(equipment, template, request),
+        request.equipment_id,
+        limit=6,
+        use_reranker=False,
+    )
     feedback = repository.list_feedback(request.equipment_id)[:5]
     events = repository.list_maintenance_events(request.equipment_id)[:8]
     spares = repository.list_spares(request.equipment_id)[:4]
@@ -177,20 +189,38 @@ def _resolve_pm_context(request: PmPlanDraftRequest) -> dict[str, Any]:
         "prompt": prompt,
     }
 
-
 def _store_pm_plan_response(
     context: dict[str, Any],
     request: PmPlanDraftRequest,
     current_user: UserPublic,
     draft: _PmPlanDraft,
 ) -> PmPlanDraftResponse:
+    saved = _save_pm_plan_base(context, request, draft)
+    smith_steps = _smith_steps(PmPlan(**saved), context["equipment"], context["evidence"])
+    return _finalize_pm_plan_response(context, request, current_user, saved, smith_steps)
+
+
+def _save_pm_plan_base(
+    context: dict[str, Any],
+    request: PmPlanDraftRequest,
+    draft: _PmPlanDraft,
+) -> dict[str, Any]:
+    evidence = context["evidence"]
+    draft = _sanitize_pm_draft(context, draft)
+    plan_payload = _plan_payload(request.equipment_id, context["template"], draft, evidence)
+    return repository.save_pm_plan(plan_payload)
+
+
+def _finalize_pm_plan_response(
+    context: dict[str, Any],
+    request: PmPlanDraftRequest,
+    current_user: UserPublic,
+    saved: dict[str, Any],
+    smith_steps: list[str],
+) -> PmPlanDraftResponse:
     equipment = context["equipment"]
     evidence = context["evidence"]
     prompt = context["prompt"]
-    draft = _sanitize_pm_draft(context, draft)
-    plan_payload = _plan_payload(request.equipment_id, context["template"], draft, evidence)
-    saved = repository.save_pm_plan(plan_payload)
-    smith_steps = _smith_steps(PmPlan(**saved), equipment, evidence)
     saved = repository.save_pm_plan({**saved, "smith_steps": smith_steps})
 
     record_assistant_interaction(
@@ -643,25 +673,42 @@ def _smith_steps(plan: PmPlan, equipment: dict[str, Any], evidence) -> list[str]
     fallback_steps = _fallback_smith_steps(plan, equipment)
     llm_client = configured_llm_client()
     response = llm_client.complete_text(
-        "\n".join(
-            [
-                f"Equipment: {equipment['id']} {equipment['name']}",
-                f"PM plan: {plan.title}",
-                "Tasks:",
-                *[f"- {task.task}" for task in plan.tasks],
-                "Thresholds:",
-                *[f"- {item}" for item in plan.thresholds],
-                "Evidence:",
-                *[f"- {item.title}: {item.excerpt}" for item in evidence[:4]],
-                "Write concise technician-ready numbered steps. Do not include JSON.",
-            ]
-        ),
-        "You are Smith, a maintenance execution assistant. Convert PM plans into safe, technician-ready steps.",
+        _smith_prompt(plan, equipment, evidence),
+        _smith_system_prompt(),
         lambda provider, reason: LLMTextResponse(content="\n".join(fallback_steps), provider=provider, used_live_provider=False),
         max_tokens=500,
     )
+    if not response.used_live_provider:
+        raise HTTPException(status_code=503, detail="Smith PM execution steps require a live LLM provider")
     steps = _lines_to_steps(response.content)
     return steps or fallback_steps
+
+
+def _smith_prompt(plan: PmPlan, equipment: dict[str, Any], evidence) -> str:
+    return "\n".join(
+        [
+            f"Equipment: {equipment['id']} {equipment['name']}",
+            f"PM plan: {plan.title}",
+            "Tasks:",
+            *[f"- {task.task}" for task in plan.tasks],
+            "Thresholds:",
+            *[f"- {item}" for item in plan.thresholds],
+            "Evidence:",
+            *[f"- {item.title}: {item.excerpt}" for item in evidence[:4]],
+            "Write concise technician-ready numbered steps. Do not include JSON.",
+        ]
+    )
+
+
+def _smith_system_prompt() -> str:
+    return "You are Smith, a maintenance execution assistant. Convert PM plans into safe, technician-ready steps."
+
+
+def _smith_stream_system_prompt() -> str:
+    return (
+        f"{_smith_system_prompt()} Stream readable Markdown immediately. Start with the heading "
+        "### Smith Execution Steps, then provide concise numbered steps only."
+    )
 
 
 def _fallback_smith_steps(plan: PmPlan, equipment: dict[str, Any]) -> list[str]:
@@ -678,9 +725,10 @@ def _fallback_smith_steps(plan: PmPlan, equipment: dict[str, Any]) -> list[str]:
 
 def _lines_to_steps(content: str) -> list[str]:
     return [
-        line.strip().lstrip("- ").strip()
+        cleaned
         for line in content.splitlines()
-        if line.strip()
+        if (cleaned := line.strip().lstrip("- ").strip())
+        and not cleaned.lstrip("#").strip().lower() in {"smith execution steps", "execution steps", "technician steps"}
     ][:10]
 
 

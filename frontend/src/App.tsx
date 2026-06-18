@@ -2297,6 +2297,10 @@ export function App() {
           setPmPlanMessage(`Morpheus is streaming PM draft content from ${event.used_live_provider ? `live ${event.provider}` : event.provider}.`)
           return
         }
+        if (event.type === 'status') {
+          setPmPlanMessage(event.message)
+          return
+        }
         if (event.type === 'token') {
           streamedText += event.content
           setPmPlanStreamText(streamedText)
@@ -2320,16 +2324,8 @@ export function App() {
         setApiState('fallback')
       }
     } catch {
-      try {
-        const response = await api.draftPmPlanWithMorpheus(payload)
-        setPmPlans((items) => [response.plan, ...items.filter((item) => item.id !== response.plan.id)])
-        setPmTemplates(response.templates.length ? response.templates : pmTemplates)
-        setPmPlanMessage(`${response.message} Provider: ${response.plan.used_live_provider ? `live ${response.plan.provider}` : response.plan.provider}.`)
-        setApiState('connected')
-      } catch {
-        setPmPlanMessage('Morpheus could not draft the preventive maintenance plan')
-        setApiState('fallback')
-      }
+      setPmPlanMessage('Morpheus could not draft the preventive maintenance plan from the live LLM stream')
+      setApiState('fallback')
     } finally {
       setPmPlanLoading(false)
       void loadPmPlanTablePage(0)

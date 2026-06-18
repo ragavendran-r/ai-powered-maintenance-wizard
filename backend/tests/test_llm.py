@@ -201,7 +201,7 @@ def test_rca_streaming_draft_uses_scoped_timeout(monkeypatch):
     assert captured["timeout_seconds"] == 45
 
 
-def test_pm_plan_streaming_draft_emits_progress_before_context_resolution(monkeypatch):
+def test_pm_plan_streaming_draft_emits_status_before_context_resolution(monkeypatch):
     class FakeStreamingClient:
         @property
         def provider_name(self):
@@ -225,8 +225,37 @@ def test_pm_plan_streaming_draft_emits_progress_before_context_resolution(monkey
 
     assert next(events)["type"] == "meta"
     progress = next(events)
-    assert progress["type"] == "token"
-    assert "collecting PM planning context" in progress["content"]
+    assert progress["type"] == "status"
+    assert "Preparing live PM draft context" in progress["message"]
+
+
+def test_pm_plan_streaming_draft_rejects_non_live_provider_without_static_plan(monkeypatch):
+    class FakeStreamingClient:
+        @property
+        def provider_name(self):
+            return "mock"
+
+    def fail_context_resolution(request):
+        raise AssertionError("mock provider should not resolve context or create a deterministic PM plan")
+
+    monkeypatch.setattr(pm_plans_service, "configured_llm_client", lambda: FakeStreamingClient())
+    monkeypatch.setattr(pm_plans_service, "_resolve_pm_context", fail_context_resolution)
+
+    events = pm_plans_service.stream_draft_plan(
+        PmPlanDraftRequest(equipment_id="RM-DRIVE-01"),
+        UserPublic(
+            id="user-1",
+            email="planner@plant.local",
+            display_name="Planner",
+            role="planner",
+        ),
+    )
+
+    assert next(events)["type"] == "meta"
+    assert next(events)["type"] == "status"
+    error = next(events)
+    assert error["type"] == "error"
+    assert "requires a live LLM provider" in error["message"]
 
 
 def test_pm_plan_streaming_draft_uses_live_markdown_stream(monkeypatch):
@@ -238,6 +267,12 @@ def test_pm_plan_streaming_draft_uses_live_markdown_stream(monkeypatch):
             return "openai"
 
         def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            if "Write concise technician-ready numbered steps" in prompt:
+                captured["smith_prompt"] = prompt
+                captured["smith_system_prompt"] = system_prompt
+                yield LLMTextResponse(content="### Smith Execution Steps\n", used_live_provider=True, provider="openai")
+                yield LLMTextResponse(content="1. Inspect bearing condition safely.\n", used_live_provider=True, provider="openai")
+                return
             captured["prompt"] = prompt
             captured["system_prompt"] = system_prompt
             captured["max_tokens"] = max_tokens
@@ -255,26 +290,70 @@ def test_pm_plan_streaming_draft_uses_live_markdown_stream(monkeypatch):
             tasks=[pm_plans_service._PmTaskDraft(task="Inspect bearing condition and coupling alignment.")],
         )
 
-    def fake_store_response(context, request, current_user, draft):
+    def fake_save_base(context, request, draft):
         captured["stored_title"] = draft.title
+        return {
+            "id": "PM-9001",
+            "equipment_id": request.equipment_id,
+            "template_id": None,
+            "title": draft.title,
+            "cadence_days": 30,
+            "next_due_date": "2026-06-25T00:00:00+00:00",
+            "trigger": draft.trigger.model_dump(mode="json"),
+            "thresholds": draft.thresholds,
+            "tasks": [
+                {
+                    "id": "TASK-1",
+                    "sequence": 1,
+                    "task": "Inspect bearing condition and coupling alignment.",
+                    "owner_role": "Maintenance Technician",
+                    "estimated_minutes": 30,
+                    "safety_note": None,
+                }
+            ],
+            "smith_steps": [],
+            "spares_strategy": [],
+            "evidence": [],
+            "adjustment_notes": [],
+            "status": "draft",
+            "converted_work_order_id": None,
+            "source": "llm",
+            "generated_by": "morpheus",
+            "used_live_provider": True,
+            "provider": "openai",
+            "created_at": "2026-06-18T00:00:00+00:00",
+            "updated_at": "2026-06-18T00:00:00+00:00",
+        }
+
+    def fake_finalize_response(context, request, current_user, saved, smith_steps):
+        captured["smith_steps"] = smith_steps
         return SimpleNamespace(
             model_dump=lambda mode="json": {
-                "plan": {
-                    "id": "PM-9001",
-                    "equipment_id": request.equipment_id,
-                    "title": draft.title,
-                    "used_live_provider": True,
-                    "provider": "openai",
-                },
+                    "plan": {
+                        "id": "PM-9001",
+                        "equipment_id": request.equipment_id,
+                        "title": saved["title"],
+                        "used_live_provider": True,
+                        "provider": "openai",
+                    },
                 "templates": [],
                 "message": "stored",
             }
         )
 
     monkeypatch.setattr(pm_plans_service, "configured_llm_client", lambda: FakeStreamingClient())
-    monkeypatch.setattr(pm_plans_service, "_resolve_pm_context", lambda request: {"prompt": "pm prompt"})
+    monkeypatch.setattr(
+        pm_plans_service,
+        "_resolve_pm_context",
+        lambda request: {
+            "prompt": "pm prompt",
+            "equipment": {"id": request.equipment_id, "name": "Main Drive Motor"},
+            "evidence": [],
+        },
+    )
     monkeypatch.setattr(pm_plans_service, "_draft_from_streamed_pm_answer", fake_draft_from_stream)
-    monkeypatch.setattr(pm_plans_service, "_store_pm_plan_response", fake_store_response)
+    monkeypatch.setattr(pm_plans_service, "_save_pm_plan_base", fake_save_base)
+    monkeypatch.setattr(pm_plans_service, "_finalize_pm_plan_response", fake_finalize_response)
 
     events = pm_plans_service.stream_draft_plan(
         PmPlanDraftRequest(equipment_id="RM-DRIVE-01"),
@@ -287,12 +366,16 @@ def test_pm_plan_streaming_draft_uses_live_markdown_stream(monkeypatch):
     )
 
     assert next(events)["type"] == "meta"
-    assert "collecting PM planning context" in next(events)["content"]
+    assert next(events)["type"] == "status"
+    assert next(events)["type"] == "status"
     first_delta = next(events)
     assert first_delta["type"] == "token"
     assert first_delta["content"] == "### PM Plan"
     second_delta = next(events)
     assert second_delta["content"] == "\nMain drive proactive PM plan"
+    assert next(events)["type"] == "status"
+    assert next(events)["content"] == "### Smith Execution Steps\n"
+    assert next(events)["content"] == "1. Inspect bearing condition safely.\n"
     done = next(events)
     assert done["type"] == "done"
     assert captured["prompt"] == "pm prompt"
@@ -302,6 +385,58 @@ def test_pm_plan_streaming_draft_uses_live_markdown_stream(monkeypatch):
     assert captured["provider"] == "openai"
     assert captured["used_live_provider"] is True
     assert captured["stored_title"] == "Main drive proactive PM plan"
+    assert captured["smith_steps"] == ["1. Inspect bearing condition safely."]
+
+
+def test_pm_plan_context_uses_non_llm_retrieval_path(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(
+        pm_plans_service.repository,
+        "get_equipment",
+        lambda equipment_id: {
+            "id": equipment_id,
+            "name": "Main Drive Motor",
+            "area": "Hot Rolling Mill",
+        },
+    )
+    monkeypatch.setattr(
+        pm_plans_service,
+        "_select_template",
+        lambda equipment_id, template_id=None: {
+            "title": "Drive inspection PM",
+            "description": "Inspect drive vibration and bearing temperature.",
+            "task_list": ["Inspect bearing housing"],
+            "thresholds": ["drive_end_vibration >= 7.1 mm/s"],
+            "cadence_days": 30,
+        },
+    )
+    monkeypatch.setattr(
+        pm_plans_service,
+        "prediction_features",
+        lambda equipment_id: SimpleNamespace(
+            risk_level="high",
+            failure_probability=0.82,
+            remaining_useful_life_days=14,
+            drivers=["drive_end_vibration >= 7.1 mm/s"],
+        ),
+    )
+
+    def fake_retrieve_evidence(query, equipment_id, limit=6, use_reranker=True):
+        captured["limit"] = limit
+        captured["use_reranker"] = use_reranker
+        return []
+
+    monkeypatch.setattr(pm_plans_service, "retrieve_evidence", fake_retrieve_evidence)
+    monkeypatch.setattr(pm_plans_service.repository, "list_feedback", lambda equipment_id: [])
+    monkeypatch.setattr(pm_plans_service.repository, "list_maintenance_events", lambda equipment_id: [])
+    monkeypatch.setattr(pm_plans_service.repository, "list_spares", lambda equipment_id: [])
+
+    context = pm_plans_service._resolve_pm_context(PmPlanDraftRequest(equipment_id="RM-DRIVE-01"))
+
+    assert captured == {"limit": 6, "use_reranker": False}
+    assert context["prediction"].risk_level == "high"
+    assert "Prediction: risk=high" in context["prompt"]
 
 
 def test_openai_text_completion_respects_local_token_cap(monkeypatch):
