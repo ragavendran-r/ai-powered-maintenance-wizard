@@ -5,6 +5,7 @@ import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEv
 import { StatusTimeline, TechnicianExecutionCard } from './sharedComponents'
 
 let neoResponseDelayMs = 0
+let delayedNeoWelcomeEmails = new Set<string>()
 let assistantResponseDelayMs = 0
 let logoutResponseDelayMs = 0
 let maintenanceInsightsDelayMs = 0
@@ -1314,8 +1315,8 @@ function neoWelcomeFor(user = userFor()): NeoChatResponse {
     }
   }
   return {
-      answer:
-      'Current plant priorities focus on plant risk and production exposure.\n1. P1: Overdue emergency work: 1 priority-1 open work item: escalate owner progress before shift handoff.',
+    answer:
+      `${user.display_name}, current plant priorities focus on plant risk and production exposure.\n1. P1: Overdue emergency work: 1 priority-1 open work item: escalate owner progress before shift handoff.`,
     table: {
       title: 'Plant Priority Updates',
       columns: ['Priority', 'Focus', 'Plant impact', 'Signal', 'Recommendation'],
@@ -1363,6 +1364,7 @@ async function openLearningAndTuning() {
 
 beforeEach(() => {
   neoResponseDelayMs = 0
+  delayedNeoWelcomeEmails = new Set<string>()
   assistantResponseDelayMs = 0
   logoutResponseDelayMs = 0
   maintenanceInsightsDelayMs = 0
@@ -1814,8 +1816,15 @@ beforeEach(() => {
         )
       }
       if (url.endsWith('/api/neo/welcome/stream')) {
-        const response = neoWelcomeFor(userFromRequest(init))
-        return Promise.resolve(neoStreamResponse(response, [response.answer]))
+        const requestUser = userFromRequest(init)
+        const response = neoWelcomeFor(requestUser)
+        const streamResponse = neoStreamResponse(response, [response.answer])
+        if (delayedNeoWelcomeEmails.has(requestUser.email)) {
+          return new Promise((resolve) => {
+            window.setTimeout(() => resolve(streamResponse), 120)
+          })
+        }
+        return Promise.resolve(streamResponse)
       }
       if (url.endsWith('/api/neo/welcome')) {
         return Promise.resolve(new Response(JSON.stringify(neoWelcomeFor(userFromRequest(init))), { status: 200 }))
@@ -3048,6 +3057,23 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
     expect(await screen.findByRole('button', { name: /sign in/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Logout' })).not.toBeInTheDocument()
+  })
+
+  it('ignores stale Neo welcome streams after switching users', async () => {
+    delayedNeoWelcomeEmails.add('admin@plant.local')
+    render(<App />)
+
+    await signIn('admin@plant.local')
+    fireEvent.click(await screen.findByRole('button', { name: 'Logout' }))
+    await screen.findByRole('button', { name: /sign in/i })
+    await signIn('supervisor@plant.local')
+
+    expect(await screen.findByText('Dhruv')).toBeInTheDocument()
+    const transcript = await screen.findByLabelText('Neo chat transcript')
+    expect(await within(transcript).findByText(/Dhruv, current plant priorities/)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(transcript.textContent).not.toContain('Ragav,')
+    })
   })
 
   it('streams Morpheus RCA draft content in the Reliability workspace', async () => {

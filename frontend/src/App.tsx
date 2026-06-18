@@ -752,6 +752,8 @@ export function App() {
   const reliabilityStreamRef = useRef<HTMLDivElement | null>(null)
   const technicianInitialContextRef = useRef('')
   const supervisorInitialContextRef = useRef('')
+  const currentUserIdRef = useRef<string | null>(null)
+  const neoWelcomeRequestRef = useRef(0)
   const previousToastMessagesRef = useRef<Record<string, string>>({})
 
   const currentUser = session?.user
@@ -826,6 +828,8 @@ export function App() {
   ])
 
   function clearSession(message = '') {
+    neoWelcomeRequestRef.current += 1
+    currentUserIdRef.current = null
     api.setSession(null)
     setSession(null)
     setActiveView('commandCenter')
@@ -914,6 +918,9 @@ export function App() {
     try {
       const result = await api.login(loginEmail.trim(), loginPassword)
       const nextSession = { accessToken: result.access_token, user: result.user }
+      neoWelcomeRequestRef.current += 1
+      currentUserIdRef.current = result.user.id
+      setNeoSessionId(null)
       api.setSession(nextSession)
       setSession(nextSession)
       setWorkOrders(fallbackWorkOrdersForUser(result.user))
@@ -1510,7 +1517,12 @@ export function App() {
       .finally(() => setPmPlanLoading(false))
   }
 
-  function loadNeoWelcome() {
+  function loadNeoWelcome(sessionIdOverride?: string | null) {
+    const requestId = ++neoWelcomeRequestRef.current
+    const requestedUserId = currentUserIdRef.current
+    const isCurrentNeoWelcomeRequest = () => (
+      requestId === neoWelcomeRequestRef.current && requestedUserId === currentUserIdRef.current
+    )
     setNeoMessages([])
     setNeoTable(null)
     setNeoLoading(true)
@@ -1545,6 +1557,7 @@ export function App() {
     }
     return api
       .neoWelcomeStream((event) => {
+        if (!isCurrentNeoWelcomeRequest()) return
         if (event.type === 'session') {
           setNeoSessionId(event.session_id)
           return
@@ -1620,11 +1633,13 @@ export function App() {
             ])
           }
         }
-      }, neoSessionId)
+      }, sessionIdOverride === undefined ? neoSessionId : sessionIdOverride)
       .then(() => {
+        if (!isCurrentNeoWelcomeRequest()) return
         setApiState('connected')
       })
       .catch(() => {
+        if (!isCurrentNeoWelcomeRequest()) return
         setNeoMessages([
           {
             id: 'neo-welcome-fallback',
@@ -1638,6 +1653,7 @@ export function App() {
         setApiState('fallback')
       })
       .finally(() => {
+        if (!isCurrentNeoWelcomeRequest()) return
         setNeoLoading(false)
         setNeoStreaming(false)
       })
@@ -1666,10 +1682,11 @@ export function App() {
 
   useEffect(() => {
     if (!authReady || !session || session.user.role === 'iot_service') return
+    currentUserIdRef.current = session.user.id
     loadDashboard()
     loadAssets()
     loadWorkOrders()
-    loadNeoWelcome()
+    loadNeoWelcome(null)
     if (canStreaming) loadStreamingStatus()
     if (canAssignWorkOrders) loadTechnicians()
   }, [authReady, session?.user.id])
