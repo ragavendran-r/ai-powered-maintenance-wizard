@@ -603,14 +603,11 @@ const embeddingProfile: LearningEmbeddingProfile = {
 function pmDraftStreamBody(response: PmPlanDraftResponse): string {
   const events: PmPlanDraftStreamEvent[] = [
     { type: 'meta', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '### PM Plan\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: 'Main drive proactive PM plan\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '### Monitoring Thresholds\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '- drive_end_vibration >= 7.1 mm/s\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '### Generated Task List\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '- Inspect bearing condition and coupling alignment.\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '### Smith Execution Steps\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '1. Inspect bearing condition safely.\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'PM Plan\nMain drive proactive PM plan\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'Monitoring Thresholds: drive_end_vibration >= 7.1 mm/s\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'Generated Task List:\nInspect bearing condition and coupling alignment.\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'Adjustment Notes:\nReview cadence after repeat vibration.### Smith Execution Steps\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'Inspect bearing condition safely.\n', provider: 'openai', used_live_provider: true },
     { type: 'done', response },
   ]
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')

@@ -17,7 +17,13 @@ import type {
   WorkOrderSpareReservation,
 } from '../services/api'
 import type { AssistantTurn } from '../assistantContent'
-import { AssistantMessageContent, FormattedAssistantContent, assistantProviderLabel, usePinnedStreamScroll } from '../assistantContent'
+import {
+  AssistantMessageContent,
+  FormattedAssistantContent,
+  assistantProviderLabel,
+  normalizePmDraftMarkdown,
+  usePinnedStreamScroll,
+} from '../assistantContent'
 import {
   supervisorAssistantName,
   technicianAssistantName,
@@ -697,7 +703,7 @@ function PreventiveMaintenancePanel({
             <h3>Morpheus PM live draft</h3>
           </div>
           <div className="pmDraftStreamViewport" aria-live="polite">
-            <FormattedAssistantContent content={streamText} />
+            <FormattedAssistantContent content={normalizePmDraftMarkdown(streamText)} />
             <div ref={streamEndRef} aria-hidden="true" />
           </div>
         </article>
