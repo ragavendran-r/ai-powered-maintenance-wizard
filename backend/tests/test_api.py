@@ -465,6 +465,47 @@ def test_asset_reliability_prediction_stream_removes_repeated_drivers(monkeypatc
     assert '"type": "done"' in body
 
 
+def test_asset_reliability_prediction_stream_emits_incremental_tokens(monkeypatch):
+    import app.services.assets as assets_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            yield LLMTextResponse(
+                content="### Failure Prediction\n",
+                used_live_provider=True,
+                provider="openai",
+            )
+            yield LLMTextResponse(
+                content="- Critical bearing risk is rising.\n",
+                used_live_provider=True,
+                provider="openai",
+            )
+            yield LLMTextResponse(
+                content="### Next Actions\n- Inspect bearing housing temperature.\n",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(assets_module, "configured_llm_client", lambda: FakeClient())
+    response = client.get("/api/assets/RM-DRIVE-01/reliability/stream", headers=auth_headers())
+
+    assert response.status_code == 200, response.text
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    event_types = [event["type"] for event in events]
+    assert event_types[:4] == ["meta", "token", "token", "token"]
+    assert event_types[-1] == "done"
+    assert "".join(event["content"] for event in events if event["type"] == "token").startswith("### Failure Prediction")
+
+
 def test_repository_initializes_once_under_concurrent_access(monkeypatch):
     calls = 0
 

@@ -150,6 +150,7 @@ def stream_asset_reliability_prediction(equipment_id: str) -> Iterator[dict[str,
         "used_live_provider": provider != "mock",
     }
 
+    emitted_answer = ""
     for chunk in llm_client.stream_text(
         prompt,
         _reliability_prediction_system_prompt(),
@@ -171,6 +172,12 @@ def stream_asset_reliability_prediction(equipment_id: str) -> Iterator[dict[str,
             return
         if chunk.content:
             content_parts.append(chunk.content)
+            cleaned_so_far = _sanitize_reliability_prediction_answer("".join(content_parts).strip())
+            if cleaned_so_far and cleaned_so_far.startswith(emitted_answer):
+                delta = cleaned_so_far[len(emitted_answer):]
+                if delta:
+                    emitted_answer = cleaned_so_far
+                    yield {"type": "token", "content": delta}
 
     answer = _sanitize_reliability_prediction_answer("".join(content_parts).strip())
     if not answer:
@@ -181,7 +188,12 @@ def stream_asset_reliability_prediction(equipment_id: str) -> Iterator[dict[str,
             "used_live_provider": False,
         }
         return
-    yield {"type": "token", "content": answer}
+    if answer.startswith(emitted_answer):
+        delta = answer[len(emitted_answer):]
+        if delta:
+            yield {"type": "token", "content": delta}
+    elif not emitted_answer:
+        yield {"type": "token", "content": answer}
     record_assistant_interaction(
         assistant="smith",
         interaction_type="reliability_prediction_stream",
