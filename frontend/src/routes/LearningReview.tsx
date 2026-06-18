@@ -179,6 +179,7 @@ export function LearningReviewRoute({
   const [learningReviewTab, setLearningReviewTab] = useState<LearningReviewTab>('examples')
   const [selectedLearningExample, setSelectedLearningExample] = useState<LearningExample | null>(null)
   const learningModels: LearningModelVersion[] = learningSummary?.model_versions ?? []
+  const adapterModelVersions = learningModels.filter((model) => Boolean(model.adapter_path) || model.status !== 'active')
   const learningPrompts = learningSummary?.prompt_versions ?? []
   const learningEvaluations: LearningEvaluationRun[] = learningSummary?.evaluation_runs ?? []
   const learningJobs: LearningJob[] = learningSummary?.recent_jobs ?? []
@@ -1040,9 +1041,9 @@ export function LearningReviewRoute({
             )}
             {artifactTablePage.error && <p className="emptyState">{artifactTablePage.error}</p>}
           </div>
-          <h3>Adapter and Prompt Versions</h3>
+          <h3>Adapter Candidate Versions</h3>
           <div className="versionList">
-            {learningModels.map((model) => {
+            {adapterModelVersions.map((model) => {
               const promotionEvaluation = passedEvaluationForModel(model.id)
               const latestDeployment = latestDeploymentForModel(model.id)
               const latestVerifiedDeployment = latestVerifiedDeploymentForModel(model.id)
@@ -1101,13 +1102,9 @@ export function LearningReviewRoute({
                 </div>
               )
             })}
-            {learningPrompts.map((prompt) => (
-              <div className="versionRow" key={prompt.id}>
-                <strong>{prompt.assistant} / {prompt.version}</strong>
-                <small>{prompt.status}</small>
-                {prompt.notes && <p>{prompt.notes}</p>}
-              </div>
-            ))}
+            {!adapterModelVersions.length && (
+              <p className="emptyState">Adapter candidates will appear here after PEFT training registers a model version with an adapter artifact.</p>
+            )}
           </div>
           <h3>Adapter Runtime Deployments</h3>
           <div className="learningAdapterGrid">
