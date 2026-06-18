@@ -660,7 +660,6 @@ export function App() {
     offset: 0,
   })
   const [pmPlanLoading, setPmPlanLoading] = useState(false)
-  const [pmPlanMessage, setPmPlanMessage] = useState('')
   const [pmPlanStreamText, setPmPlanStreamText] = useState('')
   const [technicianObservation, setTechnicianObservation] = useState('There are hotspots and looseness around the checked connections.')
   const [technicianAssistant, setTechnicianAssistant] = useState<TechnicianAssistantResponse | null>(null)
@@ -802,7 +801,6 @@ export function App() {
       ingestionMessage,
       learningMessage,
       maintenanceInsightsMessage,
-      pmPlanMessage,
       rcaMessage,
       reportMessage,
       userMessage,
@@ -819,7 +817,6 @@ export function App() {
     ingestionMessage,
     learningMessage,
     maintenanceInsightsMessage,
-    pmPlanMessage,
     rcaMessage,
     reportMessage,
     showToast,
@@ -837,7 +834,6 @@ export function App() {
     setPmTemplates([])
     setPmPlans([])
     setPmPlanLoading(false)
-    setPmPlanMessage('')
     setPmPlanStreamText('')
     setAssets([])
     setAssetDetail(null)
@@ -1496,7 +1492,6 @@ export function App() {
 
   function loadPmPlanning() {
     setPmPlanLoading(true)
-    setPmPlanMessage('')
     return Promise.all([
       api.pmTemplates().catch((): PmTemplate[] => []),
       api.pmPlans().catch((): PmPlan[] => []),
@@ -1510,10 +1505,7 @@ export function App() {
         setPlanningBacklogPage(backlogPage ?? planningBacklogFallbackPage(0))
         setApiState('connected')
       })
-      .catch(() => {
-        setPmPlanMessage('Preventive maintenance plans could not be loaded')
-        setApiState('fallback')
-      })
+      .catch(() => setApiState('fallback'))
       .finally(() => setPmPlanLoading(false))
   }
 
@@ -2280,7 +2272,6 @@ export function App() {
 
   async function draftPreventivePlan(equipmentId: string, templateId?: string) {
     setPmPlanLoading(true)
-    setPmPlanMessage('')
     setPmPlanStreamText('')
     const payload = {
       equipment_id: equipmentId,
@@ -2294,11 +2285,6 @@ export function App() {
       let completed = false
       await api.draftPmPlanWithMorpheusStream(payload, (event) => {
         if (event.type === 'meta') {
-          setPmPlanMessage(`Morpheus is streaming PM draft content from ${event.used_live_provider ? `live ${event.provider}` : event.provider}.`)
-          return
-        }
-        if (event.type === 'status') {
-          setPmPlanMessage(event.message)
           return
         }
         if (event.type === 'token') {
@@ -2311,7 +2297,6 @@ export function App() {
           const response = event.response
           setPmPlans((items) => [response.plan, ...items.filter((item) => item.id !== response.plan.id)])
           setPmTemplates(response.templates.length ? response.templates : pmTemplates)
-          setPmPlanMessage(`${response.message} Provider: ${response.plan.used_live_provider ? `live ${response.plan.provider}` : response.plan.provider}.`)
           setApiState('connected')
           return
         }
@@ -2320,11 +2305,9 @@ export function App() {
         }
       })
       if (!completed) {
-        setPmPlanMessage('Morpheus PM draft stream ended before the plan was ready.')
         setApiState('fallback')
       }
     } catch {
-      setPmPlanMessage('Morpheus could not draft the preventive maintenance plan from the live LLM stream')
       setApiState('fallback')
     } finally {
       setPmPlanLoading(false)
@@ -2334,7 +2317,6 @@ export function App() {
 
   async function convertPmPlanToWorkOrder(planId: string) {
     setPmPlanLoading(true)
-    setPmPlanMessage('')
     try {
       const workOrder = await api.convertPmPlanToWorkOrder(planId)
       setWorkOrders((items) => [workOrder, ...items.filter((item) => item.id !== workOrder.id)])
@@ -2343,10 +2325,9 @@ export function App() {
       setPmPlans(plans)
       void loadPmPlanTablePage(pmPlanTablePage.offset)
       void loadPlanningBacklogPage(planningBacklogPage.offset)
-      setPmPlanMessage(`Converted ${planId} to planned work order ${workOrder.id}`)
       setWorkOrderMessage(`Created ${workOrder.id} from preventive maintenance plan`)
     } catch {
-      setPmPlanMessage('Preventive maintenance plan could not be converted to planned work')
+      setWorkOrderMessage('Preventive maintenance plan could not be converted to planned work')
     } finally {
       setPmPlanLoading(false)
     }

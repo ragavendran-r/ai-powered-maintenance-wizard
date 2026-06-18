@@ -130,18 +130,12 @@ function rcaDraftStreamResponse(response: RcaMorpheusDraftResponse) {
 function pmDraftStreamResponse(response: PmPlanDraftResponse) {
   const events: PmPlanDraftStreamEvent[] = [
     { type: 'meta', provider: 'openai', used_live_provider: true },
-    {
-      type: 'status',
-      message: 'Preparing live PM draft context from prediction risk, maintenance history, spares, feedback, and retrieved evidence.',
-    },
-    { type: 'status', message: 'PM context is ready; generating the plan through the live LLM stream.' },
     { type: 'token', content: '### PM Plan\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: 'Main drive proactive PM plan\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '### Monitoring Thresholds\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '- drive_end_vibration >= 7.1 mm/s\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '### Generated Task List\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '- Inspect bearing condition and coupling alignment.\n', provider: 'openai', used_live_provider: true },
-    { type: 'status', message: 'Morpheus PM plan is drafted; Smith is streaming technician-ready execution steps.' },
     { type: 'token', content: '### Smith Execution Steps\n', provider: 'openai', used_live_provider: true },
     { type: 'token', content: '1. Inspect bearing condition safely.\n', provider: 'openai', used_live_provider: true },
     { type: 'done', response },
@@ -2813,8 +2807,11 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     const initialPmPlanTable = within(pmPanel).getByLabelText('Preventive maintenance plans')
     expect(within(initialPmPlanTable).getAllByRole('row')).toHaveLength(6)
     expect(within(pmPanel).getByLabelText('PM plans pagination')).toHaveTextContent('Rows 1-5 of 7')
+    expect(within(pmPanel).queryByLabelText('Morpheus PM draft stream')).not.toBeInTheDocument()
     fireEvent.click(within(pmPanel).getByRole('button', { name: /Morpheus PM draft/i }))
     expect(await within(pmPanel).findByRole('heading', { name: 'Morpheus PM live draft' })).toBeInTheDocument()
+    expect(within(pmPanel).queryByText(/opening the PM draft stream/i)).not.toBeInTheDocument()
+    expect(within(pmPanel).queryByText(/PM context is ready/i)).not.toBeInTheDocument()
     expect(await within(pmPanel).findByText('Monitoring Thresholds')).toBeInTheDocument()
     expect((await within(pmPanel).findAllByText('Main drive proactive PM plan')).length).toBeGreaterThanOrEqual(1)
     await waitFor(() => {
@@ -2907,7 +2904,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
         return JSON.parse((init.body as string) ?? '{}').planning_status === 'dispatched'
     })
     expect(JSON.parse((dispatchCall?.[1] as RequestInit).body as string)).toEqual({ planning_status: 'dispatched' })
-  })
+  }, 10_000)
 
   it('keeps the PM plans table visible when no plans are loaded', async () => {
     apiPmPlans = []

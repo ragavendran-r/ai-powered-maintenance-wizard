@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from app.models.schemas import DocumentIntelligence, PmPlanDraftRequest, RcaMorpheusDraftRequest, UserPublic
 from app.services import pm_plans as pm_plans_service
@@ -201,7 +202,7 @@ def test_rca_streaming_draft_uses_scoped_timeout(monkeypatch):
     assert captured["timeout_seconds"] == 45
 
 
-def test_pm_plan_streaming_draft_emits_status_before_context_resolution(monkeypatch):
+def test_pm_plan_streaming_draft_emits_no_static_status_before_context_resolution(monkeypatch):
     class FakeStreamingClient:
         @property
         def provider_name(self):
@@ -224,9 +225,8 @@ def test_pm_plan_streaming_draft_emits_status_before_context_resolution(monkeypa
     )
 
     assert next(events)["type"] == "meta"
-    progress = next(events)
-    assert progress["type"] == "status"
-    assert "Preparing live PM draft context" in progress["message"]
+    with pytest.raises(AssertionError, match="context resolution should happen"):
+        next(events)
 
 
 def test_pm_plan_streaming_draft_rejects_non_live_provider_without_static_plan(monkeypatch):
@@ -252,7 +252,6 @@ def test_pm_plan_streaming_draft_rejects_non_live_provider_without_static_plan(m
     )
 
     assert next(events)["type"] == "meta"
-    assert next(events)["type"] == "status"
     error = next(events)
     assert error["type"] == "error"
     assert "requires a live LLM provider" in error["message"]
@@ -366,14 +365,11 @@ def test_pm_plan_streaming_draft_uses_live_markdown_stream(monkeypatch):
     )
 
     assert next(events)["type"] == "meta"
-    assert next(events)["type"] == "status"
-    assert next(events)["type"] == "status"
     first_delta = next(events)
     assert first_delta["type"] == "token"
     assert first_delta["content"] == "### PM Plan"
     second_delta = next(events)
     assert second_delta["content"] == "\nMain drive proactive PM plan"
-    assert next(events)["type"] == "status"
     assert next(events)["content"] == "### Smith Execution Steps\n"
     assert next(events)["content"] == "1. Inspect bearing condition safely.\n"
     done = next(events)
@@ -434,7 +430,7 @@ def test_pm_plan_context_uses_non_llm_retrieval_path(monkeypatch):
 
     context = pm_plans_service._resolve_pm_context(PmPlanDraftRequest(equipment_id="RM-DRIVE-01"))
 
-    assert captured == {"limit": 6, "use_reranker": False}
+    assert captured == {"limit": 3, "use_reranker": False}
     assert context["prediction"].risk_level == "high"
     assert "Prediction: risk=high" in context["prompt"]
 

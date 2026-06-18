@@ -690,16 +690,14 @@ function PreventiveMaintenancePanel({
           </article>
         ))}
       </div>
-      {(isLoading || streamText) && (
+      {streamText && (
         <article className="pmDraftStream" aria-label="Morpheus PM draft stream">
           <div className="miniHeader">
             <Sparkles size={16} />
             <h3>Morpheus PM live draft</h3>
           </div>
-          <div className="pmDraftStreamViewport">
-            {streamText
-              ? <FormattedAssistantContent content={streamText} />
-              : <p className="emptyState">Morpheus is opening the PM draft stream...</p>}
+          <div className="pmDraftStreamViewport" aria-live="polite">
+            <FormattedAssistantContent content={streamText} />
             <div ref={streamEndRef} aria-hidden="true" />
           </div>
         </article>
