@@ -460,7 +460,8 @@ def _draft_from_streamed_answer(
     missing = _extract_section_bullets(answer, "Missing Checks") or _fallback_missing_checks(context)
     corrective = _extract_section_bullets(answer, "Corrective Actions")[:4]
     why_chain = _extract_section_bullets(answer, "5-Why")[:4]
-    evidence = _extract_section_bullets(answer, "Evidence")[:4] or [item.title for item in context["evidence"][:3]]
+    evidence_items = context.get("evidence") or []
+    evidence = _extract_section_bullets(answer, "Evidence")[:4] or [item.title for item in evidence_items[:3]]
     fishbone_text = _extract_section(answer, "Fishbone")
     return _RcaLlmDraft(
         summary=_clip(answer, 1800),
@@ -619,20 +620,21 @@ def _fallback_probable_cause(context: dict[str, Any]) -> str:
 
 def _fallback_missing_checks(context: dict[str, Any]) -> list[str]:
     checks = ["Confirm current measurements against threshold", "Attach inspection evidence", "Verify corrective action effectiveness"]
-    work_order = context["work_order"]
+    work_order = context.get("work_order")
     if work_order and work_order.get("material_readiness") in {"blocked", "pending"}:
         checks.insert(0, "Resolve material blocker before intrusive verification")
     return checks
 
 
 def _fallback_fishbone(context: dict[str, Any]) -> dict[str, list[str]]:
+    equipment = context.get("equipment") or {}
     return {
         "Machine": ["Component wear", "Alignment", "Fasteners"],
         "Method": ["Inspection sequence", "Isolation procedure"],
         "Material": ["Spare availability", "Lubricant or consumable condition"],
         "Measurement": ["Trend data", "Inspection readings"],
         "People": ["Shift handoff", "Review ownership"],
-        "Environment": [context["equipment"].get("process", "Operating campaign")],
+        "Environment": [equipment.get("process", "Operating campaign")],
     }
 
 

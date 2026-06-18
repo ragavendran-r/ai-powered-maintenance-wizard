@@ -8,7 +8,12 @@ import uuid
 from app.core.security import hash_password
 from app.data.database import connect, initialize_database
 from app.services.vector_index import build_chunks_for_document
-from app.services.vector_store import index_document_chunks, sync_learning_examples_index
+from app.services.vector_store import (
+    delete_plant_records_index,
+    index_document_chunks,
+    sync_learning_examples_index,
+    sync_plant_records_index,
+)
 
 
 _READY = False
@@ -223,7 +228,7 @@ def create_work_order(payload: dict[str, Any]) -> dict[str, Any]:
                 payload.get("failure_class") or "MECH",
                 payload.get("problem_code") or "INVESTIGATE",
                 payload.get("classification") or "Corrective",
-                payload.get("assigned_to") or "Maintenance Engineer",
+                payload.get("assigned_to") or "",
                 payload.get("supervisor") or "Maintenance Supervisor",
                 payload["due_date"],
                 payload.get("planning_status") or "unscheduled",
@@ -258,6 +263,11 @@ def create_work_order(payload: dict[str, Any]) -> dict[str, Any]:
     work_order = get_work_order(work_order_id)
     if not work_order:
         raise RuntimeError("Work order was not persisted")
+    sync_plant_records_index([_work_order_plant_record(work_order)])
+    sync_plant_records_index(
+        [_work_order_spare_plant_record(item, work_order_id=work_order["id"], equipment_id=work_order["equipment_id"]) for item in work_order.get("spare_reservations", [])]
+        + [_work_order_log_plant_record(item, work_order) for item in work_order.get("logs", [])]
+    )
     return work_order
 
 
@@ -308,6 +318,15 @@ def update_work_order(work_order_id: str, payload: dict[str, Any]) -> Optional[d
         fields.append("completed_at = CURRENT_TIMESTAMP")
     if not fields and spare_reservations is None:
         return existing
+    stale_spare_record_ids = (
+        [
+            f"work_order_spare:{reservation['id']}"
+            for reservation in existing.get("spare_reservations", [])
+            if reservation.get("id") is not None
+        ]
+        if spare_reservations is not None
+        else []
+    )
     with connect() as connection:
         if fields:
             fields.append("updated_at = CURRENT_TIMESTAMP")
@@ -316,7 +335,18 @@ def update_work_order(work_order_id: str, payload: dict[str, Any]) -> Optional[d
         if spare_reservations is not None:
             _replace_work_order_spares(connection, work_order_id, spare_reservations)
             connection.execute("UPDATE work_orders SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (work_order_id,))
-    return get_work_order(work_order_id)
+    work_order = get_work_order(work_order_id)
+    if work_order:
+        sync_plant_records_index([_work_order_plant_record(work_order)])
+        if stale_spare_record_ids:
+            delete_plant_records_index(stale_spare_record_ids)
+        sync_plant_records_index(
+            [
+                _work_order_spare_plant_record(item, work_order_id=work_order["id"], equipment_id=work_order["equipment_id"])
+                for item in work_order.get("spare_reservations", [])
+            ]
+        )
+    return work_order
 
 
 def add_work_order_log(work_order_id: str, payload: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -337,7 +367,11 @@ def add_work_order_log(work_order_id: str, payload: dict[str, Any]) -> Optional[
             ),
         )
         connection.execute("UPDATE work_orders SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (work_order_id,))
-    return get_work_order(work_order_id)
+    work_order = get_work_order(work_order_id)
+    if work_order:
+        sync_plant_records_index([_work_order_plant_record(work_order)])
+        sync_plant_records_index([_work_order_log_plant_record(item, work_order) for item in work_order.get("logs", [])])
+    return work_order
 
 
 def list_rca_cases(
@@ -434,6 +468,7 @@ def create_rca_case(payload: dict[str, Any]) -> dict[str, Any]:
     case = get_rca_case(case_id)
     if not case:
         raise RuntimeError("RCA case was not persisted")
+    sync_plant_records_index([_rca_case_plant_record(case)])
     return case
 
 
@@ -488,7 +523,10 @@ def update_rca_case(case_id: str, payload: dict[str, Any]) -> Optional[dict[str,
     values.append(case_id)
     with connect() as connection:
         connection.execute(f"UPDATE rca_cases SET {', '.join(fields)} WHERE id = ?", values)
-    return get_rca_case(case_id)
+    case = get_rca_case(case_id)
+    if case:
+        sync_plant_records_index([_rca_case_plant_record(case)])
+    return case
 
 
 def list_pm_templates(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
@@ -616,6 +654,7 @@ def save_pm_plan(payload: dict[str, Any]) -> dict[str, Any]:
     plan = get_pm_plan(plan_id)
     if not plan:
         raise RuntimeError("PM plan was not persisted")
+    sync_plant_records_index([_pm_plan_plant_record(plan)])
     return plan
 
 
@@ -632,7 +671,10 @@ def mark_pm_plan_converted(plan_id: str, work_order_id: str) -> Optional[dict[st
             """,
             (work_order_id, plan_id),
         )
-    return get_pm_plan(plan_id)
+    plan = get_pm_plan(plan_id)
+    if plan:
+        sync_plant_records_index([_pm_plan_plant_record(plan)])
+    return plan
 
 
 def _replace_work_order_spares(
@@ -756,12 +798,19 @@ def rebuild_all_document_chunks(
         learning_examples,
         collection_name=collection_name,
     )
+    plant_records = list_plant_rag_records()
+    plant_index_result = sync_plant_records_index(
+        plant_records,
+        collection_name=collection_name,
+    )
     return {
         "document_count": len(documents),
         "chunk_count": len(chunk_rows),
         "index_result": index_result,
         "learning_example_count": len(learning_examples),
         "learning_index_result": learning_index_result,
+        "plant_record_count": len(plant_records),
+        "plant_index_result": plant_index_result,
     }
 
 
@@ -794,6 +843,10 @@ def add_documents(documents: list[dict[str, Any]]) -> int:
         )
         chunk_rows = upsert_document_chunks(connection, documents)
     index_document_chunks(chunk_rows)
+    persisted_ids = {document["id"] for document in documents}
+    persisted = [item for item in list_documents() if item["id"] in persisted_ids]
+    if persisted:
+        sync_plant_records_index([_document_plant_record(item) for item in persisted])
     return len(documents)
 
 
@@ -843,6 +896,9 @@ def save_document_intelligence(payload: dict[str, Any]) -> None:
                 payload.get("provider") or "mock",
             ),
         )
+    intelligence = get_document_intelligence(payload["document_id"])
+    if intelligence:
+        sync_plant_records_index([_document_intelligence_plant_record(intelligence)])
 
 
 def list_document_intelligence(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
@@ -859,6 +915,11 @@ def list_document_intelligence(equipment_id: Optional[str] = None) -> list[dict[
     else:
         rows = _fetch_all("SELECT * FROM document_intelligence ORDER BY created_at DESC")
     return [_decode_document_intelligence(row) for row in rows]
+
+
+def get_document_intelligence(document_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM document_intelligence WHERE document_id = ?", (document_id,))
+    return _decode_document_intelligence(row) if row else None
 
 
 def rebuild_document_chunks(connection: sqlite3.Connection) -> None:
@@ -1031,7 +1092,648 @@ def add_records(payload: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
                 ],
             )
             counts[table] = len(rows)
+    plant_records = plant_rag_records_from_payload(payload)
+    if plant_records:
+        sync_plant_records_index(plant_records)
     return counts
+
+
+def plant_rag_records_from_payload(payload: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for equipment in payload.get("equipment", []):
+        records.append(_equipment_plant_record(equipment))
+    for alert in payload.get("alerts", []):
+        records.append(_alert_plant_record(alert))
+    for reading in payload.get("sensor_readings", []):
+        records.append(_sensor_reading_plant_record(reading))
+    for spare in payload.get("spares", []):
+        records.append(_spare_plant_record(spare))
+    for work_order in payload.get("work_orders", []):
+        records.append(_work_order_plant_record(work_order))
+    for reservation in payload.get("work_order_spares", []):
+        records.append(_work_order_spare_plant_record(reservation))
+    for event in payload.get("maintenance_events", []):
+        records.append(_maintenance_event_plant_record(event))
+    return [record for record in records if record.get("id") and record.get("content")]
+
+
+def list_plant_rag_records(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
+    ensure_ready()
+    records: list[dict[str, Any]] = []
+    equipment_rows = [get_equipment(equipment_id)] if equipment_id else list_equipment()
+    for equipment in [item for item in equipment_rows if item]:
+        records.append(_equipment_plant_record(equipment))
+        profile = get_asset_profile(equipment["id"])
+        if profile:
+            records.append(_asset_profile_plant_record(profile))
+        for snapshot in list_asset_metric_snapshots(equipment["id"]):
+            records.append(_asset_metric_snapshot_plant_record(snapshot))
+        for recommendation in list_asset_recommendations(equipment["id"]):
+            records.append(_asset_recommendation_plant_record(recommendation))
+        for subsystem in list_asset_subsystems(equipment["id"]):
+            records.append(_asset_subsystem_plant_record(subsystem))
+        for metric in list_asset_reliability_metrics(equipment["id"]):
+            records.append(_asset_reliability_metric_plant_record(metric))
+    for alert in list_alerts(equipment_id):
+        records.append(_alert_plant_record(alert))
+    sensor_rows = list_sensor_readings(equipment_id)
+    for reading in sensor_rows[-200:]:
+        records.append(_sensor_reading_plant_record(reading))
+    if equipment_id:
+        for spare in list_spares(equipment_id):
+            records.append(_spare_plant_record(spare))
+    else:
+        for equipment in list_equipment():
+            for spare in list_spares(equipment["id"]):
+                records.append(_spare_plant_record(spare))
+    for work_order in list_work_orders():
+        if equipment_id and work_order["equipment_id"] != equipment_id:
+            continue
+        records.append(_work_order_plant_record(work_order))
+        for reservation in work_order.get("spare_reservations", []):
+            records.append(_work_order_spare_plant_record(reservation, work_order_id=work_order["id"], equipment_id=work_order["equipment_id"]))
+        for log in get_work_order(work_order["id"]).get("logs", []):
+            records.append(_work_order_log_plant_record(log, work_order))
+    for event in list_maintenance_events(equipment_id):
+        records.append(_maintenance_event_plant_record(event))
+    for template in list_pm_templates(equipment_id):
+        records.append(_pm_template_plant_record(template))
+    for plan in list_pm_plans(equipment_id=equipment_id, limit=1000):
+        records.append(_pm_plan_plant_record(plan))
+    for case in list_rca_cases(equipment_id=equipment_id, limit=1000):
+        records.append(_rca_case_plant_record(case))
+    for feedback in list_feedback(equipment_id):
+        records.append(_feedback_plant_record(feedback))
+    for label in list_maintenance_labels(equipment_id):
+        records.append(_maintenance_label_plant_record(label))
+    for interaction in list_learning_interactions(equipment_id=equipment_id, limit=1000):
+        records.append(_interaction_plant_record(interaction))
+    for example in list_learning_examples(equipment_id=equipment_id, limit=1000):
+        records.append(_learning_example_plant_record(example))
+    for document in list_documents(equipment_id):
+        records.append(_document_plant_record(document))
+    for intelligence in list_document_intelligence(equipment_id):
+        records.append(_document_intelligence_plant_record(intelligence))
+    if not equipment_id:
+        for message in _fetch_all("SELECT * FROM streaming_messages ORDER BY received_at DESC LIMIT 1000"):
+            records.append(_streaming_message_plant_record(message))
+        for user in list_users():
+            records.append(_user_plant_record(user))
+        for event in _fetch_all("SELECT * FROM auth_audit_events ORDER BY created_at DESC LIMIT 1000"):
+            records.append(_auth_audit_event_plant_record(event))
+        for snapshot in list_learning_dataset_snapshots(limit=1000):
+            records.append(_learning_snapshot_plant_record(snapshot))
+        for model in list_learning_model_versions():
+            records.append(_learning_model_version_plant_record(model))
+        for prompt in list_learning_prompt_versions():
+            records.append(_learning_prompt_version_plant_record(prompt))
+        for evaluation in list_learning_evaluation_runs(limit=1000):
+            records.append(_learning_evaluation_plant_record(evaluation))
+        for promotion in list_learning_model_promotions(limit=1000):
+            records.append(_learning_promotion_plant_record(promotion))
+        for deployment in list_learning_model_deployments(limit=1000):
+            records.append(_learning_deployment_plant_record(deployment))
+        for job in list_learning_jobs(limit=1000):
+            records.append(_learning_job_plant_record(job))
+        for profile in list_rag_embedding_profiles():
+            records.append(_rag_embedding_profile_plant_record(profile))
+        for artifact in list_learning_artifacts(limit=1000):
+            records.append(_learning_artifact_plant_record(artifact))
+    return [record for record in records if record.get("id") and record.get("content")]
+
+
+def _equipment_plant_record(equipment: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"equipment:{equipment['id']}",
+        "source_type": "equipment",
+        "equipment_id": equipment["id"],
+        "title": f"Equipment {equipment['id']} {equipment['name']}",
+        "content": (
+            f"Equipment {equipment['id']} {equipment['name']} is in {equipment['area']} for {equipment['process']}. "
+            f"Criticality {equipment['criticality']}; status {equipment['status']}."
+        ),
+    }
+
+
+def _asset_profile_plant_record(profile: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"asset_profile:{profile['equipment_id']}",
+        "source_type": "asset_profile",
+        "equipment_id": profile["equipment_id"],
+        "title": f"Asset profile {profile['equipment_id']} {profile.get('name', '')}".strip(),
+        "timestamp": profile.get("last_updated"),
+        "content": (
+            f"Asset profile for {profile['equipment_id']}: {profile.get('description')}. "
+            f"Type {profile.get('asset_type')}; location {profile.get('location_code')} {profile.get('location_name')}; "
+            f"system {profile.get('parent_system')}; manufacturer {profile.get('manufacturer')}; model {profile.get('model')}; "
+            f"serial {profile.get('serial_number')}; owner {profile.get('owner_team')}; supervisor {profile.get('supervisor')}."
+        ),
+    }
+
+
+def _asset_metric_snapshot_plant_record(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"asset_metric_snapshot:{snapshot['id']}",
+        "source_type": "asset_metric_snapshot",
+        "equipment_id": snapshot["equipment_id"],
+        "title": f"Asset metric {snapshot['label']} for {snapshot['equipment_id']}",
+        "timestamp": snapshot.get("captured_at"),
+        "content": (
+            f"Asset metric snapshot {snapshot['id']} for {snapshot['equipment_id']}: {snapshot['label']} "
+            f"is {snapshot['value']} {snapshot['unit']} with status {snapshot['status']} and trend {snapshot['trend']}. "
+            f"Target {snapshot.get('target_value')}. Detail: {snapshot.get('detail')}."
+        ),
+    }
+
+
+def _asset_recommendation_plant_record(recommendation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"asset_recommendation:{recommendation['id']}",
+        "source_type": "asset_recommendation",
+        "equipment_id": recommendation["equipment_id"],
+        "title": f"Asset recommendation {recommendation['title']}",
+        "timestamp": recommendation.get("created_at"),
+        "content": (
+            f"Asset recommendation {recommendation['id']} for {recommendation['equipment_id']}: "
+            f"{recommendation['title']}. Priority {recommendation['priority']}; action type {recommendation['action_type']}; "
+            f"source {recommendation['source']}. Description: {recommendation['description']}."
+        ),
+    }
+
+
+def _asset_subsystem_plant_record(subsystem: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"asset_subsystem:{subsystem['id']}",
+        "source_type": "asset_subsystem",
+        "equipment_id": subsystem["equipment_id"],
+        "title": f"Asset subsystem {subsystem['name']} for {subsystem['equipment_id']}",
+        "content": (
+            f"Asset subsystem {subsystem['id']} for {subsystem['equipment_id']}: {subsystem['name']} "
+            f"component {subsystem['component']} condition {subsystem['condition']}. Detail: {subsystem['detail']}."
+        ),
+    }
+
+
+def _asset_reliability_metric_plant_record(metric: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"asset_reliability_metric:{metric['id']}",
+        "source_type": "asset_reliability_metric",
+        "equipment_id": metric["equipment_id"],
+        "title": f"Reliability metric {metric['metric_name']} for {metric['equipment_id']}",
+        "content": (
+            f"Reliability metric {metric['id']} for {metric['equipment_id']}: {metric['metric_name']} "
+            f"is {metric['value']} {metric['unit']} with status {metric['status']} and trend {metric['trend']}. "
+            f"Target {metric.get('target_value')}. Detail: {metric['detail']}."
+        ),
+    }
+
+
+def _alert_plant_record(alert: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"alert:{alert['id']}",
+        "source_type": "alert",
+        "equipment_id": alert["equipment_id"],
+        "title": f"{alert['severity'].title()} alert {alert['id']} on {alert['equipment_id']}",
+        "timestamp": alert.get("timestamp"),
+        "content": (
+            f"{alert['severity'].title()} active alert {alert['id']} for {alert['equipment_id']} at {alert.get('timestamp')}: "
+            f"{alert.get('message')}. Signal {alert['signal']} value {alert['value']} {alert['unit']} "
+            f"against threshold {alert['threshold']}."
+        ),
+    }
+
+
+def _sensor_reading_plant_record(reading: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"sensor_reading:{reading['id']}",
+        "source_type": "sensor_reading",
+        "equipment_id": reading["equipment_id"],
+        "title": f"Sensor reading {reading['signal']} on {reading['equipment_id']}",
+        "timestamp": reading.get("timestamp"),
+        "content": (
+            f"Sensor reading {reading['id']} for {reading['equipment_id']} at {reading.get('timestamp')}: "
+            f"{reading['signal']} measured {reading['value']} {reading['unit']} against threshold {reading['threshold']}."
+        ),
+    }
+
+
+def _spare_plant_record(spare: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"spare:{spare['id']}",
+        "source_type": "spare",
+        "equipment_id": spare["equipment_id"],
+        "title": f"Spare {spare['name']} for {spare['equipment_id']}",
+        "content": (
+            f"Spare {spare['id']} {spare['name']} supports {spare['equipment_id']}. "
+            f"Available quantity {spare['available_qty']}; lead time {spare['lead_time_days']} days; criticality {spare['criticality']}."
+        ),
+    }
+
+
+def _work_order_plant_record(work_order: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"work_order:{work_order['id']}",
+        "source_type": "work_order",
+        "equipment_id": work_order["equipment_id"],
+        "title": f"Work order {work_order['id']} {work_order['title']}",
+        "timestamp": work_order.get("updated_at") or work_order.get("created_at"),
+        "content": (
+            f"Work order {work_order['id']} for {work_order['equipment_id']}: {work_order['title']}. "
+            f"Status {work_order.get('status')}; priority {work_order.get('priority')}; type {work_order.get('work_type')}; "
+            f"material readiness {work_order.get('material_readiness')}; blocker {work_order.get('material_blocker_status')}. "
+            f"Description: {work_order.get('description')}. Recommended action: {work_order.get('recommended_action')}."
+        ),
+    }
+
+
+def _work_order_spare_plant_record(
+    reservation: dict[str, Any],
+    work_order_id: Optional[str] = None,
+    equipment_id: Optional[str] = None,
+) -> dict[str, Any]:
+    return {
+        "id": f"work_order_spare:{reservation['id']}",
+        "source_type": "work_order_spare",
+        "equipment_id": equipment_id,
+        "title": f"Work order spare {reservation.get('spare_name') or reservation.get('spare_id')}",
+        "content": (
+            f"Work order spare reservation {reservation['id']} for work order {work_order_id or reservation.get('work_order_id')}: "
+            f"{reservation.get('spare_name') or reservation.get('spare_id')} requires {reservation.get('required_qty')} and has "
+            f"{reservation.get('available_qty')} available, {reservation.get('reserved_qty')} reserved. "
+            f"Procurement status {reservation.get('procurement_status')}; expected availability {reservation.get('expected_available_date')}; "
+            f"blocker {reservation.get('blocker_status')} {reservation.get('blocker_note') or ''}."
+        ),
+    }
+
+
+def _work_order_log_plant_record(log: dict[str, Any], work_order: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"work_order_log:{log['id']}",
+        "source_type": "work_order_log",
+        "equipment_id": work_order["equipment_id"],
+        "title": f"Work order log {work_order['id']} {log['entry_type']}",
+        "timestamp": log.get("created_at"),
+        "content": (
+            f"Work order log for {work_order['id']} on {work_order['equipment_id']} by {log.get('author')} "
+            f"at {log.get('created_at')}: {log.get('entry_type')} - {log.get('content')}."
+        ),
+    }
+
+
+def _maintenance_event_plant_record(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"maintenance_event:{event['id']}",
+        "source_type": "maintenance_event",
+        "equipment_id": event["equipment_id"],
+        "title": f"Maintenance event {event['issue']}",
+        "timestamp": event.get("date"),
+        "content": (
+            f"Maintenance event {event['id']} for {event['equipment_id']} on {event.get('date')}: {event['issue']}. "
+            f"Root cause: {event.get('root_cause')}. Action: {event.get('action')}. Downtime {event.get('downtime_hours')} hours."
+        ),
+    }
+
+
+def _pm_template_plant_record(template: dict[str, Any]) -> dict[str, Any]:
+    tasks = "; ".join(str(item) for item in template.get("task_list", [])[:5])
+    thresholds = "; ".join(str(item) for item in template.get("thresholds", [])[:5])
+    return {
+        "id": f"pm_template:{template['id']}",
+        "source_type": "pm_template",
+        "equipment_id": template.get("equipment_id"),
+        "title": f"PM template {template['id']} {template['title']}",
+        "timestamp": template.get("updated_at") or template.get("created_at"),
+        "content": (
+            f"PM template {template['id']}: {template['title']}. Equipment {template.get('equipment_id') or 'generic'}; "
+            f"description {template.get('description')}; cadence {template.get('cadence_days')} days; "
+            f"work type {template.get('work_type')}; source {template.get('source')}. "
+            f"Tasks: {tasks or 'not specified'}. Thresholds: {thresholds or 'not specified'}."
+        ),
+    }
+
+
+def _pm_plan_plant_record(plan: dict[str, Any]) -> dict[str, Any]:
+    tasks = "; ".join(task.get("description", "") for task in plan.get("tasks", [])[:5])
+    thresholds = "; ".join(str(item) for item in plan.get("thresholds", [])[:5])
+    return {
+        "id": f"pm_plan:{plan['id']}",
+        "source_type": "pm_plan",
+        "equipment_id": plan["equipment_id"],
+        "title": f"PM plan {plan['id']} {plan['title']}",
+        "timestamp": plan.get("updated_at") or plan.get("created_at"),
+        "content": (
+            f"Preventive maintenance plan {plan['id']} for {plan['equipment_id']}: {plan['title']}. "
+            f"Status {plan.get('status')}; cadence {plan.get('cadence_days')} days; next due {plan.get('next_due_date')}; "
+            f"converted work order {plan.get('converted_work_order_id') or 'none'}. "
+            f"Trigger: {plan.get('trigger', {}).get('description') if isinstance(plan.get('trigger'), dict) else plan.get('trigger')}. "
+            f"Thresholds: {thresholds or 'not specified'}. Tasks: {tasks or 'not specified'}."
+        ),
+    }
+
+
+def _rca_case_plant_record(case: dict[str, Any]) -> dict[str, Any]:
+    corrective_actions = "; ".join(str(item) for item in case.get("corrective_actions", [])[:5])
+    evidence = "; ".join(str(item) for item in case.get("evidence", [])[:5])
+    return {
+        "id": f"rca_case:{case['id']}",
+        "source_type": "rca_case",
+        "equipment_id": case["equipment_id"],
+        "title": f"RCA case {case['id']} {case['title']}",
+        "timestamp": case.get("updated_at") or case.get("created_at"),
+        "content": (
+            f"RCA case {case['id']} for {case['equipment_id']}: {case['title']}. "
+            f"Status {case.get('status')}; related work order {case.get('work_order_id') or 'none'}. "
+            f"Problem statement: {case.get('problem_statement')}. Probable cause: {case.get('probable_cause')}. "
+            f"Evidence: {evidence or 'not specified'}. Corrective actions: {corrective_actions or 'not specified'}."
+        ),
+    }
+
+
+def _feedback_plant_record(feedback: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"feedback:{feedback['id']}",
+        "source_type": "feedback",
+        "equipment_id": feedback.get("equipment_id"),
+        "title": f"Engineer feedback {feedback['recommendation_id']}",
+        "timestamp": feedback.get("created_at"),
+        "content": (
+            f"Engineer feedback {feedback['id']} for recommendation {feedback['recommendation_id']} on "
+            f"{feedback.get('equipment_id') or 'general equipment'}: status {feedback.get('status')}. "
+            f"Corrected diagnosis: {feedback.get('corrected_diagnosis') or 'not provided'}. "
+            f"Actual root cause: {feedback.get('actual_root_cause') or 'not provided'}. "
+            f"Action taken: {feedback.get('action_taken') or 'not provided'}. "
+            f"Outcome: {feedback.get('outcome') or 'not provided'}. Notes: {feedback.get('notes') or 'none'}."
+        ),
+    }
+
+
+def _maintenance_label_plant_record(label: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"maintenance_label:{label['id']}",
+        "source_type": "maintenance_label",
+        "equipment_id": label.get("equipment_id"),
+        "title": f"Maintenance label {label['source_type']} {label['source_id']}",
+        "timestamp": label.get("created_at"),
+        "content": (
+            f"Maintenance label {label['id']} from {label['source_type']} {label['source_id']} for "
+            f"{label.get('equipment_id') or 'general equipment'}: failure mode {label.get('failure_mode')}; "
+            f"component {label.get('component')}; root cause {label.get('root_cause')}; action class {label.get('action_class')}; "
+            f"outcome {label.get('outcome_status')}; signal hints {', '.join(label.get('signal_hints') or [])}; "
+            f"usable for training {label.get('usable_for_training')}; provider {label.get('provider')}."
+        ),
+    }
+
+
+def _interaction_plant_record(interaction: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"interaction:{interaction['id']}",
+        "source_type": "assistant_interaction",
+        "equipment_id": interaction.get("equipment_id"),
+        "title": f"{interaction.get('assistant', 'assistant')} {interaction.get('interaction_type', 'interaction')}",
+        "timestamp": interaction.get("created_at"),
+        "content": (
+            f"Assistant interaction {interaction['id']} by {interaction.get('assistant')} for role {interaction.get('user_role')}. "
+            f"Type {interaction.get('interaction_type')}; work order {interaction.get('work_order_id') or 'none'}; "
+            f"equipment {interaction.get('equipment_id') or 'none'}; provider {interaction.get('provider')}. "
+            f"Prompt: {interaction.get('prompt')}. Response: {interaction.get('response')}. "
+            f"Outcome: {interaction.get('outcome_status') or 'not recorded'}."
+        ),
+    }
+
+
+def _learning_example_plant_record(example: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"learning_example:{example['id']}",
+        "source_type": "learning_example",
+        "equipment_id": example.get("equipment_id"),
+        "title": f"Learning example {example['source_type']} {example['source_id']}",
+        "timestamp": example.get("created_at"),
+        "content": (
+            f"Learning example {example['id']} from {example['source_type']} {example['source_id']} for "
+            f"{example.get('equipment_id') or 'general equipment'} and work order {example.get('work_order_id') or 'none'}. "
+            f"Approved {example.get('approved')}; judge score {example.get('judge_score')}; label {example.get('judge_label')}; "
+            f"rationale {example.get('judge_rationale') or 'not scored'}. Instruction: {example.get('instruction')}. "
+            f"Input: {example.get('input_text')}. Expected output: {example.get('expected_output')}."
+        ),
+    }
+
+
+def _document_plant_record(document: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"document:{document['id']}",
+        "source_type": "document",
+        "equipment_id": document.get("equipment_id"),
+        "title": f"Document {document['id']} {document['title']}",
+        "content": (
+            f"Document {document['id']}: {document.get('title')} from source type {document.get('source_type')} "
+            f"for equipment {document.get('equipment_id') or 'general plant context'}. "
+            f"Content excerpt: {(document.get('content') or '')[:600]}."
+        ),
+    }
+
+
+def _document_intelligence_plant_record(intelligence: dict[str, Any]) -> dict[str, Any]:
+    asset_ids = intelligence.get("asset_ids") or []
+    equipment_id = asset_ids[0] if len(asset_ids) == 1 else None
+    return {
+        "id": f"document_intelligence:{intelligence['document_id']}",
+        "source_type": "document_intelligence",
+        "equipment_id": equipment_id,
+        "title": f"Document intelligence {intelligence['document_id']}",
+        "timestamp": intelligence.get("created_at"),
+        "content": (
+            f"Document intelligence for {intelligence['document_id']}: {intelligence.get('summary')}. "
+            f"Assets: {', '.join(asset_ids) or 'none'}. Components: {', '.join(intelligence.get('components') or [])}. "
+            f"Failure modes: {', '.join(intelligence.get('failure_modes') or [])}. "
+            f"Symptoms: {', '.join(intelligence.get('symptoms') or [])}. "
+            f"Safety constraints: {', '.join(intelligence.get('safety_constraints') or [])}. "
+            f"Spares: {', '.join(intelligence.get('spares') or [])}. Thresholds: {', '.join(intelligence.get('thresholds') or [])}."
+        ),
+    }
+
+
+def _streaming_message_plant_record(message: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"streaming_message:{message['message_id']}",
+        "source_type": "streaming_message",
+        "equipment_id": None,
+        "title": f"Streaming message {message['message_id']}",
+        "timestamp": message.get("received_at"),
+        "content": (
+            f"IoT streaming message audit {message['message_id']} from {message.get('source')}: "
+            f"type {message.get('message_type')}; subject {message.get('subject') or 'none'}; "
+            f"status {message.get('status')}; error {message.get('error') or 'none'}."
+        ),
+    }
+
+
+def _user_plant_record(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"user:{user['id']}",
+        "source_type": "user",
+        "equipment_id": None,
+        "title": f"User {user['display_name']} {user['role']}",
+        "timestamp": user.get("updated_at") or user.get("created_at"),
+        "content": (
+            f"Application user {user['id']} {user.get('display_name')} has role {user.get('role')}; "
+            f"email {user.get('email')}; active {user.get('is_active')}; last login {user.get('last_login_at') or 'never'}."
+        ),
+    }
+
+
+def _auth_audit_event_plant_record(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"auth_audit_event:{event['id']}",
+        "source_type": "auth_audit_event",
+        "equipment_id": None,
+        "title": f"Auth audit {event['event_type']} {event['id']}",
+        "timestamp": event.get("created_at"),
+        "content": (
+            f"Authentication audit event {event['id']}: type {event.get('event_type')}; "
+            f"user {event.get('user_id') or 'unknown'}; email {event.get('email') or 'unknown'}; "
+            f"role {event.get('role') or 'unknown'}; success {bool(event.get('success'))}; detail {event.get('detail') or 'none'}."
+        ),
+    }
+
+
+def _learning_snapshot_plant_record(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"learning_dataset_snapshot:{snapshot['id']}",
+        "source_type": "learning_dataset_snapshot",
+        "equipment_id": None,
+        "title": f"Learning dataset snapshot {snapshot['name']}",
+        "timestamp": snapshot.get("created_at"),
+        "content": (
+            f"Learning dataset snapshot {snapshot['id']} named {snapshot.get('name')}: "
+            f"{snapshot.get('description') or 'no description'}. Example count {snapshot.get('example_count')}; "
+            f"approved only {snapshot.get('approved_only')}; created by {snapshot.get('created_by') or 'unknown'}."
+        ),
+    }
+
+
+def _learning_model_version_plant_record(model: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"learning_model_version:{model['id']}",
+        "source_type": "learning_model_version",
+        "equipment_id": None,
+        "title": f"Learning adapter/model version {model['id']}",
+        "timestamp": model.get("created_at"),
+        "content": (
+            f"Learning model or adapter registry entry {model['id']}: provider {model.get('provider')}; "
+            f"name {model.get('model_name')}; base model {model.get('base_model') or 'unknown'}; "
+            f"adapter path {model.get('adapter_path') or 'none'}; status {model.get('status')}; notes {model.get('notes') or 'none'}."
+        ),
+    }
+
+
+def _learning_prompt_version_plant_record(prompt: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"learning_prompt_version:{prompt['id']}",
+        "source_type": "learning_prompt_version",
+        "equipment_id": None,
+        "title": f"Prompt version {prompt['assistant']} {prompt['version']}",
+        "timestamp": prompt.get("created_at"),
+        "content": (
+            f"Prompt version {prompt['id']} for assistant {prompt.get('assistant')}: "
+            f"version {prompt.get('version')}; status {prompt.get('status')}; notes {prompt.get('notes') or 'none'}. "
+            f"Prompt: {prompt.get('prompt')}."
+        ),
+    }
+
+
+def _learning_evaluation_plant_record(evaluation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"learning_evaluation_run:{evaluation['id']}",
+        "source_type": "learning_evaluation_run",
+        "equipment_id": None,
+        "title": f"Learning evaluation {evaluation['id']}",
+        "timestamp": evaluation.get("created_at"),
+        "content": (
+            f"Learning evaluation run {evaluation['id']}: dataset {evaluation.get('dataset_id') or 'none'}; "
+            f"model version {evaluation.get('model_version_id') or 'none'}; prompt version {evaluation.get('prompt_version_id') or 'none'}; "
+            f"passed {evaluation.get('passed')}; metrics {evaluation.get('metrics')}; notes {evaluation.get('notes') or 'none'}."
+        ),
+    }
+
+
+def _learning_promotion_plant_record(promotion: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"learning_model_promotion:{promotion['id']}",
+        "source_type": "learning_model_promotion",
+        "equipment_id": None,
+        "title": f"Learning promotion {promotion['id']}",
+        "timestamp": promotion.get("created_at"),
+        "content": (
+            f"Learning promotion {promotion['id']}: action {promotion.get('action')}; "
+            f"model version {promotion.get('model_version_id')}; previous active {promotion.get('previous_active_model_id') or 'none'}; "
+            f"evaluation {promotion.get('evaluation_run_id')}; dataset {promotion.get('dataset_id')}; "
+            f"prompt version {promotion.get('prompt_version_id')}; reviewer {promotion.get('reviewer_email')}; "
+            f"notes {promotion.get('notes') or 'none'}."
+        ),
+    }
+
+
+def _learning_deployment_plant_record(deployment: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"learning_model_deployment:{deployment['id']}",
+        "source_type": "learning_model_deployment",
+        "equipment_id": None,
+        "title": f"Learning deployment {deployment['id']}",
+        "timestamp": deployment.get("updated_at") or deployment.get("created_at"),
+        "content": (
+            f"Learning deployment {deployment['id']} for model version {deployment.get('model_version_id')}: "
+            f"job {deployment.get('job_id') or 'none'}; runtime provider {deployment.get('runtime_provider')}; "
+            f"serving provider {deployment.get('serving_provider')}; served model {deployment.get('served_model_name')}; "
+            f"base URL {deployment.get('base_url') or 'none'}; artifact URI {deployment.get('artifact_uri') or 'none'}; "
+            f"status {deployment.get('status')}; health {deployment.get('health_status')}; "
+            f"health checked {deployment.get('health_checked_at') or 'never'}; error {deployment.get('error') or 'none'}."
+        ),
+    }
+
+
+def _learning_job_plant_record(job: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"learning_job:{job['id']}",
+        "source_type": "learning_job",
+        "equipment_id": None,
+        "title": f"Learning job {job['job_type']} {job['id']}",
+        "timestamp": job.get("updated_at") or job.get("created_at"),
+        "content": (
+            f"Learning job {job['id']}: type {job.get('job_type')}; subject {job.get('subject')}; "
+            f"status {job.get('status')}; requested by {job.get('requested_by') or 'unknown'}; "
+            f"correlation {job.get('correlation_id')}; retries {job.get('retry_count')}; "
+            f"input refs {job.get('input_refs')}; output refs {job.get('output_refs')}; error {job.get('error') or 'none'}."
+        ),
+    }
+
+
+def _rag_embedding_profile_plant_record(profile: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"rag_embedding_profile:{profile['id']}",
+        "source_type": "rag_embedding_profile",
+        "equipment_id": None,
+        "title": f"RAG embedding profile {profile['id']}",
+        "timestamp": profile.get("updated_at") or profile.get("created_at"),
+        "content": (
+            f"RAG embedding profile {profile['id']}: provider {profile.get('provider')}; model {profile.get('model')}; "
+            f"version {profile.get('version')}; dimensions {profile.get('dimensions')}; distance {profile.get('distance')}; "
+            f"status {profile.get('status')}; notes {profile.get('notes') or 'none'}."
+        ),
+    }
+
+
+def _learning_artifact_plant_record(artifact: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"learning_artifact:{artifact['id']}",
+        "source_type": "learning_artifact",
+        "equipment_id": None,
+        "title": f"Learning artifact {artifact['artifact_type']}",
+        "timestamp": artifact.get("created_at"),
+        "content": (
+            f"Learning artifact {artifact['id']} for job {artifact.get('job_id')}: type {artifact.get('artifact_type')}; "
+            f"URI {artifact.get('uri')}; content hash {artifact.get('content_hash')}; metadata {artifact.get('metadata')}."
+        ),
+    }
 
 
 def save_feedback(recommendation_id: str, feedback: dict[str, Any]) -> None:
@@ -1062,6 +1764,9 @@ def save_feedback(recommendation_id: str, feedback: dict[str, Any]) -> None:
                 feedback.get("notes"),
             ),
         )
+    latest = _fetch_one("SELECT * FROM feedback WHERE recommendation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (recommendation_id,))
+    if latest:
+        sync_plant_records_index([_feedback_plant_record(latest)])
 
 
 def list_feedback(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
@@ -1125,6 +1830,12 @@ def save_maintenance_label(payload: dict[str, Any]) -> None:
                 payload.get("provider") or "mock",
             ),
         )
+    label = _fetch_one(
+        "SELECT * FROM maintenance_labels WHERE source_type = ? AND source_id = ?",
+        (payload["source_type"], payload["source_id"]),
+    )
+    if label:
+        sync_plant_records_index([_maintenance_label_plant_record(_decode_maintenance_label(label))])
 
 
 def list_maintenance_labels(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
@@ -1185,6 +1896,7 @@ def create_user(payload: dict[str, Any]) -> dict[str, Any]:
     user = get_user_by_id(user_id)
     if not user:
         raise RuntimeError("User was not persisted")
+    sync_plant_records_index([_user_plant_record(user)])
     return user
 
 
@@ -1210,7 +1922,10 @@ def update_user(user_id: str, payload: dict[str, Any]) -> Optional[dict[str, Any
     values.append(user_id)
     with connect() as connection:
         connection.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", values)
-    return get_user_by_id(user_id)
+    user = get_user_by_id(user_id)
+    if user:
+        sync_plant_records_index([_user_plant_record(user)])
+    return user
 
 
 def reset_user_password(user_id: str, password: str) -> Optional[dict[str, Any]]:
@@ -1226,7 +1941,10 @@ def reset_user_password(user_id: str, password: str) -> Optional[dict[str, Any]]
             """,
             (hash_password(password), user_id),
         )
-    return get_user_by_id(user_id)
+    user = get_user_by_id(user_id)
+    if user:
+        sync_plant_records_index([_user_plant_record(user)])
+    return user
 
 
 def record_user_login(user_id: str) -> None:
@@ -1240,6 +1958,9 @@ def record_user_login(user_id: str) -> None:
             """,
             (user_id,),
         )
+    user = get_user_by_id(user_id)
+    if user:
+        sync_plant_records_index([_user_plant_record(user)])
 
 
 def save_auth_audit_event(
@@ -1266,6 +1987,9 @@ def save_auth_audit_event(
             """,
             (event_type, user_id, email, role, 1 if success else 0, detail),
         )
+    event = _fetch_one("SELECT * FROM auth_audit_events ORDER BY created_at DESC, id DESC LIMIT 1")
+    if event:
+        sync_plant_records_index([_auth_audit_event_plant_record(event)])
 
 
 def get_streaming_message(message_id: str) -> Optional[dict[str, Any]]:
@@ -1303,6 +2027,9 @@ def save_streaming_message(
             """,
             (message_id, source, message_type, subject, status, error),
         )
+    message = get_streaming_message(message_id)
+    if message:
+        sync_plant_records_index([_streaming_message_plant_record(message)])
 
 
 def save_learning_interaction(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1360,7 +2087,122 @@ def save_learning_interaction(payload: dict[str, Any]) -> dict[str, Any]:
     interaction = get_learning_interaction(interaction_id)
     if not interaction:
         raise RuntimeError("Learning interaction was not persisted")
+    sync_plant_records_index([_interaction_plant_record(interaction)])
     return interaction
+
+
+def upsert_assistant_session(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    session_id = payload.get("id") or f"ASST-{uuid.uuid4().hex[:12].upper()}"
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO assistant_sessions (
+                id,
+                assistant_id,
+                user_id,
+                user_role,
+                screen,
+                status,
+                metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                assistant_id=excluded.assistant_id,
+                user_id=excluded.user_id,
+                user_role=excluded.user_role,
+                screen=excluded.screen,
+                status=excluded.status,
+                metadata=excluded.metadata,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                session_id,
+                payload["assistant_id"],
+                payload.get("user_id"),
+                payload.get("user_role"),
+                payload.get("screen"),
+                payload.get("status") or "active",
+                _json_dump_any(payload.get("metadata", {})),
+            ),
+        )
+    session = get_assistant_session(session_id)
+    if not session:
+        raise RuntimeError("Assistant session was not persisted")
+    return session
+
+
+def get_assistant_session(session_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM assistant_sessions WHERE id = ?", (session_id,))
+    return _decode_assistant_session(row) if row else None
+
+
+def save_assistant_message(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    message_id = payload.get("id") or f"AMSG-{uuid.uuid4().hex[:12].upper()}"
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO assistant_messages (
+                id,
+                session_id,
+                assistant_id,
+                role,
+                content,
+                provider,
+                used_live_provider,
+                tool_calls,
+                tool_results,
+                final_response,
+                metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                message_id,
+                payload["session_id"],
+                payload["assistant_id"],
+                payload["role"],
+                payload.get("content") or "",
+                payload.get("provider"),
+                1 if payload.get("used_live_provider") else 0,
+                _json_dump_any(payload.get("tool_calls", [])),
+                _json_dump_any(payload.get("tool_results", [])),
+                _json_dump_any(payload["final_response"]) if payload.get("final_response") is not None else None,
+                _json_dump_any(payload.get("metadata", {})),
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE assistant_sessions
+            SET updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (payload["session_id"],),
+        )
+    message = get_assistant_message(message_id)
+    if not message:
+        raise RuntimeError("Assistant message was not persisted")
+    return message
+
+
+def get_assistant_message(message_id: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM assistant_messages WHERE id = ?", (message_id,))
+    return _decode_assistant_message(row) if row else None
+
+
+def list_assistant_messages(session_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    rows = _fetch_all(
+        """
+        SELECT *
+        FROM assistant_messages
+        WHERE session_id = ?
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT ?
+        """,
+        (session_id, limit),
+    )
+    return [_decode_assistant_message(row) for row in reversed(rows)]
 
 
 def get_learning_interaction(interaction_id: str) -> Optional[dict[str, Any]]:
@@ -1456,6 +2298,7 @@ def upsert_learning_example(payload: dict[str, Any]) -> dict[str, Any]:
     example = get_learning_example_by_source(payload["source_type"], payload["source_id"])
     if not example:
         raise RuntimeError("Learning example was not persisted")
+    sync_plant_records_index([_learning_example_plant_record(example)])
     return example
 
 
@@ -1532,7 +2375,10 @@ def set_learning_example_approval(example_id: str, approved: bool) -> Optional[d
             "UPDATE learning_examples SET approved = ? WHERE id = ?",
             (1 if approved else 0, example_id),
         )
-    return get_learning_example(example_id)
+    example = get_learning_example(example_id)
+    if example:
+        sync_plant_records_index([_learning_example_plant_record(example)])
+    return example
 
 
 def update_learning_example_judgement(
@@ -1559,7 +2405,10 @@ def update_learning_example_judgement(
             """,
             (score, label, rationale, provider, 1 if used_live_provider else 0, example_id),
         )
-    return get_learning_example(example_id)
+    example = get_learning_example(example_id)
+    if example:
+        sync_plant_records_index([_learning_example_plant_record(example)])
+    return example
 
 
 def create_learning_dataset_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1592,6 +2441,7 @@ def create_learning_dataset_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     snapshot = get_learning_dataset_snapshot(snapshot_id)
     if not snapshot:
         raise RuntimeError("Learning dataset snapshot was not persisted")
+    sync_plant_records_index([_learning_snapshot_plant_record(snapshot)])
     return snapshot
 
 
@@ -1660,6 +2510,7 @@ def save_rag_embedding_profile(payload: dict[str, Any]) -> dict[str, Any]:
     profile = get_rag_embedding_profile(profile_id)
     if not profile:
         raise RuntimeError("RAG embedding profile was not persisted")
+    sync_plant_records_index([_rag_embedding_profile_plant_record(profile)])
     return profile
 
 
@@ -1718,7 +2569,10 @@ def activate_rag_embedding_profile(profile_id: str) -> Optional[dict[str, Any]]:
             """,
             (profile_id,),
         )
-    return get_rag_embedding_profile(profile_id)
+    profile = get_rag_embedding_profile(profile_id)
+    if profile:
+        sync_plant_records_index([_rag_embedding_profile_plant_record(profile)])
+    return profile
 
 
 def get_active_learning_model_version() -> Optional[dict[str, Any]]:
@@ -1775,7 +2629,9 @@ def save_learning_model_version(payload: dict[str, Any]) -> dict[str, Any]:
     model = _fetch_one("SELECT * FROM learning_model_versions WHERE id = ?", (model_id,))
     if not model:
         raise RuntimeError("Learning model version was not persisted")
-    return dict(model)
+    model_dict = dict(model)
+    sync_plant_records_index([_learning_model_version_plant_record(model_dict)])
+    return model_dict
 
 
 def set_learning_model_status(model_id: str, status: str, notes: Optional[str] = None) -> Optional[dict[str, Any]]:
@@ -1793,7 +2649,10 @@ def set_learning_model_status(model_id: str, status: str, notes: Optional[str] =
             """,
             (status, next_notes, model_id),
         )
-    return get_learning_model_version(model_id)
+    model = get_learning_model_version(model_id)
+    if model:
+        sync_plant_records_index([_learning_model_version_plant_record(model)])
+    return model
 
 
 def list_learning_prompt_versions() -> list[dict[str, Any]]:
@@ -1835,6 +2694,7 @@ def save_learning_evaluation_run(payload: dict[str, Any]) -> dict[str, Any]:
     run = get_learning_evaluation_run(run_id)
     if not run:
         raise RuntimeError("Learning evaluation run was not persisted")
+    sync_plant_records_index([_learning_evaluation_plant_record(run)])
     return run
 
 
@@ -1894,6 +2754,7 @@ def save_learning_model_promotion(payload: dict[str, Any]) -> dict[str, Any]:
     promotion = get_learning_model_promotion(promotion_id)
     if not promotion:
         raise RuntimeError("Learning model promotion was not persisted")
+    sync_plant_records_index([_learning_promotion_plant_record(promotion)])
     return promotion
 
 
@@ -1977,6 +2838,7 @@ def save_learning_model_deployment(payload: dict[str, Any]) -> dict[str, Any]:
     deployment = get_learning_model_deployment(deployment_id)
     if not deployment:
         raise RuntimeError("Learning model deployment was not persisted")
+    sync_plant_records_index([_learning_deployment_plant_record(deployment)])
     return deployment
 
 
@@ -2084,6 +2946,7 @@ def save_learning_job(payload: dict[str, Any]) -> dict[str, Any]:
     job = get_learning_job(job_id)
     if not job:
         raise RuntimeError("Learning job was not persisted")
+    sync_plant_records_index([_learning_job_plant_record(job)])
     return job
 
 
@@ -2120,7 +2983,10 @@ def update_learning_job_status(
                 job_id,
             ),
         )
-    return get_learning_job(job_id)
+    job = get_learning_job(job_id)
+    if job:
+        sync_plant_records_index([_learning_job_plant_record(job)])
+    return job
 
 
 def get_learning_job(job_id: str) -> Optional[dict[str, Any]]:
@@ -2193,6 +3059,7 @@ def save_learning_artifact(payload: dict[str, Any]) -> dict[str, Any]:
     artifact = get_learning_artifact(artifact_id)
     if not artifact:
         raise RuntimeError("Learning artifact was not persisted")
+    sync_plant_records_index([_learning_artifact_plant_record(artifact)])
     return artifact
 
 
@@ -2341,6 +3208,22 @@ def _decode_learning_interaction(row: dict[str, Any]) -> dict[str, Any]:
     decoded["source_refs"] = _json_load_any(decoded.get("source_refs")) or []
     decoded["used_live_provider"] = bool(decoded.get("used_live_provider"))
     decoded["approved_for_learning"] = bool(decoded.get("approved_for_learning"))
+    return decoded
+
+
+def _decode_assistant_session(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["metadata"] = _json_load_dict(decoded.get("metadata"))
+    return decoded
+
+
+def _decode_assistant_message(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["used_live_provider"] = bool(decoded.get("used_live_provider"))
+    decoded["tool_calls"] = _json_load_any(decoded.get("tool_calls")) or []
+    decoded["tool_results"] = _json_load_any(decoded.get("tool_results")) or []
+    decoded["final_response"] = _json_load_any(decoded.get("final_response"))
+    decoded["metadata"] = _json_load_dict(decoded.get("metadata"))
     return decoded
 
 

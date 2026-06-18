@@ -13,6 +13,7 @@ from app.services.vector_index import decode_embedding, embed_text
 
 RAG_KIND_DOCUMENT_CHUNK = "document_chunk"
 RAG_KIND_LEARNING_EXAMPLE = "learning_example"
+RAG_KIND_PLANT_RECORD = "plant_record"
 
 
 @dataclass
@@ -234,6 +235,89 @@ def sync_learning_examples_index(
         }
 
 
+def sync_plant_records_index(
+    records: list[dict[str, Any]],
+    *,
+    collection_name: Optional[str] = None,
+) -> dict[str, Any]:
+    settings = get_settings()
+    collection = collection_name or settings.rag_qdrant_collection
+    profile = current_embedding_profile()
+    points = [_plant_record_to_point(record, profile) for record in records if record.get("id") and record.get("content")]
+    if configured_vector_store_name() != "qdrant":
+        return {
+            "store": configured_vector_store_name(),
+            "collection": collection,
+            "embedding_profile_id": profile.id,
+            "indexed": 0,
+            "state": "skipped",
+        }
+    try:
+        _ensure_qdrant_collection(collection, profile)
+        if points:
+            with _client() as client:
+                response = client.put(
+                    f"/collections/{collection}/points",
+                    params={"wait": "true"},
+                    json={"points": points},
+                )
+            response.raise_for_status()
+        return {
+            "store": "qdrant",
+            "collection": collection,
+            "embedding_profile_id": profile.id,
+            "indexed": len(points),
+            "state": "synced",
+        }
+    except Exception as exc:
+        return {
+            "store": "qdrant",
+            "collection": collection,
+            "embedding_profile_id": profile.id,
+            "indexed": 0,
+            "state": "fallback",
+            "error": str(exc),
+        }
+
+
+def delete_plant_records_index(
+    source_ids: list[str],
+    *,
+    collection_name: Optional[str] = None,
+) -> dict[str, Any]:
+    settings = get_settings()
+    collection = collection_name or settings.rag_qdrant_collection
+    profile = current_embedding_profile()
+    point_ids = [_plant_record_point_id(source_id, profile) for source_id in source_ids if source_id]
+    if configured_vector_store_name() != "qdrant" or not point_ids:
+        return {
+            "store": configured_vector_store_name(),
+            "collection": collection,
+            "embedding_profile_id": profile.id,
+            "deleted": 0,
+            "state": "skipped",
+        }
+    try:
+        _ensure_qdrant_collection(collection, profile)
+        _delete_points(collection, point_ids)
+        return {
+            "store": "qdrant",
+            "collection": collection,
+            "embedding_profile_id": profile.id,
+            "deleted": len(point_ids),
+            "state": "deleted",
+        }
+    except Exception as exc:
+        return {
+            "store": "qdrant",
+            "collection": collection,
+            "embedding_profile_id": profile.id,
+            "deleted": 0,
+            "state": "fallback",
+            "error": str(exc),
+        }
+
+
 def search_document_chunks(query: str, equipment_id: Optional[str], limit: int) -> list[VectorStoreHit]:
     if configured_vector_store_name() != "qdrant":
         return []
@@ -269,6 +353,49 @@ def search_document_chunks(query: str, equipment_id: Optional[str], limit: int) 
                 title=str(payload.get("title") or "Document chunk"),
                 content=str(payload.get("content") or ""),
                 source_type=str(payload.get("source_type") or "document"),
+                equipment_id=hit_equipment_id,
+                score=float(result.get("score") or 0),
+            )
+        )
+        if len(hits) >= limit:
+            break
+    return hits
+
+
+def search_plant_records(query: str, equipment_id: Optional[str], limit: int) -> list[VectorStoreHit]:
+    if configured_vector_store_name() != "qdrant":
+        return []
+    profile = current_embedding_profile()
+    try:
+        _ensure_qdrant_collection(get_settings().rag_qdrant_collection, profile)
+        candidate_limit = max(limit * 4, limit, 1)
+        body = _search_body(query, profile, candidate_limit, rag_kind=RAG_KIND_PLANT_RECORD)
+        with _client() as client:
+            response = client.post(
+                f"/collections/{get_settings().rag_qdrant_collection}/points/search",
+                json=body,
+            )
+        response.raise_for_status()
+        results = response.json().get("result", [])
+    except Exception:
+        return []
+    hits: list[VectorStoreHit] = []
+    for result in results:
+        payload = result.get("payload") or {}
+        if payload.get("rag_kind") != RAG_KIND_PLANT_RECORD:
+            continue
+        source_id = str(payload.get("source_id") or "")
+        if not source_id:
+            continue
+        hit_equipment_id = payload.get("equipment_id")
+        if equipment_id and hit_equipment_id not in (equipment_id, None, ""):
+            continue
+        hits.append(
+            VectorStoreHit(
+                source_id=source_id,
+                title=str(payload.get("title") or "Plant record"),
+                content=str(payload.get("content") or ""),
+                source_type=str(payload.get("source_type") or RAG_KIND_PLANT_RECORD),
                 equipment_id=hit_equipment_id,
                 score=float(result.get("score") or 0),
             )
@@ -507,6 +634,34 @@ def _learning_example_to_point(example: dict[str, Any], profile: EmbeddingProfil
             "embedding_distance": profile.distance,
         },
     }
+
+
+def _plant_record_to_point(record: dict[str, Any], profile: EmbeddingProfile) -> dict[str, Any]:
+    text = str(record.get("content") or "")
+    source_id = str(record["id"])
+    return {
+        "id": _plant_record_point_id(source_id, profile),
+        "vector": embed_text(text, profile),
+        "payload": {
+            "rag_kind": RAG_KIND_PLANT_RECORD,
+            "source_id": source_id,
+            "source_type": record.get("source_type") or RAG_KIND_PLANT_RECORD,
+            "equipment_id": record.get("equipment_id"),
+            "title": record.get("title") or "Plant record",
+            "content": text,
+            "timestamp": record.get("timestamp"),
+            "embedding_profile_id": profile.id,
+            "embedding_provider": profile.provider,
+            "embedding_model": profile.model,
+            "embedding_version": profile.version,
+            "embedding_dimensions": profile.dimensions,
+            "embedding_distance": profile.distance,
+        },
+    }
+
+
+def _plant_record_point_id(source_id: str, profile: EmbeddingProfile) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"plant-record:{profile.id}:{source_id}"))
 
 
 def _delete_points(collection: str, point_ids: list[str]) -> None:

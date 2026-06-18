@@ -4402,6 +4402,7 @@ h3 {
   color: var(--color-text-ink);
   display: grid;
   gap: 8px;
+  font-weight: 400;
   line-height: 1.42;
 }
 
@@ -4413,14 +4414,19 @@ h3 {
 
 .assistantFormattedContent h3 {
   font-size: 1rem;
-  font-weight: 800;
+  font-weight: 700;
   margin-top: 2px;
 }
 
 .assistantFormattedContent h4 {
   font-size: 0.94rem;
-  font-weight: 800;
+  font-weight: 700;
   margin-top: 2px;
+}
+
+.assistantFormattedContent p,
+.assistantFormattedContent li {
+  font-weight: 400;
 }
 
 .assistantFormattedContent ul,
@@ -4431,7 +4437,16 @@ h3 {
 
 .assistantFormattedContent strong {
   color: var(--color-text-deep);
-  font-weight: 800;
+  font-weight: 600;
+}
+
+.chatBubble.assistant .assistantFormattedContent,
+.chatBubble.assistant .assistantFormattedContent h3,
+.chatBubble.assistant .assistantFormattedContent h4,
+.chatBubble.assistant .assistantFormattedContent p,
+.chatBubble.assistant .assistantFormattedContent li,
+.chatBubble.assistant .assistantFormattedContent strong {
+  font-weight: 400;
 }
 
 .reportsRouteStack {
@@ -4790,4 +4805,46 @@ h3 {
 
 .appShell :where(h1, h2, h3, .leftNav, .leftNav *, .sectionHeader h2, .pageHeader *) {
   line-height: normal;
+}
+
+.appShell :where(
+  p,
+  li,
+  dd,
+  dt,
+  td,
+  input,
+  select,
+  textarea,
+  .emptyState,
+  .assistantFormattedContent,
+  .assistantFormattedContent p,
+  .assistantFormattedContent li,
+  .assistantFormattedContent span,
+  .assistantFormattedContent strong
+),
+.loginShell :where(p, li, dd, dt, input, select, textarea) {
+  font-family: var(--font-family-base);
+  font-size: var(--content-font-size);
+  font-weight: 400;
+  line-height: var(--content-line-height);
+}
+
+.learningExamplesTable td,
+.learningExamplesTable td strong,
+.learningExamplesTable td small,
+.lifecycleTable td,
+.lifecycleTable td strong,
+.lifecycleTable td small,
+.chatBubble.assistant .assistantFormattedContent,
+.chatBubble.assistant .assistantFormattedContent h3,
+.chatBubble.assistant .assistantFormattedContent h4,
+.chatBubble.assistant .assistantFormattedContent p,
+.chatBubble.assistant .assistantFormattedContent li,
+.chatBubble.assistant .assistantFormattedContent span,
+.chatBubble.assistant .assistantFormattedContent strong {
+  font-family: var(--font-family-base);
+  font-size: var(--content-font-size);
+  font-weight: 400;
+  line-height: var(--content-line-height);
 }

@@ -7,7 +7,7 @@ from app.models.schemas import Evidence
 from app.services.learning import TRAINING_WORTHY_SCORE
 from app.services.ai_client import configured_llm_client
 from app.services.vector_index import cosine_similarity, decode_embedding, embed_text, tokenize
-from app.services.vector_store import configured_vector_store_name, search_document_chunks, search_learning_examples
+from app.services.vector_store import configured_vector_store_name, search_document_chunks, search_learning_examples, search_plant_records
 
 
 class RetrievalRerankResult(BaseModel):
@@ -70,6 +70,25 @@ def retrieve_evidence(
             )
         )
 
+    plant_vector_hits = search_plant_records(query, equipment_id, max(limit * 3, limit))
+    for hit in plant_vector_hits:
+        if not hit.content or hit.source_id in seen_sources:
+            continue
+        seen_sources.add(hit.source_id)
+        scored.append(
+            (
+                hit.score * 3 + 2.1 + (0.2 if equipment_id and hit.equipment_id == equipment_id else 0),
+                Evidence(
+                    source_type=hit.source_type,
+                    source_id=hit.source_id,
+                    title=hit.title,
+                    excerpt=hit.content[:260],
+                    equipment_id=hit.equipment_id,
+                    relevance_reason=f"Matched by {vector_store_name} plant record search.",
+                ),
+            )
+        )
+
     for chunk in repository.list_document_chunks(equipment_id, current_profile_only=True):
         if chunk["id"] in seen_sources:
             continue
@@ -89,6 +108,29 @@ def retrieve_evidence(
                         title=chunk["title"],
                         excerpt=chunk["content"][:260],
                         equipment_id=chunk.get("equipment_id"),
+                    ),
+                )
+            )
+
+    for record in repository.list_plant_rag_records(equipment_id):
+        if record["id"] in seen_sources:
+            continue
+        text = f"{record['title']} {record['content']}"
+        lexical_score = _score(text, terms)
+        if equipment_id and record.get("equipment_id") == equipment_id:
+            lexical_score += 1
+        if lexical_score > 0:
+            scored.append(
+                (
+                    lexical_score * 0.12,
+                    Evidence(
+                        source_type=record["source_type"],
+                        source_id=record["id"],
+                        title=record["title"],
+                        excerpt=record["content"][:260],
+                        equipment_id=record.get("equipment_id"),
+                        timestamp=record.get("timestamp"),
+                        relevance_reason="Matched by plant record fallback search.",
                     ),
                 )
             )

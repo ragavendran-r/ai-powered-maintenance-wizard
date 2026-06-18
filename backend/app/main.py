@@ -29,6 +29,7 @@ from app.models.schemas import (
     AssetDetail,
     AssetListItem,
     ChatRequest,
+    ChatMessage,
     ChatResponse,
     DashboardSummary,
     DiagnosisRequest,
@@ -132,6 +133,7 @@ from app.services.learning import (
 from app.services.vector_store import vector_store_status
 from app.services.maintenance_labeling import label_feedback, label_maintenance_event, label_maintenance_history, stored_labels
 from app.services.neo_assistant import neo_assistance, neo_welcome, stream_neo_assistance, stream_neo_welcome
+from app.services.assistant_runtime import standardized_assistant_stream
 from app.services.pm_plans import PM_PLAN_ROLES
 from app.services.pm_plans import convert_plan_to_work_order as convert_pm_plan_to_work_order
 from app.services.pm_plans import draft_plan as draft_pm_plan
@@ -462,7 +464,9 @@ def list_work_orders(
 def create_work_order(request: WorkOrderCreateRequest):
     if not repository.get_equipment(request.equipment_id):
         raise HTTPException(status_code=404, detail="Equipment not found")
-    return repository.create_work_order(request.model_dump())
+    payload = request.model_dump()
+    _normalize_assignee_payload(payload)
+    return repository.create_work_order(payload)
 
 
 @app.get(
@@ -564,6 +568,7 @@ def update_work_order(
     if not existing_work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
     payload = request.model_dump(exclude_unset=True)
+    _normalize_assignee_payload(payload)
     _normalize_material_ready_payload(payload, existing_work_order)
     merged_work_order = _merged_work_order(existing_work_order, payload)
     requested_status = payload.get("status")
@@ -635,6 +640,23 @@ def _work_order_has_material_blocker(work_order: dict[str, Any]) -> bool:
         if required_qty and reserved_qty < required_qty and available_qty < required_qty:
             return True
     return False
+
+
+def _normalize_assignee_payload(payload: dict[str, Any]) -> None:
+    if "assigned_to" not in payload:
+        return
+    requested = str(payload.get("assigned_to") or "").strip()
+    if not requested:
+        payload["assigned_to"] = ""
+        return
+    normalized = requested.casefold()
+    for user in repository.list_users():
+        if not user.get("is_active"):
+            continue
+        if str(user.get("display_name") or "").casefold() == normalized or str(user.get("email") or "").casefold() == normalized:
+            payload["assigned_to"] = user["display_name"]
+            return
+    raise HTTPException(status_code=400, detail=f"Assignee '{requested}' is not an active Maintenance Wizard user")
 
 
 def _material_start_block_reason(work_order: dict[str, Any]) -> str:
@@ -754,7 +776,19 @@ def technician_assist_stream(
     current_user: UserPublic = Depends(require_roles(*TECHNICIAN_ASSISTANT_ROLES)),
 ):
     def events():
-        for event in stream_technician_assistance(request, current_user):
+        def legacy_events(session_id: str, history: list[ChatMessage]):
+            session_request = request.model_copy(update={"session_id": session_id})
+            return stream_technician_assistance(session_request, current_user, history)
+
+        for event in standardized_assistant_stream(
+            assistant_id="trinity",
+            screen="work_execution_technician",
+            current_user=current_user,
+            session_id=request.session_id,
+            user_content=request.observation or request.requested_step or f"Review {request.work_order_id}",
+            request_metadata={"work_order_id": request.work_order_id, "requested_step": request.requested_step},
+            legacy_events=legacy_events,
+        ):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(
@@ -788,7 +822,19 @@ def supervisor_assist_stream(
     current_user: UserPublic = Depends(require_roles(*SUPERVISOR_ASSISTANT_ROLES)),
 ):
     def events():
-        for event in stream_supervisor_assistance(request, current_user):
+        def legacy_events(session_id: str, history: list[ChatMessage]):
+            session_request = request.model_copy(update={"session_id": session_id})
+            return stream_supervisor_assistance(session_request, current_user, history)
+
+        for event in standardized_assistant_stream(
+            assistant_id="trinity",
+            screen="work_execution_supervisor",
+            current_user=current_user,
+            session_id=request.session_id,
+            user_content=request.question or request.queue_name or request.work_order_id or "Review work execution priorities",
+            request_metadata={"work_order_id": request.work_order_id, "queue_name": request.queue_name},
+            legacy_events=legacy_events,
+        ):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(
@@ -841,10 +887,19 @@ def neo_role_welcome(
 @app.get("/api/neo/welcome/stream")
 def neo_role_welcome_stream(
     context: str = Query(default="command_center", pattern="^(command_center|work_execution)$"),
+    session_id: Optional[str] = Query(default=None),
     current_user: UserPublic = Depends(require_roles(*READ_ROLES)),
 ):
     def events():
-        for event in stream_neo_welcome(current_user, context):
+        for event in standardized_assistant_stream(
+            assistant_id="neo",
+            screen=context,
+            current_user=current_user,
+            session_id=session_id,
+            user_content=f"Load {context} priorities for {current_user.display_name}",
+            request_metadata={"context": context, "request_type": "welcome"},
+            legacy_events=lambda _session_id, _history: stream_neo_welcome(current_user, context),
+        ):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(
@@ -863,7 +918,20 @@ def neo_chat_stream(
     current_user: UserPublic = Depends(require_roles(*READ_ROLES)),
 ):
     def events():
-        for event in stream_neo_assistance(request, current_user):
+        def legacy_events(session_id: str, history: list[ChatMessage]):
+            merged_history = [*history, *request.history][-get_settings().assistant_history_limit :]
+            session_request = request.model_copy(update={"session_id": session_id, "history": merged_history})
+            return stream_neo_assistance(session_request, current_user)
+
+        for event in standardized_assistant_stream(
+            assistant_id="neo",
+            screen="command_center",
+            current_user=current_user,
+            session_id=request.session_id,
+            user_content=request.message,
+            request_metadata={"request_type": "chat"},
+            legacy_events=legacy_events,
+        ):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(

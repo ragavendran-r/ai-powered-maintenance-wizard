@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -26,6 +27,7 @@ from app.services.iot_streaming import (
     build_dead_letter_payload,
     process_iot_message,
 )
+from app.services.llm import LLMTextResponse
 from app.services.retrieval import retrieve_evidence
 from app.services.document_intelligence import document_intelligence
 from app.services.maintenance_labeling import stored_labels
@@ -52,6 +54,67 @@ def auth_headers(email: str = "admin@plant.local", password: str = DEMO_PASSWORD
     assert response.status_code == 200, response.text
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(autouse=True)
+def default_live_text_assistant(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    import app.services.work_order_assistant as work_order_module
+
+    class FakeLiveTextClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            if _fake_no_live_response(prompt):
+                return fallback_factory("mock", "no live LLM provider is configured for this test")
+            return LLMTextResponse(
+                content=_fake_live_text(prompt),
+                used_live_provider=True,
+                provider="openai",
+            )
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            if _fake_no_live_response(prompt):
+                yield fallback_factory("mock", "no live LLM provider is configured for this test")
+                return
+            yield LLMTextResponse(
+                content=_fake_live_text(prompt),
+                used_live_provider=True,
+                provider="openai",
+            )
+
+        def complete_model(
+            self,
+            prompt,
+            response_model,
+            system_prompt,
+            fallback_factory,
+            max_tokens=None,
+            timeout_seconds=None,
+            response_format=None,
+        ):
+            return fallback_factory("mock", "no live structured LLM provider is configured for this test")
+
+    fake_client = FakeLiveTextClient()
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: fake_client)
+    monkeypatch.setattr(work_order_module, "configured_llm_client", lambda: fake_client)
+
+
+def _fake_live_text(prompt: str) -> str:
+    if "WO-8297" in prompt:
+        return "Trinity reviewed WO-8297 and recommends supervisor follow-up."
+    if "WO-8304" in prompt:
+        return "Trinity reviewed WO-8304 and recommends the next safe execution step."
+    if "RM-DRIVE-01" in prompt:
+        return "Ragav, RM-DRIVE-01 is the grounded asset context for the next maintenance decision."
+    return "Neo answered using the live configured LLM and grounded application context."
+
+
+def _fake_no_live_response(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return "what is the time now" in lowered or "when is drive end bearing expected to be available" in lowered
 
 
 class _FakeNatsMessage:
@@ -92,7 +155,7 @@ def test_health_check():
 def test_database_status_reports_seeded_tables():
     status = database_status()
     assert Path(status["database_path"]) == TEST_DATABASE_PATH
-    assert status["schema_version"] == "19"
+    assert status["schema_version"] == "20"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["asset_profiles"] == 5
     assert status["counts"]["asset_metric_snapshots"] == 15
@@ -116,6 +179,8 @@ def test_database_status_reports_seeded_tables():
     assert status["counts"]["users"] == 8
     assert "learning_interactions" in status["counts"]
     assert "learning_examples" in status["counts"]
+    assert "assistant_sessions" in status["counts"]
+    assert "assistant_messages" in status["counts"]
     assert status["counts"]["learning_model_versions"] >= 1
     assert status["counts"]["learning_prompt_versions"] >= 3
     assert "learning_jobs" in status["counts"]
@@ -583,6 +648,55 @@ def test_admin_and_supervisor_can_list_assignment_technicians():
     assert [user["display_name"] for user in planner_response.json()] == ["Vinoth"]
 
 
+def test_work_order_assignment_requires_active_user_or_blank():
+    headers = auth_headers()
+
+    unknown_create = client.post(
+        "/api/work-orders",
+        json={
+            "equipment_id": "BF-BLOWER-02",
+            "title": "Inspect blower actuator linkage",
+            "description": "Inspect inlet guide vane actuator linkage after pressure variance trend.",
+            "priority": 2,
+            "work_type": "CM",
+            "failure_class": "CTRL",
+            "problem_code": "IGVACT",
+            "classification": "Control actuator",
+            "assigned_to": "Mani",
+            "supervisor": "Blast Furnace Supervisor",
+            "due_date": "2026-06-14T09:00:00+05:30",
+            "recommended_action": "Stroke actuator and verify position feedback.",
+        },
+        headers=headers,
+    )
+    assert unknown_create.status_code == 400
+    assert "not an active Maintenance Wizard user" in unknown_create.json()["detail"]
+
+    unknown_response = client.patch(
+        "/api/work-orders/WO-8304",
+        json={"assigned_to": "Mani"},
+        headers=headers,
+    )
+    assert unknown_response.status_code == 400
+    assert "not an active Maintenance Wizard user" in unknown_response.json()["detail"]
+
+    email_response = client.patch(
+        "/api/work-orders/WO-8304",
+        json={"assigned_to": "technician@plant.local"},
+        headers=headers,
+    )
+    assert email_response.status_code == 200
+    assert email_response.json()["assigned_to"] == "Vinoth"
+
+    blank_response = client.patch(
+        "/api/work-orders/WO-8304",
+        json={"assigned_to": ""},
+        headers=headers,
+    )
+    assert blank_response.status_code == 200
+    assert blank_response.json()["assigned_to"] == ""
+
+
 def test_planner_board_filters_open_scheduled_work_orders():
     headers = auth_headers("planner@plant.local")
 
@@ -1029,9 +1143,30 @@ def test_technician_assistant_streams_sse_response():
     assert '"type": "meta"' in body
     assert '"type": "token"' in body
     assert '"type": "done"' in body
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ")
+    ]
+    evidence_calls = [
+        event["tool_call"]
+        for event in events
+        if event["type"] == "tool_call" and event["tool_call"]["name"] == "load_evidence_context"
+    ]
+    evidence_results = [
+        event["tool_result"]
+        for event in events
+        if event["type"] == "tool_result" and event["tool_result"]["name"] == "load_evidence_context"
+    ]
+    assert evidence_calls
+    assert evidence_calls[0]["assistant_id"] == "trinity"
+    assert evidence_results
+    assert evidence_results[0]["artifact_type"] == "retrieval_evidence"
     assert "Trinity" in body
-    assert "Sorry, Trinity could not get a live LLM response" in body
-    assert "LWTQCONNECT" not in body
+    assert '"provider": "openai"' in body
+    assert '"used_live_provider": true' in body
+    token_text = "".join(event.get("content", "") for event in events if event["type"] == "token")
+    assert "LWTQCONNECT" not in token_text
 
     forbidden_response = client.post(
         "/api/work-orders/technician-assist/stream",
@@ -1073,6 +1208,65 @@ def test_technician_assistant_stream_uses_stream_llm_timeout(monkeypatch):
     assert "Address the technician by this name; do not address them by role." in captured["prompt"]
     assert "address them by name and not by role" in captured["system_prompt"]
     assert "Trinity bounded guidance" in body
+
+
+def test_technician_assistant_stream_includes_persisted_session_history(monkeypatch):
+    import app.services.work_order_assistant as assistant_module
+    from app.services.llm import LLMTextResponse
+
+    session_id = "TEST-TRINITY-TECH-HISTORY"
+    repository.upsert_assistant_session(
+        {
+            "id": session_id,
+            "assistant_id": "trinity",
+            "user_id": "USER-TECH",
+            "user_role": "maintenance_technician",
+            "screen": "work_execution_technician",
+            "status": "active",
+            "metadata": {},
+        }
+    )
+    repository.save_assistant_message(
+        {
+            "session_id": session_id,
+            "assistant_id": "trinity",
+            "role": "user",
+            "content": "The previous observation was loose coupling bolts on RM-DRIVE-01.",
+        }
+    )
+    repository.save_assistant_message(
+        {
+            "session_id": session_id,
+            "assistant_id": "trinity",
+            "role": "assistant",
+            "content": "Trinity recommended checking coupling alignment before completion.",
+        }
+    )
+    captured: dict[str, str] = {}
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["prompt"] = prompt
+            yield LLMTextResponse(content="Vinoth, continue from the coupling alignment check.", used_live_provider=True, provider="openai")
+
+    monkeypatch.setattr(assistant_module, "configured_llm_client", lambda: FakeClient())
+    with client.stream(
+        "POST",
+        "/api/work-orders/technician-assist/stream",
+        json={"work_order_id": "WO-8304", "observation": "what should I do next", "session_id": session_id},
+        headers=auth_headers("technician@plant.local"),
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert "Conversation continuity:" in captured["prompt"]
+    assert "loose coupling bolts on RM-DRIVE-01" in captured["prompt"]
+    assert "checking coupling alignment" in captured["prompt"]
+    assert "continue from the coupling alignment check" in body
 
 
 def test_technician_assistant_uses_apology_when_material_question_has_no_llm():
@@ -1241,6 +1435,65 @@ def test_supervisor_assistant_stream_uses_stream_llm_timeout(monkeypatch):
     assert "Supervisor name: Dhruv" in captured["prompt"]
     assert "address them by name and not by role" in captured["system_prompt"]
     assert "Trinity supervisor bounded review" in body
+
+
+def test_supervisor_assistant_stream_includes_persisted_session_history(monkeypatch):
+    import app.services.work_order_assistant as assistant_module
+    from app.services.llm import LLMTextResponse
+
+    session_id = "TEST-TRINITY-SUP-HISTORY"
+    repository.upsert_assistant_session(
+        {
+            "id": session_id,
+            "assistant_id": "trinity",
+            "user_id": "USER-SUPERVISOR",
+            "user_role": "maintenance_supervisor",
+            "screen": "work_execution_supervisor",
+            "status": "active",
+            "metadata": {},
+        }
+    )
+    repository.save_assistant_message(
+        {
+            "session_id": session_id,
+            "assistant_id": "trinity",
+            "role": "user",
+            "content": "Earlier we discussed WO-8311 approval before handoff.",
+        }
+    )
+    repository.save_assistant_message(
+        {
+            "session_id": session_id,
+            "assistant_id": "trinity",
+            "role": "assistant",
+            "content": "Trinity said WO-8311 needs approval or scope send-back.",
+        }
+    )
+    captured: dict[str, str] = {}
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["prompt"] = prompt
+            yield LLMTextResponse(content="Dhruv, continue with WO-8311 approval before handoff.", used_live_provider=True, provider="openai")
+
+    monkeypatch.setattr(assistant_module, "configured_llm_client", lambda: FakeClient())
+    with client.stream(
+        "POST",
+        "/api/work-orders/supervisor-assist/stream",
+        json={"queue_name": "waiting_approval", "question": "what was pending from earlier", "session_id": session_id},
+        headers=auth_headers("supervisor@plant.local"),
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert "Conversation continuity:" in captured["prompt"]
+    assert "WO-8311 approval before handoff" in captured["prompt"]
+    assert "approval or scope send-back" in captured["prompt"]
+    assert "continue with WO-8311 approval" in body
 
 
 def test_streaming_status_is_disabled_by_default():
@@ -1429,7 +1682,7 @@ def test_added_assets_have_health_prediction_and_retrieval(
     assert diagnosis_response.status_code == 200
     diagnosis = diagnosis_response.json()
     assert diagnosis["evidence"]
-    assert any(item["title"] == expected_document for item in diagnosis["evidence"])
+    assert any(item["equipment_id"] == equipment_id for item in diagnosis["evidence"])
 
     evidence = retrieve_evidence(query, equipment_id)
     assert any(item.title == expected_document for item in evidence)
@@ -1478,7 +1731,7 @@ def test_chat_returns_recommendation():
     assert payload["recommendation"]["equipment_id"] == "RM-DRIVE-01"
 
 
-def test_neo_chat_returns_dashboard_table_for_read_roles():
+def test_neo_chat_does_not_use_generic_table_resolver_for_read_roles():
     response = client.post(
         "/api/neo/chat",
         json={"message": "Show work orders needing follow-up"},
@@ -1487,30 +1740,73 @@ def test_neo_chat_returns_dashboard_table_for_read_roles():
     assert response.status_code == 200
     payload = response.json()
     assert "Neo" in payload["answer"] or payload["answer"]
-    assert payload["table"]["title"] == "Work Orders"
-    assert "Work order" in payload["table"]["columns"]
-    assert "Material" in payload["table"]["columns"]
-    assert payload["table"]["rows"]
-    assert payload["used_live_provider"] is False
-    assert payload["provider"] == "mock"
-    assert all(row["Follow-up"] == "Yes" for row in payload["table"]["rows"])
+    assert payload["table"] is None
+    assert payload["provider"] == "openai"
+    assert "Grounded app response" not in payload["answer"]
+    assert "Rows:" not in payload["answer"]
 
 
-def test_neo_chat_stream_returns_sse_done_event_for_table_query():
+def test_neo_chat_stream_returns_standardized_events_for_asset_decision():
     with client.stream(
         "POST",
         "/api/neo/chat/stream",
-        json={"message": "Show work orders needing follow-up"},
-        headers=auth_headers("operator@plant.local"),
+        json={
+            "message": "since RM-DRIVE-01 is most critical, what should I do now as an admin",
+            "history": [
+                {
+                    "role": "assistant",
+                    "content": "Ragav, these are the lowest-health equipment items right now. CRITICAL: RM-DRIVE-01.",
+                }
+            ],
+        },
+        headers=auth_headers("admin@plant.local"),
     ) as response:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
         body = "".join(response.iter_text())
 
     assert "data:" in body
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ")
+    ]
+    session_events = [event for event in events if event["type"] == "session"]
+    assert session_events
+    session_id = session_events[0]["session_id"]
+    assert session_id
+    assert session_events[0]["runtime"] == "legacy"
+    tool_names = {tool["name"] for tool in session_events[0]["tools"]}
+    assert "load_asset_context" in tool_names
+    assert "load_plant_priority_context" in tool_names
+    assert any(event["type"] == "meta" and event["runtime"] == "legacy" for event in events)
+    tool_calls = [event["tool_call"] for event in events if event["type"] == "tool_call"]
+    tool_results = [event["tool_result"] for event in events if event["type"] == "tool_result"]
+    assert tool_calls
+    assert tool_results
+    assert tool_calls[0]["name"] == "asset_decision_guidance"
+    assert tool_calls[0]["assistant_id"] == "neo"
+    assert tool_calls[0]["arguments"]["target_id"] == "RM-DRIVE-01"
+    assert tool_results[0]["name"] == "asset_decision_guidance"
+    assert tool_results[0]["artifact_type"] == "assistant_action"
+    assert tool_results[0]["content"]["action"]["type"] == "asset_decision_guidance"
+    final_events = [event for event in events if event["type"] == "final"]
+    assert final_events
+    assert final_events[0]["response"]["session_id"] == session_id
+    assert final_events[0]["response"]["assistant_id"] == "neo"
+    assert final_events[0]["response"]["runtime"] == "legacy"
     assert '"type": "done"' in body
-    assert '"title": "Work Orders"' in body
-    assert '"provider": "mock"' in body
+    assert "RM-DRIVE-01" in body
+    assert "asset_decision_guidance" in body
+    assert '"table": null' in body
+    assert '"provider": "openai"' in body
+    assert "Grounded app response" not in body
+    assert "Rows:" not in body
+    messages = repository.list_assistant_messages(session_id)
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[-1]["final_response"]["assistant_id"] == "neo"
+    assert messages[-1]["tool_calls"][0]["name"] == "asset_decision_guidance"
+    assert messages[-1]["tool_results"][0]["artifact_type"] == "assistant_action"
 
 
 def test_neo_chat_stream_uses_interactive_llm_timeout(monkeypatch):
@@ -1540,6 +1836,783 @@ def test_neo_chat_stream_uses_interactive_llm_timeout(monkeypatch):
 
     assert captured["timeout_seconds"] == 15.0
     assert "Neo dashboard bounded answer" in body
+
+
+def test_neo_chat_stream_filters_prompt_label_leak_for_asset_decision(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    captured = {}
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["prompt"] = prompt
+            yield LLMTextResponse(
+                content=(
+                    "Grounded app response:\n\nNone\n\nAnswer requirements:\n\n"
+                    "Rows:\n{'Asset': 'RM-DRIVE-01'}"
+                ),
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    with client.stream(
+        "POST",
+        "/api/neo/chat/stream",
+        json={
+            "message": "since RM-DRIVE-01 is most critical, what should I do now as an admin",
+            "history": [
+                {
+                    "role": "assistant",
+                    "content": "CRITICAL: RM-DRIVE-01 Hot Strip Mill Main Drive Motor.",
+                }
+            ],
+        },
+        headers=auth_headers("admin@plant.local"),
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert "Grounded app response" not in captured["prompt"]
+    assert "Rows:" not in captured["prompt"]
+    assert "Grounded app response" not in body
+    assert "Answer requirements" not in body
+    assert "RM-DRIVE-01" in body
+    assert "asset_decision_guidance" in body
+
+
+def test_assistant_runtime_stream_prefers_pydantic_ai_when_configured(monkeypatch):
+    from app.core.config import get_settings
+    import app.services.assistant_runtime as runtime
+    from app.services.llm import LLMTextResponse, MockLLMClient
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("ASSISTANT_RUNTIME", "pydantic_ai")
+    get_settings.cache_clear()
+    monkeypatch.setattr(runtime, "pydantic_ai_available", lambda: True)
+    monkeypatch.setattr(
+        runtime,
+        "_run_pydantic_ai_output",
+        lambda **kwargs: runtime.AssistantRuntimeOutput(
+            markdown="Ragav, Pydantic AI produced a validated assistant answer."
+        ),
+    )
+
+    events = list(
+        runtime.stream_assistant_markdown(
+            assistant_id="morpheus",
+            prompt="Which assets are at risk?",
+            system_prompt="Answer as Neo.",
+            fallback_client=MockLLMClient(provider="mock"),
+            fallback_factory=lambda provider, reason: LLMTextResponse(
+                content=f"fallback: {reason}",
+                used_live_provider=False,
+                provider=provider,
+            ),
+            max_tokens=200,
+        )
+    )
+
+    get_settings.cache_clear()
+    assert "".join(event.content for event in events) == "Ragav, Pydantic AI produced a validated assistant answer."
+    assert all(event.provider == "pydantic_ai" for event in events)
+    assert all(event.used_live_provider for event in events)
+
+
+def test_pydantic_ai_runtime_uses_configured_openai_compatible_provider(monkeypatch):
+    import app.services.assistant_runtime as runtime
+
+    captured: dict[str, object] = {}
+
+    class FakeProvider:
+        def __init__(self, base_url=None, api_key=None):
+            captured["base_url"] = base_url
+            captured["api_key"] = api_key
+
+    class FakeModel:
+        def __init__(self, model_name, *, provider):
+            captured["model_name"] = model_name
+            captured["provider"] = provider
+
+    monkeypatch.setitem(sys.modules, "pydantic_ai.models.openai", SimpleNamespace(OpenAIChatModel=FakeModel))
+    monkeypatch.setitem(sys.modules, "pydantic_ai.providers.openai", SimpleNamespace(OpenAIProvider=FakeProvider))
+
+    model = runtime._pydantic_ai_model(
+        SimpleNamespace(
+            llm_provider="openai",
+            openai_model="qwen2.5-7b-instruct",
+            openai_base_url="http://127.0.0.1:8080/v1",
+            openai_api_key="llama-cpp-local",
+            ollama_model="unused",
+        )
+    )
+
+    assert isinstance(model, FakeModel)
+    assert captured["model_name"] == "qwen2.5-7b-instruct"
+    assert captured["base_url"] == "http://127.0.0.1:8080/v1"
+    assert captured["api_key"] == "llama-cpp-local"
+    assert isinstance(captured["provider"], FakeProvider)
+
+
+def test_assistant_tools_load_grounded_records():
+    from app.services.assistant_tools import (
+        add_work_order_log,
+        assign_work_order,
+        assistant_tool_functions,
+        assistant_tool_specs,
+        create_work_order,
+        load_asset_context,
+        load_evidence_context,
+        load_plant_priority_context,
+        load_work_order_context,
+        update_work_order_material_ready,
+        update_work_order_status,
+    )
+
+    neo_tools = {tool.name for tool in assistant_tool_specs("neo")}
+    trinity_tools = {tool.name for tool in assistant_tool_specs("trinity")}
+    assert "load_plant_priority_context" in neo_tools
+    assert "create_work_order" in neo_tools
+    assert "load_plant_priority_context" not in trinity_tools
+    assert {"update_work_order_status", "assign_work_order", "create_work_order", "add_work_order_log"} <= trinity_tools
+
+    repository.save_pm_plan(
+        {
+            "equipment_id": "HYD-SYS-04",
+            "title": "HYD-SYS-04 hydraulic oil temperature PM",
+            "status": "active",
+            "cadence_days": 30,
+            "next_due_date": "2026-06-25T08:00:00+05:30",
+            "trigger": {"description": "Elevated hydraulic oil temperature"},
+            "thresholds": [{"signal": "hydraulic_oil_temperature", "limit": 75}],
+            "tasks": [{"description": "Inspect cooler fouling and return-line temperature"}],
+            "source": "morpheus",
+            "generated_by": "morpheus",
+            "used_live_provider": True,
+            "provider": "openai",
+        }
+    )
+
+    asset_context = load_asset_context("RM-DRIVE-01")
+    assert asset_context["status"] == "completed"
+    assert asset_context["equipment"]["id"] == "RM-DRIVE-01"
+    assert asset_context["work_orders"]
+
+    hydraulic_context = load_asset_context("HYD-SYS-04")
+    assert hydraulic_context["status"] == "completed"
+    assert any(plan["title"] == "HYD-SYS-04 hydraulic oil temperature PM" for plan in hydraulic_context["pm_plans"])
+
+    work_order_context = load_work_order_context("WO-8304")
+    assert work_order_context["status"] == "completed"
+    assert work_order_context["work_order"]["id"] == "WO-8304"
+    assert work_order_context["equipment"]["id"] == "RM-DRIVE-01"
+
+    evidence_context = load_evidence_context("bearing vibration", equipment_id="RM-DRIVE-01", limit=2)
+    assert evidence_context["status"] == "completed"
+    assert len(evidence_context["evidence"]) <= 2
+
+    plant_context = load_plant_priority_context()
+    assert plant_context["status"] == "completed"
+    assert plant_context["assets_at_risk"]
+
+    neo_functions = assistant_tool_functions("neo", current_user=SimpleNamespace(role="admin", display_name="Ragav"))
+    trinity_functions = assistant_tool_functions("trinity", current_user=SimpleNamespace(role="maintenance_technician", display_name="Vinoth"))
+    assert "assign_work_order" in neo_functions
+    assert "create_work_order" in neo_functions
+    assert "update_work_order_status" in neo_functions
+    assert "assign_work_order" in trinity_functions
+    assert "update_work_order_status" in trinity_functions
+    assert "add_work_order_log" in trinity_functions
+
+    created = create_work_order("RM-DRIVE-01", assignee="Vinoth", current_user=SimpleNamespace(role="admin", display_name="Ragav"))
+    assert created["status"] == "completed"
+    assert created["work_order"]["equipment_id"] == "RM-DRIVE-01"
+    assert created["work_order"]["assigned_to"] == "Vinoth"
+
+    unassigned = create_work_order("HYD-SYS-04", current_user=SimpleNamespace(role="admin", display_name="Ragav"))
+    assert unassigned["status"] == "completed"
+    assert unassigned["work_order"]["equipment_id"] == "HYD-SYS-04"
+    assert unassigned["work_order"]["assigned_to"] == ""
+    assert "assignment is blank" in unassigned["detail"]
+
+    assigned = assign_work_order("WO-8304", "Vinoth", current_user=SimpleNamespace(role="admin", display_name="Ragav"))
+    assert assigned["status"] == "completed"
+    assert assigned["work_order"]["assigned_to"] == "Vinoth"
+
+    email_assigned = assign_work_order(
+        "WO-8304",
+        "technician@plant.local",
+        current_user=SimpleNamespace(role="admin", display_name="Ragav"),
+    )
+    assert email_assigned["status"] == "completed"
+    assert email_assigned["work_order"]["assigned_to"] == "Vinoth"
+
+    unknown_assignment = assign_work_order(
+        "WO-8304",
+        "Mani",
+        current_user=SimpleNamespace(role="admin", display_name="Ragav"),
+    )
+    assert unknown_assignment["status"] == "blocked"
+    assert "not an active Maintenance Wizard user" in unknown_assignment["detail"]
+    assert any(user["display_name"] == "Vinoth" for user in unknown_assignment["valid_assignees"])
+
+    unknown_create = create_work_order(
+        "HYD-SYS-04",
+        assignee="Mani",
+        current_user=SimpleNamespace(role="admin", display_name="Ragav"),
+    )
+    assert unknown_create["status"] == "blocked"
+    assert "not an active Maintenance Wizard user" in unknown_create["detail"]
+
+    blocked_assignment = assign_work_order(
+        "WO-8304",
+        "Lokesh",
+        current_user=SimpleNamespace(role="maintenance_technician", display_name="Vinoth"),
+    )
+    assert blocked_assignment["status"] == "not_allowed"
+
+    approved = update_work_order_status("WO-8311", "APPR", current_user=SimpleNamespace(role="maintenance_supervisor", display_name="Dhruv"))
+    assert approved["status"] == "completed"
+    assert approved["to_status"] == "APPR"
+
+    blocked_start = update_work_order_status("WO-8304", "INPRG", current_user=SimpleNamespace(role="maintenance_technician", display_name="Vinoth"))
+    assert blocked_start["status"] == "not_allowed"
+    assert "bearing" in blocked_start["detail"].lower() or "material" in blocked_start["detail"].lower()
+
+    material_ready = update_work_order_material_ready("WO-8304", current_user=SimpleNamespace(role="planner", display_name="Priya"))
+    assert material_ready["status"] == "completed"
+    assert material_ready["work_order"]["material_readiness"] == "ready"
+
+    log_result = add_work_order_log(
+        "WO-8304",
+        "Checked bearing housing after material readiness update.",
+        current_user=SimpleNamespace(role="maintenance_technician", display_name="Vinoth"),
+    )
+    assert log_result["status"] == "completed"
+    assert log_result["work_order"]["logs"][-1]["content"] == "Checked bearing housing after material readiness update."
+
+    blocked_log = add_work_order_log(
+        "WO-8304",
+        "Trying to update another technician's work.",
+        current_user=SimpleNamespace(role="maintenance_technician", display_name="Lokesh"),
+    )
+    assert blocked_log["status"] == "not_allowed"
+
+
+def test_neo_creates_and_assigns_work_order_from_session_task_context(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeLiveClient:
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            return LLMTextResponse(
+                content="Created work order WO-9999 for CC-PUMP-03 and assigned it to Kumar.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeLiveClient())
+
+    response = client.post(
+        "/api/neo/chat",
+        json={
+            "message": "Create a work order and assign this task to Vinoth",
+            "history": [
+                {
+                    "role": "assistant",
+                    "content": (
+                        "The next step for RM-DRIVE-01 is to inspect bearing housing temperature, "
+                        "lubrication condition, coupling alignment, foundation bolts, and load changes."
+                    ),
+                }
+            ],
+        },
+        headers=auth_headers(),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["action"]["type"] == "create_work_order"
+    assert body["action"]["status"] == "completed"
+    assert "Vinoth" in body["answer"]
+    assert "RM-DRIVE-01" in body["answer"]
+    assert "CC-PUMP-03" not in body["answer"]
+    assert "Kumar" not in body["answer"]
+    created = repository.get_work_order(body["action"]["target_id"])
+    assert created is not None
+    assert created["equipment_id"] == "RM-DRIVE-01"
+    assert created["assigned_to"] == "Vinoth"
+    assert created["status"] == "WAPPR"
+
+
+def test_pydantic_ai_runtime_registers_assistant_tools(monkeypatch):
+    from app.core.config import get_settings
+    import app.services.assistant_runtime as runtime
+
+    captured: dict[str, object] = {}
+
+    class FakeResult:
+        output = runtime.AssistantRuntimeOutput(markdown="Ragav, registered tools are available.")
+
+    class FakeAgent:
+        def __init__(self, *args, **kwargs):
+            self.registered_tools: list[str] = []
+            captured["agent_kwargs"] = kwargs
+
+        def tool_plain(self, func):
+            self.registered_tools.append(func.__name__)
+            return func
+
+        def run_sync(self, prompt, message_history=None, model_settings=None):
+            captured["registered_tools"] = self.registered_tools
+            captured["message_history"] = message_history
+            captured["model_settings"] = model_settings
+            return FakeResult()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pydantic_ai",
+        SimpleNamespace(Agent=FakeAgent, PromptedOutput=lambda output_type, **kwargs: output_type),
+    )
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("ASSISTANT_RUNTIME", "pydantic_ai")
+    get_settings.cache_clear()
+
+    markdown = runtime._run_pydantic_ai_markdown(
+        assistant_id="neo",
+        prompt="Which plant risks matter now?",
+        system_prompt="Answer as Neo.",
+        max_tokens=200,
+    )
+
+    get_settings.cache_clear()
+    assert markdown == "Ragav, registered tools are available."
+    assert "load_asset_context" in captured["registered_tools"]
+    assert "load_work_order_context" in captured["registered_tools"]
+    assert "load_evidence_context" in captured["registered_tools"]
+    assert "load_plant_priority_context" in captured["registered_tools"]
+    assert "assign_work_order" in captured["registered_tools"]
+    assert "create_work_order" in captured["registered_tools"]
+    assert "update_work_order_status" in captured["registered_tools"]
+    assert "update_work_order_material_ready" in captured["registered_tools"]
+    assert captured["message_history"] == []
+    assert captured["model_settings"]["max_tokens"] == 200
+
+
+def test_pydantic_ai_runtime_passes_native_message_history(monkeypatch):
+    from app.core.config import get_settings
+    from app.models.schemas import ChatMessage
+    import app.services.assistant_runtime as runtime
+
+    captured: dict[str, object] = {}
+
+    class FakeUserPromptPart:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeTextPart:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeModelRequest:
+        def __init__(self, parts):
+            self.parts = parts
+
+    class FakeModelResponse:
+        def __init__(self, parts):
+            self.parts = parts
+
+    class FakeResult:
+        output = runtime.AssistantRuntimeOutput(markdown="Ragav, continuing from the previous RM-DRIVE-01 task.")
+
+    class FakeAgent:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def tool_plain(self, func):
+            return func
+
+        def run_sync(self, prompt, message_history=None, model_settings=None):
+            captured["prompt"] = prompt
+            captured["message_history"] = message_history
+            captured["model_settings"] = model_settings
+            return FakeResult()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pydantic_ai",
+        SimpleNamespace(Agent=FakeAgent, PromptedOutput=lambda output_type, **kwargs: output_type),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pydantic_ai.messages",
+        SimpleNamespace(
+            ModelRequest=FakeModelRequest,
+            ModelResponse=FakeModelResponse,
+            TextPart=FakeTextPart,
+            UserPromptPart=FakeUserPromptPart,
+        ),
+    )
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("ASSISTANT_RUNTIME", "pydantic_ai")
+    get_settings.cache_clear()
+
+    markdown = runtime._run_pydantic_ai_markdown(
+        assistant_id="neo",
+        prompt="Can I assign this task to a technician?",
+        system_prompt="Answer as Neo.",
+        max_tokens=200,
+        history=[
+            ChatMessage(role="user", content="What should I do now for RM-DRIVE-01?"),
+            ChatMessage(role="assistant", content="Inspect bearing housing temperature and coupling alignment."),
+            ChatMessage(
+                role="assistant",
+                content="Sorry, Neo could not get a live LLM response right now. Please retry after confirming the LLM service is responding.",
+            ),
+        ],
+    )
+
+    get_settings.cache_clear()
+    assert markdown == "Ragav, continuing from the previous RM-DRIVE-01 task."
+    message_history = captured["message_history"]
+    assert len(message_history) == 2
+    assert isinstance(message_history[0], FakeModelRequest)
+    assert message_history[0].parts[0].content == "What should I do now for RM-DRIVE-01?"
+    assert isinstance(message_history[1], FakeModelResponse)
+    assert message_history[1].parts[0].content == "Inspect bearing housing temperature and coupling alignment."
+    assert captured["prompt"] == "Can I assign this task to a technician?"
+
+
+def test_standardized_stream_captures_pydantic_ai_tool_events(monkeypatch):
+    from app.core.config import get_settings
+    import app.services.assistant_runtime as runtime
+    from app.models.schemas import UserPublic
+    from app.services.llm import LLMTextResponse, MockLLMClient
+
+    class FakeResult:
+        output = runtime.AssistantRuntimeOutput(markdown="Ragav, RM-DRIVE-01 context was loaded.")
+
+    class FakeAgent:
+        def __init__(self, *args, **kwargs):
+            self.registered_tools: dict[str, object] = {}
+
+        def tool_plain(self, func):
+            self.registered_tools[func.__name__] = func
+            return func
+
+        def run_sync(self, prompt, message_history=None, model_settings=None):
+            self.registered_tools["load_asset_context"](equipment_id="RM-DRIVE-01")
+            return FakeResult()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pydantic_ai",
+        SimpleNamespace(Agent=FakeAgent, PromptedOutput=lambda output_type, **kwargs: output_type),
+    )
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("ASSISTANT_RUNTIME", "pydantic_ai")
+    get_settings.cache_clear()
+    user = UserPublic.model_validate(repository.get_user_by_email("admin@plant.local"))
+
+    def legacy_events(session_id, history):
+        yield {"type": "meta", "provider": "pydantic_ai", "used_live_provider": True}
+        markdown = ""
+        for chunk in runtime.stream_assistant_markdown(
+            assistant_id="morpheus",
+            prompt="Load RM-DRIVE-01 context.",
+            system_prompt="Answer as Neo.",
+            fallback_client=MockLLMClient(provider="mock"),
+            fallback_factory=lambda provider, reason: LLMTextResponse(
+                content=f"fallback: {reason}",
+                used_live_provider=False,
+                provider=provider,
+            ),
+            max_tokens=200,
+            current_user=user,
+        ):
+            markdown += chunk.content
+            yield {"type": "token", "content": chunk.content}
+        yield {
+            "type": "done",
+            "response": {
+                "answer": markdown,
+                "provider": "pydantic_ai",
+                "used_live_provider": True,
+            },
+        }
+
+    events = list(
+        runtime.standardized_assistant_stream(
+            assistant_id="neo",
+            screen="command_center",
+            current_user=user,
+            session_id="TEST-PYDANTIC-TOOL-CAPTURE",
+            user_content="Load RM-DRIVE-01 context.",
+            legacy_events=legacy_events,
+        )
+    )
+
+    get_settings.cache_clear()
+    assert any(event["type"] == "tool_call" and event["tool_call"]["name"] == "load_asset_context" for event in events)
+    assert any(event["type"] == "tool_result" and event["tool_result"]["name"] == "load_asset_context" for event in events)
+    saved_messages = repository.list_assistant_messages(session_id="TEST-PYDANTIC-TOOL-CAPTURE")
+    assistant_message = next(message for message in saved_messages if message["role"] == "assistant")
+    assert assistant_message["tool_calls"][0]["name"] == "load_asset_context"
+    assert assistant_message["tool_results"][0]["content"]["equipment"]["id"] == "RM-DRIVE-01"
+
+
+def test_standardized_stream_rejects_cross_user_session_history():
+    import app.services.assistant_runtime as runtime
+    from app.models.schemas import UserPublic
+
+    admin = UserPublic.model_validate(repository.get_user_by_email("admin@plant.local"))
+    operator = UserPublic.model_validate(repository.get_user_by_email("operator@plant.local"))
+    original_session = repository.upsert_assistant_session(
+        {
+            "id": "TEST-CROSS-USER-SESSION",
+            "assistant_id": "neo",
+            "user_id": admin.id,
+            "user_role": admin.role,
+            "screen": "command_center",
+        }
+    )
+    repository.save_assistant_message(
+        {
+            "session_id": original_session["id"],
+            "assistant_id": "neo",
+            "role": "user",
+            "content": "Sensitive admin context from prior session.",
+        }
+    )
+    captured_history: list[object] = []
+
+    def legacy_events(session_id, history):
+        captured_history.extend(history)
+        yield {"type": "meta", "provider": "openai", "used_live_provider": True}
+        yield {
+            "type": "done",
+            "response": {
+                "answer": "Operator receives a fresh assistant session.",
+                "provider": "openai",
+                "used_live_provider": True,
+            },
+        }
+
+    events = list(
+        runtime.standardized_assistant_stream(
+            assistant_id="neo",
+            screen="command_center",
+            current_user=operator,
+            session_id=original_session["id"],
+            user_content="Start a new operator chat.",
+            legacy_events=legacy_events,
+        )
+    )
+
+    session_event = next(event for event in events if event["type"] == "session")
+    assert session_event["session_id"] != original_session["id"]
+    assert captured_history == []
+    assert repository.get_assistant_session(original_session["id"])["user_id"] == admin.id
+    assert repository.get_assistant_session(session_event["session_id"])["user_id"] == operator.id
+
+
+def test_pydantic_ai_runtime_registers_trinity_action_tools(monkeypatch):
+    from app.core.config import get_settings
+    import app.services.assistant_runtime as runtime
+    from app.models.schemas import UserPublic
+
+    captured: dict[str, object] = {}
+
+    class FakeResult:
+        output = runtime.AssistantRuntimeOutput(markdown="Vinoth, Trinity action tools are available.")
+
+    class FakeAgent:
+        def __init__(self, *args, **kwargs):
+            self.registered_tools: list[str] = []
+
+        def tool_plain(self, func):
+            self.registered_tools.append(func.__name__)
+            return func
+
+        def run_sync(self, prompt, message_history=None, model_settings=None):
+            captured["registered_tools"] = self.registered_tools
+            captured["message_history"] = message_history
+            return FakeResult()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pydantic_ai",
+        SimpleNamespace(Agent=FakeAgent, PromptedOutput=lambda output_type, **kwargs: output_type),
+    )
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("ASSISTANT_RUNTIME", "pydantic_ai")
+    get_settings.cache_clear()
+    user = UserPublic.model_validate(repository.get_user_by_email("technician@plant.local"))
+
+    markdown = runtime._run_pydantic_ai_markdown(
+        assistant_id="trinity",
+        prompt="Start my assigned work order.",
+        system_prompt="Answer as Trinity.",
+        max_tokens=200,
+        current_user=user,
+    )
+
+    get_settings.cache_clear()
+    assert markdown == "Vinoth, Trinity action tools are available."
+    assert "load_work_order_context" in captured["registered_tools"]
+    assert "update_work_order_status" in captured["registered_tools"]
+    assert "assign_work_order" in captured["registered_tools"]
+    assert "create_work_order" in captured["registered_tools"]
+    assert "add_work_order_log" in captured["registered_tools"]
+    assert captured["message_history"] == []
+
+
+def test_assistant_runtime_stream_returns_structured_failure_when_pydantic_ai_unavailable(monkeypatch):
+    from app.core.config import get_settings
+    import app.services.assistant_runtime as runtime
+    from app.services.llm import LLMTextResponse, MockLLMClient
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("ASSISTANT_RUNTIME", "pydantic_ai")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        runtime,
+        "_run_pydantic_ai_output",
+        lambda **kwargs: (_ for _ in ()).throw(runtime.AssistantRuntimeFailure("not installed")),
+    )
+
+    events = list(
+        runtime.stream_assistant_markdown(
+            assistant_id="morpheus",
+            prompt="Which assets are at risk?",
+            system_prompt="Answer as Neo.",
+            fallback_client=MockLLMClient(provider="mock"),
+            fallback_factory=lambda provider, reason: LLMTextResponse(
+                content=f"fallback: {reason}",
+                used_live_provider=False,
+                provider=provider,
+            ),
+            max_tokens=200,
+        )
+    )
+
+    get_settings.cache_clear()
+    assert len(events) == 1
+    assert events[0].provider == "pydantic_ai"
+    assert events[0].used_live_provider is False
+    assert events[0].runtime == "pydantic_ai"
+    assert events[0].runtime_fallback is True
+    assert events[0].runtime_fallback_reason == "not installed"
+    assert events[0].content == ""
+
+
+def test_neo_stream_bypasses_pydantic_validation_and_caps_live_text_tokens(monkeypatch):
+    from app.core.config import get_settings
+    import app.services.assistant_runtime as runtime
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("ASSISTANT_RUNTIME", "pydantic_ai")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        runtime,
+        "_run_pydantic_ai_output",
+        lambda **kwargs: (_ for _ in ()).throw(runtime.AssistantRuntimeFailure("pydantic runtime unavailable")),
+    )
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["max_tokens"] = max_tokens
+            yield LLMTextResponse(
+                content="Ragav, RM-DRIVE-01 is the immediate plant-risk focus.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+
+    with client.stream(
+        "POST",
+        "/api/neo/chat/stream",
+        json={"message": "Explain current plant risk in one paragraph"},
+        headers=auth_headers("admin@plant.local"),
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    get_settings.cache_clear()
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ")
+    ]
+    meta = next(event for event in events if event["type"] == "meta")
+    final = next(event for event in events if event["type"] == "final")
+    done = next(event for event in events if event["type"] == "done")
+    assert captured["max_tokens"] == 250
+    assert meta["runtime"] == "pydantic_ai"
+    assert meta["provider"] == "openai"
+    assert meta["used_live_provider"] is True
+    assert meta["runtime_fallback"] is False
+    assert final["response"]["markdown"] == "Ragav, RM-DRIVE-01 is the immediate plant-risk focus."
+    assert done["response"]["answer"] == "Ragav, RM-DRIVE-01 is the immediate plant-risk focus."
+    assert not any(event["type"] == "error" for event in events)
+
+
+def test_trinity_runtime_bypasses_pydantic_validation_and_caps_live_text_tokens(monkeypatch):
+    from app.core.config import get_settings
+    import app.services.assistant_runtime as runtime
+    from app.services.llm import LLMTextResponse
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("ASSISTANT_RUNTIME", "pydantic_ai")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        runtime,
+        "_run_pydantic_ai_output",
+        lambda **kwargs: (_ for _ in ()).throw(runtime.AssistantRuntimeFailure("pydantic runtime unavailable")),
+    )
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["max_tokens"] = max_tokens
+            yield LLMTextResponse(
+                content="Vinoth, WO-8304 is blocked by material readiness.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    events = list(
+        runtime.stream_assistant_markdown(
+            assistant_id="trinity",
+            prompt="What should I do next?",
+            system_prompt="Answer as Trinity.",
+            fallback_client=FakeClient(),
+            fallback_factory=lambda provider, reason: LLMTextResponse(
+                content="",
+                used_live_provider=False,
+                provider=provider,
+            ),
+            max_tokens=900,
+        )
+    )
+
+    get_settings.cache_clear()
+    assert captured["max_tokens"] == 250
+    assert "".join(event.content for event in events) == "Vinoth, WO-8304 is blocked by material readiness."
+    assert all(event.provider == "openai" for event in events)
+    assert all(event.used_live_provider for event in events)
 
 
 def test_neo_welcome_streams_llm_context_and_done_event(monkeypatch):
@@ -1585,7 +2658,7 @@ def test_neo_welcome_streams_llm_context_and_done_event(monkeypatch):
     assert '"provider": "openai"' in body
 
 
-def test_neo_chat_returns_asset_table_with_llm_answer():
+def test_neo_chat_avoids_generic_asset_table_resolver():
     response = client.post(
         "/api/neo/chat",
         json={"message": "Show assets"},
@@ -1593,11 +2666,32 @@ def test_neo_chat_returns_asset_table_with_llm_answer():
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["table"]["title"] == "Assets"
-    assert "Asset" in payload["table"]["columns"]
-    assert payload["table"]["rows"]
-    assert payload["used_live_provider"] is False
-    assert payload["provider"] == "mock"
+    assert payload["table"] is None
+    assert payload["provider"] == "openai"
+    assert "Grounded app response" not in payload["answer"]
+
+
+def test_neo_resolves_previous_asset_context_from_session_history():
+    response = client.post(
+        "/api/neo/chat",
+        json={
+            "message": "which asset are you talking about",
+            "history": [
+                {
+                    "role": "assistant",
+                    "content": "P1: Assets at risk\n- Signal: RM-DRIVE-01 Hot Strip Mill Main Drive Motor has critical risk.",
+                }
+            ],
+        },
+        headers=auth_headers("supervisor@plant.local"),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action"]["type"] == "session_context_lookup"
+    assert payload["action"]["status"] == "completed"
+    assert payload["table"]["title"] == "Previous Answer Asset Context"
+    assert payload["table"]["rows"][0]["Asset"] == "RM-DRIVE-01"
+    assert "RM-DRIVE-01" in payload["answer"]
 
 
 def test_neo_user_table_is_role_limited():
@@ -1608,8 +2702,8 @@ def test_neo_user_table_is_role_limited():
     )
     assert operator_response.status_code == 200
     operator_payload = operator_response.json()
-    assert operator_payload["table"]["title"] == "Current User"
-    assert operator_payload["provider"] == "mock"
+    assert operator_payload["table"] is None
+    assert operator_payload["provider"] == "openai"
 
     admin_response = client.post(
         "/api/neo/chat",
@@ -1618,8 +2712,8 @@ def test_neo_user_table_is_role_limited():
     )
     assert admin_response.status_code == 200
     admin_payload = admin_response.json()
-    assert admin_payload["table"]["title"] == "Users"
-    assert admin_payload["provider"] == "mock"
+    assert admin_payload["table"] is None
+    assert admin_payload["provider"] == "openai"
 
 
 def test_neo_user_table_supports_role_filters_with_llm_answer():
@@ -1630,11 +2724,9 @@ def test_neo_user_table_supports_role_filters_with_llm_answer():
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["table"]["title"] == "Supervisors"
-    assert payload["table"]["rows"]
-    assert {row["Role"] for row in payload["table"]["rows"]} == {"maintenance_supervisor"}
-    assert payload["used_live_provider"] is False
-    assert payload["provider"] == "mock"
+    assert payload["table"] is None
+    assert payload["used_live_provider"] is True
+    assert payload["provider"] == "openai"
 
 
 def test_neo_welcome_highlights_assigned_technician_work(monkeypatch):
@@ -1709,10 +2801,10 @@ def test_neo_command_center_replaces_malformed_live_priority_text(monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "grounded_priority_guard"
+    assert payload["provider"] == "openai"
     assert "Assets at risk" in payload["answer"]
     assert "Impact:" in payload["answer"]
-    assert "Focus:" in payload["answer"]
+    assert "P1:" in payload["answer"]
     assert "WO-8304" not in payload["answer"]
     assert "; reason" not in payload["answer"]
     assert payload["table"]["title"] == "Plant Priority Updates"
@@ -1783,7 +2875,7 @@ def test_neo_welcome_is_read_only_for_operator_attention(monkeypatch):
         def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
             assert "read-only" in prompt
             return LLMTextResponse(
-                content="Casey, read-only operator attention starts with RM-DRIVE-01 because it is high risk; monitor indications and report field observations.",
+                    content="Jan, read-only operator attention starts with RM-DRIVE-01 because it is high risk; monitor indications and report field observations.",
                 used_live_provider=True,
                 provider="openai",
             )
@@ -1808,7 +2900,7 @@ def test_neo_returns_asset_performance_summary_from_backend_data():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "mock"
+    assert payload["provider"] == "openai"
     assert payload["table"]["title"] == "BF-BLOWER-02 Performance"
     assert payload["action"]["type"] == "asset_performance"
     assert payload["action"]["status"] == "completed"
@@ -1824,7 +2916,7 @@ def test_neo_returns_asset_documents_from_backend_data():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "mock"
+    assert payload["provider"] == "openai"
     assert payload["table"]["title"] == "BF-BLOWER-02 Documents"
     assert any(row["Source"] in {"manual", "sop", "log", "history"} for row in payload["table"]["rows"])
 
@@ -1838,11 +2930,11 @@ def test_neo_technician_next_steps_use_assigned_work_order_only():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "mock"
+    assert payload["provider"] == "openai"
     assert payload["action"]["type"] == "work_order_next_steps"
     assert payload["action"]["target_id"] == "WO-8304"
     assert payload["table"]["rows"][0]["Work order"] == "WO-8304"
-    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
+    assert payload["used_live_provider"] is True
 
 
 def test_neo_technician_material_question_does_not_start_blocked_work_order():
@@ -1858,11 +2950,11 @@ def test_neo_technician_material_question_does_not_start_blocked_work_order():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "mock"
+    assert payload["provider"] == "openai"
     assert payload["action"]["type"] == "work_order_material_status"
     assert payload["action"]["target_id"] == "WO-8304"
     assert payload["table"]["rows"][0]["Work order"] == "WO-8304"
-    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
+    assert payload["used_live_provider"] is True
     assert repository.get_work_order("WO-8304")["status"] == "WMATL"
 
 
@@ -1875,10 +2967,10 @@ def test_neo_blocks_explicit_start_when_material_is_not_ready():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "mock"
+    assert payload["provider"] == "openai"
     assert payload["action"]["type"] == "update_work_order_status"
     assert payload["action"]["status"] == "not_allowed"
-    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
+    assert "Drive end bearing is out of stock" in payload["answer"]
     assert repository.get_work_order("WO-8304")["status"] == "WMATL"
 
 
@@ -1963,7 +3055,7 @@ def test_neo_can_create_work_order_for_critical_asset_when_role_allows():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "mock"
+    assert payload["provider"] == "openai"
     assert payload["action"]["type"] == "create_work_order"
     assert payload["action"]["status"] == "completed"
     assert payload["action"]["target_id"].startswith("WO-")
@@ -1983,7 +3075,7 @@ def test_neo_blocks_work_order_creation_for_operator():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider"] == "mock"
+    assert payload["provider"] == "openai"
     assert payload["action"]["status"] == "not_allowed"
     assert payload["table"] is None
 
@@ -2013,7 +3105,7 @@ def test_neo_can_manage_user_data_for_admin_only():
     assert operator_payload["action"]["status"] == "not_allowed"
 
 
-def test_neo_general_maintenance_query_uses_evidence_fallback_when_llm_is_slow():
+def test_neo_general_maintenance_query_uses_live_llm_text():
     response = client.post(
         "/api/neo/chat",
         json={"message": "how to inspect Blast Furnace Combustion Air Blower"},
@@ -2022,9 +3114,9 @@ def test_neo_general_maintenance_query_uses_evidence_fallback_when_llm_is_slow()
     assert response.status_code == 200
     payload = response.json()
     assert payload["table"] is None
-    assert payload["used_live_provider"] is False
-    assert payload["provider"] == "mock"
-    assert "Sorry, Neo could not get a live LLM response" in payload["answer"]
+    assert payload["used_live_provider"] is True
+    assert payload["provider"] == "openai"
+    assert "live configured LLM" in payload["answer"]
     assert "### Safety Checks" not in payload["answer"]
     assert "Ask me to show assets" not in payload["answer"]
 
@@ -2042,7 +3134,7 @@ def test_neo_chat_stream_returns_token_events_for_general_queries():
     assert '"type": "meta"' in body
     assert '"type": "token"' in body
     assert '"type": "done"' in body
-    assert "Sorry, Neo could not get a live LLM response" in body
+    assert '"provider": "openai"' in body
     assert "Safety Checks" not in body
 
 
@@ -2319,10 +3411,312 @@ def test_rag_reindex_syncs_approved_learning_examples(monkeypatch):
     assert any(example["source_type"] == "feedback" and example["approved"] for example in examples)
 
 
+def test_plant_rag_records_cover_persisted_operational_and_learning_tables(monkeypatch):
+    repository.save_auth_audit_event(
+        "login",
+        True,
+        email="admin@plant.local",
+        user_id="USER-ADMIN",
+        role="admin",
+        detail="Coverage test login.",
+    )
+    repository.save_pm_plan(
+        {
+            "equipment_id": "RM-DRIVE-01",
+            "title": "RM drive bearing thermal PM",
+            "status": "active",
+            "cadence_days": 14,
+            "next_due_date": "2026-06-20T08:00:00+05:30",
+            "trigger": {"description": "High bearing temperature and vibration risk"},
+            "thresholds": [{"signal": "bearing_temperature", "limit": 85}],
+            "tasks": [{"description": "Inspect drive end bearing lubrication and alignment"}],
+            "source": "morpheus",
+            "generated_by": "morpheus",
+            "used_live_provider": True,
+            "provider": "openai",
+        }
+    )
+    repository.save_document_intelligence(
+        {
+            "document_id": "DOC-RM-SOP-01",
+            "summary": "Drive SOP mentions bearing temperature and vibration response.",
+            "asset_ids": ["RM-DRIVE-01"],
+            "components": ["Drive end bearing"],
+            "failure_modes": ["Bearing overheating"],
+            "symptoms": ["High vibration"],
+            "safety_constraints": ["Lockout required"],
+            "spares": ["Drive end bearing"],
+            "thresholds": ["Bearing temperature high"],
+            "used_live_provider": True,
+            "provider": "openai",
+        }
+    )
+    repository.save_feedback(
+        "rec-rag-coverage",
+        {
+            "equipment_id": "RM-DRIVE-01",
+            "status": "accepted",
+            "actual_root_cause": "Bearing lubrication starvation",
+            "action_taken": "Lubricated bearing and verified vibration",
+            "outcome": "Risk reduced",
+            "notes": "Useful for future diagnosis.",
+        },
+    )
+    repository.save_maintenance_label(
+        {
+            "source_type": "work_order",
+            "source_id": "WO-8304",
+            "equipment_id": "RM-DRIVE-01",
+            "failure_mode": "bearing overheating",
+            "component": "drive end bearing",
+            "root_cause": "lubrication starvation",
+            "action_class": "inspection",
+            "outcome_status": "training_worthy",
+            "signal_hints": ["bearing_temperature", "vibration"],
+            "usable_for_training": True,
+            "used_live_provider": True,
+            "provider": "openai",
+        }
+    )
+    repository.save_streaming_message(
+        "MSG-RAG-COVERAGE-1",
+        "iot-gateway",
+        "sensor_reading",
+        "plant.rm-drive-01.sensor",
+        "processed",
+    )
+    repository.save_learning_interaction(
+        {
+            "assistant": "neo",
+            "interaction_type": "chat",
+            "user_id": "USER-SUPERVISOR",
+            "user_role": "maintenance_supervisor",
+            "equipment_id": "RM-DRIVE-01",
+            "work_order_id": "WO-8304",
+            "prompt": "Explain active alerts.",
+            "response": "RM-DRIVE-01 has bearing temperature and vibration risk.",
+            "provider": "openai",
+            "used_live_provider": True,
+            "approved_for_learning": True,
+            "outcome_status": "accepted",
+        }
+    )
+    repository.upsert_learning_example(
+        {
+            "source_type": "assistant_interaction",
+            "source_id": "rag-coverage-interaction",
+            "equipment_id": "RM-DRIVE-01",
+            "work_order_id": "WO-8304",
+            "instruction": "Prioritize plant risk.",
+            "input_text": "Active alert context",
+            "expected_output": "Escalate bearing temperature risk.",
+            "approved": True,
+            "judge_score": 0.95,
+            "judge_label": "Training Worthy",
+            "judge_rationale": "Grounded and actionable.",
+            "judge_provider": "openai",
+            "judge_used_live_provider": True,
+        }
+    )
+    snapshot = repository.create_learning_dataset_snapshot(
+        {
+            "name": "rag-coverage-snapshot",
+            "description": "Coverage test snapshot",
+            "example_count": 1,
+            "approved_only": True,
+            "jsonl_content": "{}\n",
+            "created_by": "admin@plant.local",
+        }
+    )
+    model = repository.save_learning_model_version(
+        {
+            "provider": "llama.cpp",
+            "model_name": "qwen2.5-7b-instruct",
+            "base_model": "Qwen2.5-7B-Instruct",
+            "adapter_path": "/tmp/adapter",
+            "status": "candidate",
+            "notes": "Coverage test adapter.",
+        }
+    )
+    evaluation = repository.save_learning_evaluation_run(
+        {
+            "dataset_id": snapshot["id"],
+            "model_version_id": model["id"],
+            "prompt_version_id": "neo/default",
+            "metrics": {"pass_rate": 1.0},
+            "notes": "Coverage test evaluation.",
+            "passed": True,
+        }
+    )
+    repository.save_learning_model_promotion(
+        {
+            "model_version_id": model["id"],
+            "previous_active_model_id": "model-local-qwen2.5-current",
+            "evaluation_run_id": evaluation["id"],
+            "dataset_id": snapshot["id"],
+            "prompt_version_id": "neo/default",
+            "action": "promoted",
+            "reviewer_email": "admin@plant.local",
+            "notes": "Coverage test promotion.",
+        }
+    )
+    deployment = repository.save_learning_model_deployment(
+        {
+            "model_version_id": model["id"],
+            "job_id": None,
+            "runtime_provider": "llama.cpp",
+            "serving_provider": "openai",
+            "served_model_name": "qwen2.5-7b-instruct",
+            "base_url": "http://localhost:8080/v1",
+            "artifact_uri": "/tmp/adapter",
+            "artifact_hash": "hash",
+            "status": "verified",
+            "health_status": "healthy",
+            "health_checked_at": "2026-06-17T08:00:00+05:30",
+            "metadata": {"adapter": "loaded"},
+        }
+    )
+    job = repository.save_learning_job(
+        {
+            "job_type": "peft_tuning",
+            "subject": "maintenance.learning.peft.requested",
+            "status": "completed",
+            "requested_by": "admin@plant.local",
+            "input_refs": {"dataset_id": snapshot["id"]},
+            "output_refs": {"deployment_id": deployment["id"]},
+        }
+    )
+    repository.save_learning_artifact(
+        {
+            "job_id": job["id"],
+            "artifact_type": "adapter",
+            "uri": "/tmp/adapter",
+            "content_hash": "hash",
+            "metadata": {"model_version_id": model["id"]},
+        }
+    )
+
+    records = repository.list_plant_rag_records()
+    source_types = {record["source_type"] for record in records}
+    user_records = [record for record in records if record["source_type"] == "user"]
+    assert any("Vinoth" in record["content"] and "maintenance_technician" in record["content"] for record in user_records)
+    assert all("password" not in record["content"].lower() for record in user_records)
+    expected_source_types = {
+        "equipment",
+        "asset_profile",
+        "asset_metric_snapshot",
+        "asset_recommendation",
+        "asset_subsystem",
+        "asset_reliability_metric",
+        "alert",
+        "sensor_reading",
+        "spare",
+        "work_order",
+        "work_order_spare",
+        "work_order_log",
+        "maintenance_event",
+        "pm_template",
+        "pm_plan",
+        "rca_case",
+        "document",
+        "document_intelligence",
+        "feedback",
+        "maintenance_label",
+        "streaming_message",
+        "user",
+        "auth_audit_event",
+        "assistant_interaction",
+        "learning_example",
+        "learning_dataset_snapshot",
+        "learning_model_version",
+        "learning_prompt_version",
+        "learning_evaluation_run",
+        "learning_model_promotion",
+        "learning_model_deployment",
+        "learning_job",
+        "learning_artifact",
+        "rag_embedding_profile",
+    }
+    assert expected_source_types <= source_types
+
+    captured: dict[str, object] = {}
+
+    def fake_index_document_chunks(chunks, *, collection_name=None, recreate_collection=False):
+        return {"store": "qdrant", "collection": collection_name, "indexed": len(chunks), "state": "indexed"}
+
+    def fake_sync_learning_examples(examples, *, collection_name=None, min_judge_score=0.65):
+        return {"store": "qdrant", "collection": collection_name, "eligible": len(examples), "indexed": len(examples), "state": "synced"}
+
+    def fake_sync_plant_records(records, *, collection_name=None):
+        if collection_name:
+            captured["collection_name"] = collection_name
+            captured["records"] = records
+        return {"store": "qdrant", "collection": collection_name, "indexed": len(records), "state": "synced"}
+
+    monkeypatch.setattr(repository, "index_document_chunks", fake_index_document_chunks)
+    monkeypatch.setattr(repository, "sync_learning_examples_index", fake_sync_learning_examples)
+    monkeypatch.setattr(repository, "sync_plant_records_index", fake_sync_plant_records)
+
+    response = client.post(
+        "/api/learning/rag/reindex",
+        json={"target_collection": "maintenance_wizard_documents_all_records", "recreate_collection": False},
+        headers=auth_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["output_refs"]["plant_index_result"]["state"] == "synced"
+    assert captured["collection_name"] == "maintenance_wizard_documents_all_records"
+    indexed_source_types = {record["source_type"] for record in captured["records"]}
+    assert expected_source_types <= indexed_source_types
+
+
+def test_work_order_spare_replacement_deletes_stale_plant_records(monkeypatch):
+    deleted_source_ids: list[str] = []
+
+    def fake_delete_plant_records(source_ids, *, collection_name=None):
+        deleted_source_ids.extend(source_ids)
+        return {"store": "qdrant", "collection": collection_name, "deleted": len(source_ids), "state": "deleted"}
+
+    monkeypatch.setattr(repository, "delete_plant_records_index", fake_delete_plant_records)
+
+    work_order = repository.get_work_order("WO-8304")
+    assert work_order["spare_reservations"]
+    stale_source_ids = [f"work_order_spare:{item['id']}" for item in work_order["spare_reservations"]]
+
+    updated = repository.update_work_order(
+        "WO-8304",
+        {
+            "spare_reservations": [
+                {
+                    "spare_id": "BRG-22",
+                    "spare_name": "Drive End Bearing Cartridge",
+                    "required_qty": 1,
+                    "reserved_qty": 1,
+                    "available_qty": 1,
+                    "reorder_requested": False,
+                    "procurement_status": "reserved",
+                    "procurement_lead_time_days": 0,
+                    "expected_available_date": None,
+                    "substitute_spare_id": None,
+                    "substitute_name": None,
+                    "blocker_status": "reserved",
+                    "blocker_note": None,
+                }
+            ]
+        },
+    )
+
+    assert updated is not None
+    assert deleted_source_ids == stale_source_ids
+    assert [f"work_order_spare:{item['id']}" for item in updated["spare_reservations"]] != stale_source_ids
+
+
 def test_learning_review_endpoints_are_role_gated_and_export_jsonl(monkeypatch):
     monkeypatch.setenv("LEARNING_ARTIFACT_RETENTION_DAYS", "0")
     monkeypatch.setenv("LEARNING_ARTIFACT_CLEANUP_ENABLED", "false")
     monkeypatch.setenv("LEARNING_PEFT_TRAINER_COMMAND", "")
+    monkeypatch.setenv("LEARNING_ADAPTER_DEPLOYER_COMMAND", "")
     get_settings.cache_clear()
     operator_response = client.get("/api/learning/summary", headers=auth_headers("operator@plant.local"))
     assert operator_response.status_code == 403
@@ -3379,7 +4773,7 @@ def test_markdown_report_export_contains_actions_and_evidence():
     assert "Maintenance Decision Report: RM-DRIVE-01" in response.text
     assert "## Immediate Actions" in response.text
     assert "## Reasoning Explanation" in response.text
-    assert "Hot Strip Mill Main Drive Vibration SOP" in response.text
+    assert "Recurring high vibration on drive end" in response.text
 
 
 def test_structured_maintenance_insights_include_alerts_decisions_and_logs():

@@ -9,6 +9,8 @@ export type AssistantTurn = {
   details?: string[]
   provider?: string
   usedLiveProvider?: boolean
+  runtimeFallback?: boolean
+  runtimeFallbackReason?: string | null
 }
 
 export function assistantTurnId(prefix: string) {
@@ -20,12 +22,13 @@ export function assistantProviderLabel(turn: AssistantTurn) {
   if (turn.provider === 'deterministic') return 'Dashboard data'
   if (turn.provider === 'grounded_priority_guard') return 'Dashboard data'
   if (turn.provider === 'work_order_tool') return 'Trinity action'
-  return `${turn.usedLiveProvider ? 'Live LLM' : 'LLM fallback'} · ${turn.provider}`
+  if (turn.runtimeFallback || turn.provider === 'fallback') return `LLM error · ${turn.provider}`
+  return `${turn.usedLiveProvider ? 'Live LLM' : 'LLM error'} · ${turn.provider}`
 }
 
 export function AssistantMessageContent({ turn }: { turn: AssistantTurn }) {
   if (turn.role === 'assistant') {
-    return <FormattedAssistantContent content={turn.content} />
+    return <FormattedAssistantContent content={normalizeAssistantChatMarkdown(turn.content)} />
   }
   return <p>{turn.content}</p>
 }
@@ -178,7 +181,14 @@ function normalizeAssistantContent(content: string) {
     .replace(/\s+(#{1,4}\s+)/g, '\n$1')
     .replace(/(#{1,4}\s+[^:\n]+:)\s+(\d+\.\s+)/g, '$1\n$2')
     .replace(/\s+(\d+\.\s+(?:\*\*|[A-Z]))/g, '\n$1')
-    .replace(/\s+-\s+(?=[A-Z*])/g, '\n- ')
+    .replace(/(?<!\*)\s+-\s+(?=[A-Z*])/g, '\n- ')
+}
+
+function normalizeAssistantChatMarkdown(content: string) {
+  return content
+    .split('\n')
+    .map((line) => line.replace(/^\s*\*\*(.+?)\*\*\s*$/, '$1'))
+    .join('\n')
 }
 
 function stripMarkdownHeadingSuffix(text: string) {

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import json
 import re
 from collections.abc import Iterator
-from typing import Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
@@ -29,6 +29,10 @@ class LLMTextResponse(BaseModel):
     content: str
     used_live_provider: bool = False
     provider: str = "mock"
+    runtime: Optional[str] = None
+    runtime_fallback: bool = False
+    runtime_fallback_reason: Optional[str] = None
+    referenced_records: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class LLMProviderError(RuntimeError):
