@@ -58,6 +58,18 @@ export const diagnosisAssistantName = 'Morpheus'
 export const reliabilityAssistantName = 'Smith'
 export const technicianAssistantName = 'Trinity'
 export const supervisorAssistantName = 'Trinity'
+export const emptyLearningRefreshMessage =
+  'Refresh completed, but no learning examples were found. Add accepted feedback, usable maintenance labels, completed work orders, closed RCA cases, ingested documents, or approved assistant interactions, then refresh again.'
+
+export function learningRefreshMessage(exampleCount: number) {
+  return exampleCount > 0
+    ? `Refreshed ${exampleCount} learning example${exampleCount === 1 ? '' : 's'}`
+    : emptyLearningRefreshMessage
+}
+
+export function learningJudgeProgressMessage(sourceType: string) {
+  return `Judging ${sourceType.replace(/_/g, ' ')} example. Live LLM checks can take up to 15 seconds before falling back.`
+}
 
 export const fallbackWorkOrders: WorkOrder[] = [
   {
