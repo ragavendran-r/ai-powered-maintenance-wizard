@@ -1,4 +1,6 @@
+import re
 from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import HTTPException
@@ -7,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.core.config import get_settings
 from app.data import repository
 from app.models.schemas import (
+    ChatMessage,
     SupervisorAssistantRequest,
     SupervisorAssistantResponse,
     TechnicianAssistantRequest,
@@ -15,6 +18,7 @@ from app.models.schemas import (
     WorkOrderCreateRequest,
 )
 from app.services.ai_client import configured_llm_client
+from app.services.assistant_runtime import assistant_history_content_is_contextual, stream_assistant_markdown
 from app.services.learning import learning_context_for_asset, record_assistant_interaction
 from app.services.llm import LLMTextResponse
 from app.services.retrieval import retrieve_evidence
@@ -23,8 +27,10 @@ from app.services.risk import health_summary
 
 TECHNICIAN_ASSISTANT_NAME = "Trinity"
 SUPERVISOR_ASSISTANT_NAME = "Trinity"
-WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS = 600
-WORK_ORDER_ASSISTANT_INITIAL_CONTEXT_MAX_TOKENS = 220
+WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS = 250
+WORK_ORDER_ASSISTANT_INITIAL_CONTEXT_MAX_TOKENS = 250
+ALERT_RISK_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+IST = timezone(timedelta(hours=5, minutes=30))
 MATERIAL_INQUIRY_TERMS = (
     "available",
     "availability",
@@ -163,6 +169,7 @@ def technician_assistance(
 def stream_technician_assistance(
     request: TechnicianAssistantRequest,
     current_user: Optional[UserPublic] = None,
+    history: Optional[list[ChatMessage]] = None,
 ) -> Iterator[dict[str, object]]:
     llm_client = configured_llm_client()
     provider = llm_client.provider_name
@@ -190,43 +197,60 @@ def stream_technician_assistance(
         use_reranker=False,
     )
     fallback = _technician_fallback(request, work_order, summary, evidence)
-    prompt = _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes, current_user)
+    prompt = _technician_text_prompt(
+        request,
+        work_order,
+        equipment,
+        summary,
+        evidence,
+        fallback,
+        learning_notes,
+        current_user,
+        history or [],
+    )
     content_parts: list[str] = []
     last_meta = (provider, used_live_provider)
-    initial_context = request.requested_step == "initial_context"
-    for chunk in llm_client.stream_text(
-        prompt,
-        _technician_text_system_prompt(),
-        lambda fallback_provider, reason: LLMTextResponse(
+    runtime_fallback = False
+    runtime_fallback_reason = None
+    for chunk in stream_assistant_markdown(
+        assistant_id="trinity",
+        prompt=prompt,
+        system_prompt=_technician_text_system_prompt(),
+        fallback_client=llm_client,
+        fallback_factory=lambda fallback_provider, reason: LLMTextResponse(
             content=_technician_stream_fallback_text(fallback, reason),
             used_live_provider=False,
             provider=fallback_provider,
         ),
         max_tokens=_technician_stream_max_tokens(request),
         timeout_seconds=get_settings().llm_stream_timeout_seconds,
+        current_user=current_user,
+        history=history or [],
     ):
         provider = chunk.provider
         used_live_provider = chunk.used_live_provider
+        runtime_fallback = chunk.runtime_fallback
+        runtime_fallback_reason = chunk.runtime_fallback_reason
         if (provider, used_live_provider) != last_meta:
-            yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+            yield {
+                "type": "meta",
+                "provider": provider,
+                "used_live_provider": used_live_provider,
+                "runtime_fallback": runtime_fallback,
+                "runtime_fallback_reason": runtime_fallback_reason,
+            }
             last_meta = (provider, used_live_provider)
         if chunk.content:
             content_parts.append(chunk.content)
-            if not initial_context:
-                yield {"type": "token", "content": chunk.content}
+            yield {"type": "token", "content": chunk.content}
 
     answer = "".join(content_parts).strip()
+    if runtime_fallback or not used_live_provider:
+        yield {"type": "error", "message": _live_llm_error_detail(TECHNICIAN_ASSISTANT_NAME, runtime_fallback_reason)}
+        return
     if not answer:
-        answer = _technician_stream_fallback_text(fallback, "stream returned no content")
-        provider = "mock"
-        used_live_provider = False
-    if initial_context:
-        checked_answer = _quality_checked_technician_initial_answer(answer, work_order)
-        if checked_answer != answer:
-            answer = checked_answer
-            provider = "grounded_priority_guard"
-            used_live_provider = False
-        yield {"type": "token", "content": answer}
+        yield {"type": "error", "message": _live_llm_error_detail(TECHNICIAN_ASSISTANT_NAME, "stream returned no content")}
+        return
     base_response = fallback if used_live_provider else _technician_llm_unavailable_response(work_order, evidence, provider)
     response = base_response.model_copy(
         update={
@@ -315,6 +339,7 @@ def supervisor_assistance(
 def stream_supervisor_assistance(
     request: SupervisorAssistantRequest,
     current_user: Optional[UserPublic] = None,
+    history: Optional[list[ChatMessage]] = None,
 ) -> Iterator[dict[str, object]]:
     queue_focus = _supervisor_queue_focus(request)
     work_orders = _supervisor_work_orders_for_focus(queue_focus)
@@ -322,47 +347,53 @@ def stream_supervisor_assistance(
     if request.work_order_id and not selected:
         raise HTTPException(status_code=404, detail="Work order not found")
     fallback = _supervisor_fallback(request, work_orders, selected, queue_focus)
-    prompt = _supervisor_text_prompt(request, work_orders, selected, fallback, queue_focus, current_user)
+    prompt = _supervisor_text_prompt(request, work_orders, selected, fallback, queue_focus, current_user, history or [])
     content_parts: list[str] = []
     provider = "mock"
     used_live_provider = False
+    runtime_fallback = False
+    runtime_fallback_reason = None
     sent_meta = False
-    initial_context = _is_supervisor_initial_context_request(request)
-    for chunk in configured_llm_client().stream_text(
-        prompt,
-        _supervisor_text_system_prompt(),
-        lambda fallback_provider, reason: LLMTextResponse(
+    llm_client = configured_llm_client()
+    for chunk in stream_assistant_markdown(
+        assistant_id="trinity",
+        prompt=prompt,
+        system_prompt=_supervisor_text_system_prompt(),
+        fallback_client=llm_client,
+        fallback_factory=lambda fallback_provider, reason: LLMTextResponse(
             content=_supervisor_stream_fallback_text(fallback, reason),
             used_live_provider=False,
             provider=fallback_provider,
         ),
         max_tokens=WORK_ORDER_ASSISTANT_TEXT_MAX_TOKENS,
         timeout_seconds=get_settings().llm_stream_timeout_seconds,
+        current_user=current_user,
+        history=history or [],
     ):
         provider = chunk.provider
         used_live_provider = chunk.used_live_provider
+        runtime_fallback = chunk.runtime_fallback
+        runtime_fallback_reason = chunk.runtime_fallback_reason
         if not sent_meta:
             sent_meta = True
-            yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
+            yield {
+                "type": "meta",
+                "provider": provider,
+                "used_live_provider": used_live_provider,
+                "runtime_fallback": runtime_fallback,
+                "runtime_fallback_reason": runtime_fallback_reason,
+            }
         if chunk.content:
             content_parts.append(chunk.content)
-            if not initial_context:
-                yield {"type": "token", "content": chunk.content}
+            yield {"type": "token", "content": chunk.content}
 
     answer = "".join(content_parts).strip()
+    if runtime_fallback or not used_live_provider:
+        yield {"type": "error", "message": _live_llm_error_detail(SUPERVISOR_ASSISTANT_NAME, runtime_fallback_reason)}
+        return
     if not answer:
-        answer = _supervisor_stream_fallback_text(fallback, "stream returned no content")
-        provider = "mock"
-        used_live_provider = False
-        if not sent_meta:
-            yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
-    if initial_context:
-        checked_answer = _quality_checked_supervisor_initial_answer(answer, work_orders)
-        if checked_answer != answer:
-            answer = checked_answer
-            provider = "grounded_priority_guard"
-            used_live_provider = False
-        yield {"type": "token", "content": answer}
+        yield {"type": "error", "message": _live_llm_error_detail(SUPERVISOR_ASSISTANT_NAME, "stream returned no content")}
+        return
     base_response = fallback if used_live_provider else _supervisor_llm_unavailable_response(work_orders, selected, provider)
     response = base_response.model_copy(
         update={
@@ -409,6 +440,7 @@ def _technician_text_system_prompt() -> str:
     return (
         f"You are {TECHNICIAN_ASSISTANT_NAME}, a steel-plant maintenance technician assistant. "
         "Stream a concise Markdown chat response for the assigned technician. Do not return JSON. "
+        "Do not wrap full lines or section titles in bold Markdown; use plain text headings and normal bullet text. "
         "When a technician name is supplied in the prompt, address them by name and not by role. "
         "Use short headings and bullets. When the technician asks about blocked spares, material "
         "readiness, availability, expected date, procurement, reorder, lead time, or substitutes, "
@@ -445,33 +477,46 @@ def _supervisor_text_system_prompt() -> str:
     return (
         f"You are {SUPERVISOR_ASSISTANT_NAME}, a maintenance supervisor assistant. "
         "Stream a concise Markdown chat response for supervisor review. Do not return JSON. "
+        "Do not wrap full lines or section titles in bold Markdown; use plain text headings and normal bullet text. "
         "When a supervisor name is supplied in the prompt, address them by name and not by role. "
         "Answer the supervisor's exact question first as a prioritized action list. If the question asks for waiting approval or pending "
         "approval, list only WAPPR work orders and the required approval decision. If it asks for follow-ups, "
         "list follow-up work. If it asks for material blockers, list material-blocked work. Then list risks "
         "and say whether a draft follow-up work order is warranted based only on supplied work-order data. "
-        "For initial Work Execution context, use one short lead sentence and numbered P1/P2/P3 items in this format: P1: WO-1234: why it needs focus: next supervisor decision. "
+        "For initial Work Execution context, greet the supervisor by name, then use a concise Markdown section with P1/P2/P3 priority-labeled recommendation blocks. "
+        "The response can be up to 10 lines, but must stay meaningful and precise: why it matters and the recommended next decision. "
+        "Do not use ordered Markdown lists; start each priority block with a plain label such as P1: ... or P2: ... . "
         "Do not include table names, "
         "column names, row counts, or table-update metadata."
     )
 
 
-def _technician_text_prompt(request, work_order, equipment, summary, evidence, fallback, learning_notes, current_user: Optional[UserPublic] = None) -> str:
+def _technician_text_prompt(
+    request,
+    work_order,
+    equipment,
+    summary,
+    evidence,
+    fallback,
+    learning_notes,
+    current_user: Optional[UserPublic] = None,
+    history: Optional[list[ChatMessage]] = None,
+) -> str:
     initial_context = request.requested_step == "initial_context"
     has_material_blocker = bool(_material_blocker_sentence(work_order))
     material_inquiry = _is_material_inquiry(request.observation or "") or (initial_context and has_material_blocker)
     if initial_context and has_material_blocker:
         response_objective = (
             "Response objective: return a prioritized technician action list for the selected assigned work. "
-            "Use one short lead sentence and numbered P1/P2 items in this format: P1: WO-1234: why it needs focus: next action. Each item must include the work-order ID, "
+            "Greet the technician by name, then use a concise Markdown section with P1/P2 priority-labeled recommendation blocks. Each item must include the work-order ID, "
             "the material blocker or execution risk, and what the technician can do next without starting field execution. "
-            "Limit the response to 100 words."
+            "Do not use ordered Markdown lists. The response can be up to 10 lines, but must stay meaningful and precise."
         )
     elif initial_context:
         response_objective = (
             "Response objective: return a prioritized technician action list for the selected assigned work. "
-            "Use one short lead sentence and numbered P1/P2 items in this format: P1: WO-1234: why it needs focus: next action. Each item must include the work-order ID, "
-            "why it needs focus, and the next technician action. Limit the response to 100 words."
+            "Greet the technician by name, then use a concise Markdown section with P1/P2 priority-labeled recommendation blocks. Each item must include the work-order ID, "
+            "why it needs focus, and the next technician action. Do not use ordered Markdown lists. The response can be up to 10 lines, but must stay meaningful and precise."
         )
     elif material_inquiry:
         response_objective = (
@@ -496,6 +541,8 @@ def _technician_text_prompt(request, work_order, equipment, summary, evidence, f
             f"Technician observation: {request.observation or 'No observation yet'}",
             f"Technician intent: {'initial blocked context' if initial_context and has_material_blocker else 'initial context' if initial_context else 'material availability question' if material_inquiry else 'execution guidance'}",
             response_objective,
+            "Conversation continuity:",
+            *_assistant_history_lines(history or []),
             f"Current risk: {summary.risk_level}, health score: {summary.health_score}",
             f"Suggested problem code from app rules: {fallback.suggested_problem_code}",
             f"Suggested failure class from app rules: {fallback.suggested_failure_class}",
@@ -520,6 +567,7 @@ def _supervisor_text_prompt(
     fallback,
     queue_focus: str,
     current_user: Optional[UserPublic] = None,
+    history: Optional[list[ChatMessage]] = None,
 ) -> str:
     return "\n".join(
         [
@@ -527,7 +575,9 @@ def _supervisor_text_prompt(
             "Address the supervisor by this name; do not address them by role.",
             f"Supervisor question: {request.question or 'Review work order status and follow-ups.'}",
             f"Queue focus: {queue_focus}",
-            "Response objective: answer the supervisor question using only the focused queue below as a prioritized action list before adding risks. Use numbered P1/P2/P3 items in this format: P1: WO-1234: why it needs focus: next supervisor decision.",
+            "Response objective: answer the supervisor question using only the focused queue below as a prioritized recommendation list before adding risks. Greet the supervisor by name. Use a concise Markdown section with P1/P2/P3 priority-labeled recommendation blocks. Do not use ordered Markdown lists. The response can be up to 10 lines, but must stay meaningful and precise.",
+            "Conversation continuity:",
+            *_assistant_history_lines(history or []),
             "Selected work order:",
             _work_order_line(selected) if selected else "None selected",
             "Queue work orders:",
@@ -542,6 +592,17 @@ def _supervisor_text_prompt(
     )
 
 
+def _assistant_history_lines(history: list[ChatMessage]) -> list[str]:
+    lines: list[str] = []
+    for turn in history[-6:]:
+        content = re.sub(r"\s+", " ", turn.content).strip()
+        if not assistant_history_content_is_contextual(content):
+            continue
+        role = "User" if turn.role == "user" else "Assistant"
+        lines.append(f"- {role}: {_truncate_text(content, 180)}")
+    return lines or ["- No prior session context is available."]
+
+
 def _technician_stream_fallback_text(response: TechnicianAssistantResponse, reason: str) -> str:
     return _llm_unavailable_apology()
 
@@ -550,34 +611,51 @@ def _supervisor_stream_fallback_text(response: SupervisorAssistantResponse, reas
     return _llm_unavailable_apology()
 
 
-def _quality_checked_technician_initial_answer(answer: str, work_order: dict) -> str:
+def _quality_checked_technician_initial_answer(
+    answer: str,
+    work_order: dict,
+    current_user: Optional[UserPublic] = None,
+) -> str:
     normalized = answer.strip()
     lowered = normalized.lower()
     has_id = work_order["id"] in normalized
+    display_name = current_user.display_name if current_user else str(work_order.get("assigned_to") or "")
+    greets_user = bool(display_name and display_name.split()[0].lower() in lowered)
     leaked_prompt = any(term in lowered for term in ["reason=", "; reason", "asset=", "status=", "priority=", "material="])
     too_short = len(normalized.split()) < 14
-    if has_id and not leaked_prompt and not too_short:
+    if greets_user and has_id and not leaked_prompt and not too_short:
         return answer
-    return _canonical_technician_initial_answer(work_order)
+    return _canonical_technician_initial_answer(work_order, display_name)
 
 
-def _canonical_technician_initial_answer(work_order: dict) -> str:
+def _canonical_technician_initial_answer(work_order: dict, display_name: str = "") -> str:
+    first_name = display_name.split()[0] if display_name else "there"
     material_blocker = _material_blocker_sentence(work_order)
     if material_blocker:
         reason = material_blocker.replace("Material status: ", "")
         action = _material_availability_answer(work_order)
         return "\n".join(
             [
-                f"{work_order['id']} is blocked before field execution.",
-                f"1. P1: {work_order['id']}: {reason}: Confirm ETA, reservation, or approved substitute before starting work.",
-                f"2. P2: {work_order['id']}: Execution evidence is still needed: {_truncate_text(action, 120)}",
+                f"{first_name}, {work_order['id']} should not move into field execution until the material blocker is resolved.",
+                "",
+                "### Recommended Next Steps",
+                f"P1: {work_order['id']} material readiness",
+                f"- Why it matters: {reason}",
+                "- Recommendation: Confirm the ETA, reservation, or approved substitute before staging intrusive work.",
+                f"P2: {work_order['id']} execution evidence",
+                f"- Recommendation: {_truncate_text(action, 120)}",
             ]
         )
     return "\n".join(
         [
-            f"{work_order['id']} is the next assigned execution focus.",
-            f"1. P1: {work_order['id']}: {work_order['title']} is {_readable_status(work_order['status']).lower()}: verify permits, lockout/tagout, and material readiness.",
-            f"2. P2: {work_order['id']}: Closeout evidence will be needed: record readings, findings, corrective action, and residual risk.",
+            f"{first_name}, {work_order['id']} is the next assigned execution focus.",
+            "",
+            "### Recommended Next Steps",
+            f"P1: {work_order['id']} readiness",
+            f"- Why it matters: {work_order['title']} is {_readable_status(work_order['status']).lower()}",
+            "- Recommendation: Verify permits, lockout/tagout, and material readiness before starting.",
+            f"P2: {work_order['id']} closeout evidence",
+            "- Recommendation: Record readings, findings, corrective action, and residual risk.",
         ]
     )
 
@@ -587,28 +665,53 @@ def _is_supervisor_initial_context_request(request: SupervisorAssistantRequest) 
     return "open supervisor work execution" in text or ("prioritized action list" in text and request.queue_name == "all_work")
 
 
-def _quality_checked_supervisor_initial_answer(answer: str, work_orders: list[dict]) -> str:
+def _quality_checked_supervisor_initial_answer(
+    answer: str,
+    work_orders: list[dict],
+    current_user: Optional[UserPublic] = None,
+) -> str:
     normalized = answer.strip()
     lowered = normalized.lower()
     ids = [item["id"] for item in work_orders[:8]]
     has_id = any(item_id in normalized for item_id in ids)
+    display_name = current_user.display_name if current_user else "Supervisor"
+    greets_user = bool(display_name and display_name.split()[0].lower() in lowered)
     leaked_prompt = any(term in lowered for term in ["reason=", "; reason", "asset=", "status=", "priority=", "material="])
     too_short = len(normalized.split()) < 14
-    if has_id and not leaked_prompt and not too_short:
+    if greets_user and has_id and not leaked_prompt and not too_short:
         return answer
-    return _canonical_supervisor_initial_answer(work_orders)
+    return _canonical_supervisor_initial_answer(work_orders, display_name)
 
 
-def _canonical_supervisor_initial_answer(work_orders: list[dict]) -> str:
+def _canonical_supervisor_initial_answer(work_orders: list[dict], display_name: str = "Supervisor") -> str:
     priorities = _supervisor_priority_items(work_orders)
+    first_name = display_name.split()[0] if display_name else "Supervisor"
     if not priorities:
-        return "No supervisor work-execution priorities are currently waiting in this queue."
-    lines = ["Current supervisor priorities need decisions before the next handoff."]
+        return f"{first_name}, no supervisor work-execution priorities are currently waiting in this queue."
+    lines = [
+        f"{first_name}, these work-execution priorities need decisions before the next handoff.",
+        "",
+        "### Recommended Supervisor Decisions",
+    ]
     for index, item in enumerate(priorities[:4], start=1):
-        lines.append(
-            f"{index}. P{min(index, 3)}: {item['id']}: {_supervisor_priority_reason(item)}: {_supervisor_priority_action(item)}"
-        )
+        lines.append(f"P{min(index, 3)}: {item['id']} ({item['equipment_id']})")
+        lines.append(f"- Why it matters: {_supervisor_priority_reason(item)}.")
+        lines.append(f"- Recommendation: {_supervisor_priority_action(item)}.")
     return "\n".join(lines)
+
+
+def _chunk_readable_text(content: str, chunk_size: int = 220) -> Iterator[str]:
+    current = ""
+    for part in re.split(r"(\n\n|\n)", content):
+        if not part:
+            continue
+        if len(current) + len(part) > chunk_size and current:
+            yield current
+            current = part
+        else:
+            current += part
+    if current:
+        yield current
 
 
 def _supervisor_priority_items(work_orders: list[dict]) -> list[dict]:
@@ -653,6 +756,11 @@ def _truncate_text(value: str, limit: int) -> str:
 
 def _llm_unavailable_apology() -> str:
     return "Sorry, Trinity could not get a live LLM response right now. Please retry after confirming the LLM service is responding."
+
+
+def _live_llm_error_detail(assistant_name: str, reason: Optional[str] = None) -> str:
+    suffix = f" Reason: {reason}" if reason else ""
+    return f"{assistant_name} requires a live LLM response and did not generate a deterministic answer.{suffix}"
 
 
 def _technician_llm_unavailable_response(work_order, evidence, provider: str) -> TechnicianAssistantResponse:
@@ -781,6 +889,7 @@ def _supervisor_fallback(request, work_orders, selected, queue_focus: Optional[s
     focused_ids = {item["id"] for item in work_orders}
     target = selected if selected and selected["id"] in focused_ids else (work_orders[0] if work_orders else None)
     queue_focus = queue_focus or _supervisor_queue_focus(request)
+    critical_alert_draft = _critical_alert_work_order_draft(request, selected)
     follow_ups = [item for item in work_orders if item.get("follow_up_required")]
     approvals = [item for item in work_orders if item["status"] == "WAPPR"]
     overdue_or_urgent = [item for item in work_orders if item["priority"] == 1 and item["status"] not in {"COMP", "CLOSE"}]
@@ -799,7 +908,9 @@ def _supervisor_fallback(request, work_orders, selected, queue_focus: Optional[s
         for item in overdue_or_urgent[:4]
     ]
     draft = None
-    if target and target.get("follow_up_required"):
+    if critical_alert_draft:
+        draft = critical_alert_draft
+    elif target and target.get("follow_up_required"):
         draft = WorkOrderCreateRequest(
             equipment_id=target["equipment_id"],
             title=f"Follow up: {target['title']}",
@@ -816,7 +927,16 @@ def _supervisor_fallback(request, work_orders, selected, queue_focus: Optional[s
             follow_up_required=False,
             ai_summary=f"Drafted from supervisor review of {target['id']}.",
         )
-    if queue_focus == "waiting_approval":
+    if critical_alert_draft:
+        summary = (
+            f"Drafted a critical-alert work order for {critical_alert_draft.equipment_id}. "
+            "Review the prefilled scope before submitting."
+        )
+        follow_up_actions = [
+            f"Review and submit the drafted work order for {critical_alert_draft.equipment_id}.",
+            "Confirm owner, due date, and whether operations need an immediate load restriction.",
+        ]
+    elif queue_focus == "waiting_approval":
         summary = _approval_summary(approvals)
         follow_up_actions = [
             f"Approve or reject {item['id']} for {item['equipment_id']}: {item['title']}."
@@ -842,6 +962,61 @@ def _supervisor_fallback(request, work_orders, selected, queue_focus: Optional[s
         referenced_work_orders=[item["id"] for item in work_orders[:6]],
         used_live_provider=False,
         provider="mock",
+    )
+
+
+def _critical_alert_work_order_draft(
+    request: SupervisorAssistantRequest,
+    selected: Optional[dict],
+) -> Optional[WorkOrderCreateRequest]:
+    question = (request.question or "").lower()
+    wants_work_order = any(term in question for term in ["create", "draft", "new work order", "work order"])
+    wants_alert = "alert" in question or "critical" in question
+    if not wants_work_order or not wants_alert:
+        return None
+
+    selected_equipment_id = selected["equipment_id"] if selected else None
+    alerts = repository.list_alerts(selected_equipment_id)
+    if not alerts and selected_equipment_id:
+        alerts = repository.list_alerts()
+    critical_alerts = [
+        alert for alert in alerts if alert.get("severity") in {"critical", "high"}
+    ] or alerts
+    if not critical_alerts:
+        return None
+    alert = sorted(
+        critical_alerts,
+        key=lambda item: (
+            ALERT_RISK_ORDER.get(item.get("severity", "low"), 0),
+            item.get("timestamp") or "",
+        ),
+        reverse=True,
+    )[0]
+    equipment = repository.get_equipment(alert["equipment_id"]) or {}
+    due_date = (datetime.now(IST) + timedelta(hours=8)).isoformat(timespec="minutes")
+    title = f"Investigate {alert['equipment_id']} {alert['signal']} alert"
+    description = (
+        f"Critical alert review for {alert['equipment_id']}: {alert.get('message') or alert['signal']}. "
+        f"Current value {alert.get('value')} {alert.get('unit')} against threshold {alert.get('threshold')}."
+    )
+    return WorkOrderCreateRequest(
+        equipment_id=alert["equipment_id"],
+        title=title,
+        description=description,
+        priority=1 if alert.get("severity") == "critical" else 2,
+        work_type="CM",
+        failure_class="MECH",
+        problem_code="ALERT",
+        classification="Corrective",
+        assigned_to="Maintenance Engineer",
+        supervisor=str(equipment.get("supervisor") or "Maintenance Supervisor"),
+        due_date=due_date,
+        recommended_action=(
+            f"Validate the {alert['signal']} alert, compare current readings with trend and threshold, "
+            "inspect likely failure points, and document whether immediate operating restriction is required."
+        ),
+        follow_up_required=False,
+        ai_summary=f"Drafted by Trinity from alert {alert['id']} ({alert.get('severity', 'unknown')}).",
     )
 
 

@@ -255,6 +255,12 @@ export function WorkOrdersRoute({
                           value={technicianObservation}
                           disabled={technicianLoading}
                           onChange={(event) => setTechnicianObservation(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                              event.preventDefault()
+                              runTechnicianAssistant()
+                            }
+                          }}
                         />
                         <button className="textButton" type="submit" disabled={technicianLoading}>
                           {technicianLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}
@@ -296,6 +302,12 @@ export function WorkOrdersRoute({
                           value={supervisorQuestion}
                           disabled={supervisorLoading}
                           onChange={(event) => setSupervisorQuestion(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                              event.preventDefault()
+                              runSupervisorAssistant(selectedWorkOrder.id)
+                            }
+                          }}
                         />
                         <button className="textButton" type="submit" disabled={supervisorLoading}>
                           {supervisorLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}

@@ -457,14 +457,39 @@ export interface NeoChatResponse {
 }
 
 export type NeoStreamEvent =
-  | { type: 'meta'; provider: string; used_live_provider: boolean }
+  | { type: 'session'; session_id: string; assistant_id: string; screen?: string; runtime?: string; tools?: Record<string, unknown>[] }
+  | {
+      type: 'meta'
+      provider: string
+      used_live_provider: boolean
+      runtime?: string
+      runtime_fallback?: boolean
+      runtime_fallback_reason?: string | null
+    }
   | { type: 'token'; content: string }
+  | { type: 'tool_call'; tool_call: Record<string, unknown> }
+  | { type: 'tool_result'; tool_result: Record<string, unknown> }
+  | { type: 'final'; response: Record<string, unknown> }
   | { type: 'done'; response: NeoChatResponse }
+  | { type: 'error'; message: string }
 
 export type AssistantStreamEvent<TResponse> =
-  | { type: 'meta'; provider: string; used_live_provider: boolean }
+  | { type: 'session'; session_id: string; assistant_id: string; screen?: string; runtime?: string; tools?: Record<string, unknown>[] }
+  | {
+      type: 'meta'
+      provider: string
+      used_live_provider: boolean
+      runtime?: string
+      runtime_fallback?: boolean
+      runtime_fallback_reason?: string | null
+    }
   | { type: 'token'; content: string }
+  | { type: 'tool_call'; tool_call: Record<string, unknown> }
+  | { type: 'tool_result'; tool_result: Record<string, unknown> }
+  | { type: 'final'; response: Record<string, unknown> }
   | { type: 'done'; response: TResponse }
+  | { type: 'error'; message: string }
+  | { type: 'error'; message: string }
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000'
 const AUTH_SESSION_KEY = 'maintenance_wizard_auth_session'
@@ -1272,29 +1297,30 @@ export const api = {
       body: JSON.stringify({ equipment_id: equipmentId, message }),
     }),
   neoWelcome: () => request<NeoChatResponse>('/api/neo/welcome'),
-  neoWelcomeStream: (onEvent: (event: NeoStreamEvent) => void) =>
+  neoWelcomeStream: (onEvent: (event: NeoStreamEvent) => void, sessionId?: string | null) =>
     streamRequest<NeoStreamEvent>(
-      '/api/neo/welcome/stream',
+      `/api/neo/welcome/stream${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`,
       {
         method: 'GET',
       },
       onEvent,
     ),
-  neoChat: (message: string, history: { role: 'user' | 'assistant'; content: string }[] = []) =>
+  neoChat: (message: string, history: { role: 'user' | 'assistant'; content: string }[] = [], sessionId?: string | null) =>
     request<NeoChatResponse>('/api/neo/chat', {
       method: 'POST',
-      body: JSON.stringify({ message, history }),
+      body: JSON.stringify({ message, history, session_id: sessionId }),
     }),
   neoChatStream: (
     message: string,
     history: { role: 'user' | 'assistant'; content: string }[] = [],
     onEvent: (event: NeoStreamEvent) => void,
+    sessionId?: string | null,
   ) =>
     streamRequest<NeoStreamEvent>(
       '/api/neo/chat/stream',
       {
         method: 'POST',
-        body: JSON.stringify({ message, history }),
+        body: JSON.stringify({ message, history, session_id: sessionId }),
       },
       onEvent,
     ),
@@ -1604,12 +1630,13 @@ export const api = {
     requestedStep: string | undefined,
     onEvent: (event: AssistantStreamEvent<TechnicianAssistantResponse>) => void,
     signal?: AbortSignal,
+    sessionId?: string | null,
   ) =>
     streamRequest<AssistantStreamEvent<TechnicianAssistantResponse>>(
       '/api/work-orders/technician-assist/stream',
       {
         method: 'POST',
-        body: JSON.stringify({ work_order_id: workOrderId, observation, requested_step: requestedStep }),
+        body: JSON.stringify({ work_order_id: workOrderId, observation, requested_step: requestedStep, session_id: sessionId }),
         signal,
       },
       onEvent,
@@ -1620,7 +1647,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   supervisorAssistStream: (
-    payload: { work_order_id?: string; queue_name?: string; question?: string },
+    payload: { work_order_id?: string; queue_name?: string; question?: string; session_id?: string | null },
     onEvent: (event: AssistantStreamEvent<SupervisorAssistantResponse>) => void,
     signal?: AbortSignal,
   ) =>

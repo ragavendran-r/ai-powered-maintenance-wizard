@@ -232,7 +232,7 @@ class WorkOrderCreateRequest(BaseModel):
     failure_class: str = "MECH"
     problem_code: str = "INVESTIGATE"
     classification: str = "Corrective"
-    assigned_to: str = "Maintenance Engineer"
+    assigned_to: str = ""
     supervisor: str = "Maintenance Supervisor"
     due_date: str
     planning_status: WorkOrderPlanningStatus = "unscheduled"
@@ -409,6 +409,7 @@ class TechnicianAssistantRequest(BaseModel):
     work_order_id: str
     observation: Optional[str] = None
     requested_step: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class TechnicianAssistantResponse(BaseModel):
@@ -429,6 +430,7 @@ class SupervisorAssistantRequest(BaseModel):
     work_order_id: Optional[str] = None
     queue_name: Optional[str] = None
     question: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class SupervisorAssistantResponse(BaseModel):
@@ -614,6 +616,7 @@ class NeoAction(BaseModel):
 class NeoChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = []
+    session_id: Optional[str] = None
 
 
 class NeoChatResponse(BaseModel):
@@ -622,6 +625,78 @@ class NeoChatResponse(BaseModel):
     action: Optional[NeoAction] = None
     used_live_provider: bool = False
     provider: str = "mock"
+
+
+AssistantMessageRole = Literal["user", "assistant", "tool", "system"]
+AssistantEventType = Literal["session", "meta", "token", "tool_call", "tool_result", "final", "done", "error"]
+AssistantStatus = Literal["completed", "blocked", "not_allowed", "not_found", "failed"]
+
+
+class AssistantToolCall(BaseModel):
+    id: str
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    assistant_id: Optional[str] = None
+    description: Optional[str] = None
+
+
+class AssistantToolResult(BaseModel):
+    tool_call_id: str
+    name: str
+    status: AssistantStatus = "completed"
+    content: dict[str, Any] = Field(default_factory=dict)
+    artifact_type: Optional[str] = None
+
+
+class AssistantPriorityItem(BaseModel):
+    priority: str
+    title: str
+    impact: str
+    signal: str
+    recommendation: str
+    referenced_ids: list[str] = Field(default_factory=list)
+
+
+class AssistantFinalResponse(BaseModel):
+    assistant_id: str
+    session_id: str
+    markdown: str
+    status: AssistantStatus = "completed"
+    priorities: list[AssistantPriorityItem] = Field(default_factory=list)
+    action: Optional[NeoAction] = None
+    table: Optional[NeoTable] = None
+    referenced_records: list[dict[str, Any]] = Field(default_factory=list)
+    provider: str = "mock"
+    used_live_provider: bool = False
+    runtime: str = "legacy"
+    runtime_fallback: bool = False
+    runtime_fallback_reason: Optional[str] = None
+
+
+class AssistantSessionPublic(BaseModel):
+    id: str
+    assistant_id: str
+    user_id: Optional[str] = None
+    user_role: Optional[str] = None
+    screen: Optional[str] = None
+    status: str = "active"
+    created_at: str
+    updated_at: str
+
+
+class AssistantMessagePublic(BaseModel):
+    id: str
+    session_id: str
+    assistant_id: str
+    role: AssistantMessageRole
+    content: str
+    provider: Optional[str] = None
+    used_live_provider: bool = False
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)
+    final_response: Optional[dict[str, Any]] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
 
 
 class DiagnosisRequest(BaseModel):

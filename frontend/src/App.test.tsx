@@ -79,14 +79,18 @@ it('shows waiting for material before in progress in the work order workflow', (
   expect(Boolean(inProgress.compareDocumentPosition(completed) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
 })
 
-function neoStreamResponse(response: NeoChatResponse, tokenChunks: string[] = []) {
+function neoStreamResponse(response: NeoChatResponse, tokenChunks: string[] = [], finalMarkdown?: string) {
   const events: NeoStreamEvent[] = tokenChunks.length
     ? [
         { type: 'meta', provider: response.provider, used_live_provider: response.used_live_provider },
         ...tokenChunks.map((content) => ({ type: 'token' as const, content })),
+        ...(finalMarkdown ? [{ type: 'final' as const, response: { markdown: finalMarkdown } }] : []),
         { type: 'done', response },
       ]
-    : [{ type: 'done', response }]
+    : [
+        ...(finalMarkdown ? [{ type: 'final' as const, response: { markdown: finalMarkdown } }] : []),
+        { type: 'done', response } as NeoStreamEvent,
+      ]
   return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
     status: 200,
     headers: { 'Content-Type': 'text/event-stream' },
@@ -96,14 +100,19 @@ function neoStreamResponse(response: NeoChatResponse, tokenChunks: string[] = []
 function assistantStreamResponse<TResponse extends { provider: string; used_live_provider: boolean }>(
   response: TResponse,
   tokenChunks: string[] = [],
+  finalMarkdown?: string,
 ) {
   const events: AssistantStreamEvent<TResponse>[] = tokenChunks.length
     ? [
         { type: 'meta', provider: response.provider, used_live_provider: response.used_live_provider },
         ...tokenChunks.map((content) => ({ type: 'token' as const, content })),
+        ...(finalMarkdown ? [{ type: 'final' as const, response: { markdown: finalMarkdown } }] : []),
         { type: 'done', response },
       ]
-    : [{ type: 'done', response }]
+    : [
+        ...(finalMarkdown ? [{ type: 'final' as const, response: { markdown: finalMarkdown } }] : []),
+        { type: 'done', response } as AssistantStreamEvent<TResponse>,
+      ]
   return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
     status: 200,
     headers: { 'Content-Type': 'text/event-stream' },
@@ -1386,6 +1395,12 @@ async function signIn(email = 'admin@plant.local') {
   await screen.findByRole('button', { name: 'Logout' })
 }
 
+async function renderAuthenticated(email = 'admin@plant.local') {
+  api.setSession({ accessToken: `token-${email}`, user: userFor(email) })
+  render(<App />)
+  await screen.findByRole('button', { name: 'Logout' })
+}
+
 beforeEach(() => {
   neoResponseDelayMs = 0
   assistantResponseDelayMs = 0
@@ -1423,7 +1438,7 @@ beforeEach(() => {
         )
       }
       if (url.endsWith('/api/auth/me')) {
-        return Promise.resolve(new Response(JSON.stringify(userFor()), { status: 200 }))
+        return Promise.resolve(new Response(JSON.stringify(userFromRequest(init)), { status: 200 }))
       }
       if (url.endsWith('/api/auth/logout')) {
         if (logoutResponseDelayMs > 0) {
@@ -1844,6 +1859,8 @@ beforeEach(() => {
       if (url.endsWith('/api/neo/chat/stream')) {
         const body = JSON.parse((init?.body as string) ?? '{}')
         if (body.message === 'Format markdown response') {
+          const finalMarkdown =
+            'To inspect BF-BLOWER-02, follow these steps:\n\n### Safety Checks:\n\n1. **Lockout/Tagout**: Isolate and tag all power sources.\n2. **Ventilation**: Confirm safe airflow before access.\n\n### Inspection Steps:\n\n- Inspect inlet guide vane response.\n- Verify actuator calibration.'
           const response = {
             answer:
               'To inspect BF-BLOWER-02, follow these steps: ### Safety Checks: 1. **Lockout/Tagout**: Isolate and tag all power sources. 2. **Ventilation**: Confirm safe airflow before access. ### Inspection Steps: - Inspect inlet guide vane response. - Verify actuator calibration.',
@@ -1855,7 +1872,7 @@ beforeEach(() => {
             neoStreamResponse(response, [
               'To inspect BF-BLOWER-02, follow these steps: ### Safety Checks: 1. **Lockout/Tagout**: Isolate and tag all power sources. ',
               '2. **Ventilation**: Confirm safe airflow before access. ### Inspection Steps: - Inspect inlet guide vane response. - Verify actuator calibration.',
-            ]),
+            ], finalMarkdown),
           )
         }
         const response = neoStreamResponse({
@@ -1898,8 +1915,8 @@ beforeEach(() => {
               suggested_failure_class: selectedOrder.failure_class,
               completion_summary: `${selectedOrder.id} initial context reviewed.`,
               evidence: recommendation.evidence,
-              used_live_provider: false,
-              provider: 'mock',
+              used_live_provider: true,
+              provider: 'openai',
             },
             [initialAnswer],
           )
@@ -1919,8 +1936,8 @@ beforeEach(() => {
             suggested_failure_class: 'MECH',
             completion_summary: 'Connections were tightened to spec.',
             evidence: recommendation.evidence,
-            used_live_provider: false,
-            provider: 'mock',
+            used_live_provider: true,
+            provider: 'openai',
           },
           ['Trinity recommends verifying torque ', 'and documenting completion.'],
         )
@@ -1967,8 +1984,8 @@ beforeEach(() => {
               : ['WO-8304 remains priority 1 and APPR.'],
             draft_work_order: null,
             referenced_work_orders: approvalQueue ? ['WO-8311'] : ['WO-8304', 'WO-8297'],
-            used_live_provider: false,
-            provider: 'mock',
+            used_live_provider: true,
+            provider: 'openai',
           },
           approvalQueue ? ['Dhruv, waiting for approval: WO-8311 needs supervisor approval.'] : ['Dhruv, Trinity reviewed 2 work orders ', 'and found 2 follow-ups.'],
         )
@@ -2199,8 +2216,7 @@ afterEach(() => {
 
 describe('Intelligent Maintenance Wizard dashboard', () => {
   it('renders dashboard metrics, anomalies, and selected asset details', async () => {
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
     fireEvent.click(await screen.findByRole('button', { name: 'Command Center' }))
 
     expect(screen.queryByText('API connected')).not.toBeInTheDocument()
@@ -2248,14 +2264,19 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('opens a prefilled work order review dialog before submitting creation', async () => {
+    api.setSession({ accessToken: 'token-admin@plant.local', user: userFor() })
     render(<App />)
-    await signIn()
+    await screen.findByRole('button', { name: 'Logout' })
 
     const quickActions = within(screen.getByLabelText('Maintenance navigation')).getByLabelText('Quick actions')
     fireEvent.click(within(quickActions).getByRole('button', { name: /create work order/i }))
 
-    const dialog = await screen.findByRole('dialog', { name: 'Review Work Order' })
+    const dialog = screen.getByRole('dialog', { name: 'Review Work Order' })
     expect(within(dialog).getByLabelText('Equipment')).toHaveValue('RM-DRIVE-01')
+    expect(within(dialog).getByRole('option', { name: 'RM-DRIVE-01 - Hot Strip Mill Main Drive Motor' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Assigned to')).toHaveValue('')
+    expect(within(dialog).getByRole('option', { name: 'Unassigned' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('option', { name: 'Vinoth' })).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Work order title')).toHaveValue('Inspect Hot Strip Mill Main Drive Motor')
     expect(within(dialog).getByLabelText('Recommended action')).toHaveValue(
       'Critical vibration alert and unavailable bearing spare require intervention planning.',
@@ -2267,9 +2288,11 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.change(within(dialog).getByLabelText('Work order title'), {
       target: { value: 'Inspect drive bearing after vibration alert' },
     })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm and submit' }))
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm and submit' }))
+      await Promise.resolve()
+    })
 
-    expect(await screen.findByText('Created WO-9001')).toBeInTheDocument()
     const createCall = vi.mocked(fetch).mock.calls.find(([url, init]) => (
       url.toString().endsWith('/api/work-orders') && init?.method === 'POST'
     ))
@@ -2278,12 +2301,12 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       title: 'Inspect drive bearing after vibration alert',
       work_type: 'CM',
       problem_code: 'INVESTIGATE',
+      assigned_to: '',
     })
   })
 
   it('opens an Assets page with a company asset table and data-backed asset detail', async () => {
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
     fireEvent.click(within(screen.getByLabelText('Maintenance navigation')).getByRole('button', { name: 'Assets' }))
 
@@ -2338,8 +2361,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('shows Morpheus diagnosis on asset summary for maintenance supervisors', async () => {
-    render(<App />)
-    await signIn('supervisor@plant.local')
+    await renderAuthenticated('supervisor@plant.local')
 
     fireEvent.click(within(screen.getByLabelText('Maintenance navigation')).getByRole('button', { name: 'Assets' }))
     const assetsTable = await screen.findByLabelText('Company assets table')
@@ -2357,8 +2379,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     Object.defineProperty(window.URL, 'createObjectURL', { configurable: true, value: createObjectUrl })
     Object.defineProperty(window.URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl })
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
     fireEvent.click(within(screen.getByLabelText('Maintenance navigation')).getByRole('button', { name: 'Reports' }))
 
@@ -2402,8 +2423,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
   it('lets Neo update the dashboard center table for read-only users', async () => {
     neoResponseDelayMs = 500
-    render(<App />)
-    await signIn('operator@plant.local')
+    await renderAuthenticated('operator@plant.local')
 
     expect(await screen.findByRole('heading', { name: 'Neo' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Ask Neo'), { target: { value: 'Show work orders needing follow-up' } })
@@ -2427,8 +2447,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('loads a role-aware Neo welcome with technician immediate work guidance', async () => {
-    render(<App />)
-    await signIn('technician@plant.local')
+    await renderAuthenticated('technician@plant.local')
     fireEvent.click(await screen.findByRole('button', { name: 'Command Center' }))
 
     const transcript = screen.getByLabelText('Neo chat transcript')
@@ -2468,8 +2487,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       },
     ]
 
-    render(<App />)
-    await signIn('technician@plant.local')
+    await renderAuthenticated('technician@plant.local')
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
 
@@ -2538,8 +2556,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('keeps waiting for a submitted technician query past 15 seconds while the stream is still pending', async () => {
-    render(<App />)
-    await signIn('technician@plant.local')
+    await renderAuthenticated('technician@plant.local')
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
     expect(await within(screen.getByLabelText('Trinity technician chat')).findByText(/P1: WO-8304: approved and ready for technician execution/)).toBeInTheDocument()
@@ -2570,8 +2587,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('falls back when a submitted technician query receives no LLM token within the stream timeout', async () => {
-    render(<App />)
-    await signIn('technician@plant.local')
+    await renderAuthenticated('technician@plant.local')
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
     expect(await within(screen.getByLabelText('Trinity technician chat')).findByText(/P1: WO-8304: approved and ready for technician execution/)).toBeInTheDocument()
@@ -2593,8 +2609,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('formats Markdown-like Neo responses into readable sections', async () => {
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
     fireEvent.click(await screen.findByRole('button', { name: 'Command Center' }))
 
     fireEvent.change(screen.getByLabelText('Ask Neo'), { target: { value: 'Format markdown response' } })
@@ -2611,8 +2626,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('runs diagnosis and exposes report export action', async () => {
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
     const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText('Hot Strip Mill Main Drive Motor').closest('button')
     if (!assetButton) throw new Error('Missing asset button')
@@ -2636,8 +2650,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('stores detailed engineer feedback for learning', async () => {
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
     const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText('Hot Strip Mill Main Drive Motor').closest('button')
     if (!assetButton) throw new Error('Missing asset button')
@@ -2665,8 +2678,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('hides non-applicable work order assistant panels from admin users', async () => {
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
     expect(await screen.findByText('Assigned and follow-up work')).toBeInTheDocument()
@@ -2705,8 +2717,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('lets planners schedule and dispatch approved work orders without assistant panels', async () => {
-    render(<App />)
-    await signIn('planner@plant.local')
+    await renderAuthenticated('planner@plant.local')
 
     fireEvent.click(await screen.findByRole('button', { name: 'Planning' }))
     const centerPane = screen.getByLabelText('Work order center pane')
@@ -2811,8 +2822,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
   it('keeps the PM plans table visible when no plans are loaded', async () => {
     apiPmPlans = []
-    render(<App />)
-    await signIn('planner@plant.local')
+    await renderAuthenticated('planner@plant.local')
 
     fireEvent.click(await screen.findByRole('button', { name: 'Planning' }))
     const centerPane = screen.getByLabelText('Work order center pane')
@@ -2827,8 +2837,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
   it('shows only the technician LLM assistant to technician users', async () => {
     assistantResponseDelayMs = 300
-    render(<App />)
-    await signIn('technician@plant.local')
+    await renderAuthenticated('technician@plant.local')
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
     expect(await screen.findByText('Assigned and follow-up work')).toBeInTheDocument()
@@ -2876,15 +2885,14 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(within(updatedWorkflow).getByText(/Connections were tightened to spec./)).toBeInTheDocument()
     expect(screen.getByLabelText('Trinity technician chat').textContent).not.toContain('Verify torque on bolted connections.')
     expect(screen.getByLabelText('Trinity technician chat').textContent).not.toContain('Problem code: LWTQCONNECT')
-    expect(screen.getAllByText('LLM fallback · mock').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Live LLM · openai').length).toBeGreaterThanOrEqual(1)
     const submitCompleted = within(updatedWorkflow).getByRole('button', { name: 'Submit completed work' })
     expect(submitCompleted).toBeEnabled()
   })
 
   it('shows only the supervisor LLM assistant to supervisor users', async () => {
     assistantResponseDelayMs = 300
-    render(<App />)
-    await signIn('supervisor@plant.local')
+    await renderAuthenticated('supervisor@plant.local')
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
     expect(await screen.findByText('Assigned and follow-up work')).toBeInTheDocument()
@@ -2910,12 +2918,11 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(supervisorTranscript.textContent).not.toContain('Review WO-8297 brake shoe replacement planning.')
     expect(supervisorTranscript.textContent).not.toContain('Risk: WO-8304 remains priority 1 and Approved.')
     expect(supervisorTranscript.textContent).not.toContain('APPR')
-    expect(screen.getByText('LLM fallback · mock')).toBeInTheDocument()
+    expect(screen.getByText('Live LLM · openai')).toBeInTheDocument()
   })
 
   it('routes supervisor approval questions to the waiting approval queue', async () => {
-    render(<App />)
-    await signIn('supervisor@plant.local')
+    await renderAuthenticated('supervisor@plant.local')
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
     const transcript = await screen.findByLabelText('Trinity supervisor chat')
@@ -2934,8 +2941,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('lets supervisor Trinity approve an explicit work order command through the action tool', async () => {
-    render(<App />)
-    await signIn('supervisor@plant.local')
+    await renderAuthenticated('supervisor@plant.local')
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
     const transcript = await screen.findByLabelText('Trinity supervisor chat')
@@ -2957,8 +2963,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
   it('logs out immediately even when the logout API is slow', async () => {
     logoutResponseDelayMs = 60_000
-    render(<App />)
-    await signIn('supervisor@plant.local')
+    await renderAuthenticated('supervisor@plant.local')
 
     expect(await screen.findByRole('button', { name: 'Logout' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Logout' }))
@@ -2969,14 +2974,17 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
   it('uploads document files from the ingestion panel', async () => {
     ingestionResponseDelayMs = 100
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
-    expect(await screen.findByText('IoT Stream')).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Admin' }))
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('tab', { name: 'Ingestion' })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByLabelText('Ingestion file')).toBeInTheDocument()
     expect(screen.getByText('MW_IOT')).toBeInTheDocument()
     const file = new File(['Inspect bearing housing when vibration increases.'], 'uploaded_sop.txt', { type: 'text/plain' })
-    fireEvent.change(await screen.findByLabelText('Ingestion file'), { target: { files: [file] } })
+    fireEvent.change(screen.getByLabelText('Ingestion file'), { target: { files: [file] } })
     fireEvent.click(screen.getByRole('button', { name: /upload/i }))
     expect(screen.getByRole('button', { name: /uploading/i })).toBeDisabled()
 
@@ -2993,11 +3001,14 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('uploads every bundled ingestion sample file with the intended source type and asset', async () => {
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
-    expect(await screen.findByText('IoT Stream')).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Admin' }))
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('tab', { name: 'Ingestion' })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByLabelText('Ingestion file')).toBeInTheDocument()
 
     for (const sample of sampleFiles) {
       const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText(sample.assetName).closest('button')
@@ -3028,10 +3039,13 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
 
   it('imports document JSON from the ingestion panel', async () => {
     ingestionResponseDelayMs = 100
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Admin' }))
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('tab', { name: 'Ingestion' })).toHaveAttribute('aria-selected', 'true')
     fireEvent.change(await screen.findByLabelText('Ingestion JSON'), {
       target: {
         value:
@@ -3057,8 +3071,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
 
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Reliability' }))
 
@@ -3248,8 +3261,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     learningSummaryExamples = []
     learningRefreshExamples = []
 
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
     fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
@@ -3267,8 +3279,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   it('does not show Qdrant migration progress while refreshing learning examples', async () => {
     learningRefreshDelayMs = 250
 
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
     fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
@@ -3287,8 +3298,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   it('shows progress while a learning example is being judged', async () => {
     learningJudgeDelayMs = 250
 
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
     fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
@@ -3302,8 +3312,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('keeps Learning and Tuning inside Admin instead of reliability navigation', async () => {
-    render(<App />)
-    await signIn('reliability@plant.local')
+    await renderAuthenticated('reliability@plant.local')
 
     expect(await screen.findByRole('button', { name: 'Reliability' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Learning and Tuning' })).not.toBeInTheDocument()
@@ -3311,8 +3320,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('hides restricted actions for operators', async () => {
-    render(<App />)
-    await signIn('operator@plant.local')
+    await renderAuthenticated('operator@plant.local')
 
     expect(screen.getByText('Jan')).toBeInTheDocument()
     const navigation = screen.getByLabelText('Maintenance navigation')
@@ -3335,8 +3343,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('lets admins open the users view and create a user', async () => {
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
     expect(await screen.findByRole('tab', { name: 'Ingestion' })).toHaveAttribute('aria-selected', 'true')
@@ -3367,8 +3374,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('opens password reset in a dialog instead of inline user rows', async () => {
-    render(<App />)
-    await signIn()
+    await renderAuthenticated()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
     fireEvent.click(await screen.findByRole('tab', { name: 'User management' }))

@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     llm_rca_draft_response_format: str = Field(default="json_schema", alias="LLM_RCA_DRAFT_RESPONSE_FORMAT")
     llm_rca_draft_stream_enabled: bool = Field(default=True, alias="LLM_RCA_DRAFT_STREAM_ENABLED")
     llm_use_active_learning_model: bool = Field(default=True, alias="LLM_USE_ACTIVE_LEARNING_MODEL")
+    assistant_runtime: str = Field(default="pydantic_ai", alias="ASSISTANT_RUNTIME")
+    assistant_output_mode: str = Field(default="prompted", alias="ASSISTANT_OUTPUT_MODE")
+    assistant_history_limit: int = Field(default=12, ge=0, le=50, alias="ASSISTANT_HISTORY_LIMIT")
     auth_enabled: bool = Field(default=True, alias="AUTH_ENABLED")
     jwt_secret_key: str = Field(
         default="maintenance-wizard-local-dev-secret-change-me",

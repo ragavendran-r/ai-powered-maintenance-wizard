@@ -111,6 +111,12 @@ export function DashboardRoute({
                 value={neoQuestion}
                 disabled={neoLoading}
                 onChange={(event) => setNeoQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault()
+                    sendNeoQuestion()
+                  }
+                }}
               />
               <button className="textButton" type="submit" disabled={neoLoading}>
                 {neoLoading ? <span className="loadingSpinner" aria-hidden="true" /> : <Send size={16} />}

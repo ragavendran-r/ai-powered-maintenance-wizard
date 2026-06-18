@@ -10,6 +10,7 @@ This prototype now has production-aligned local architecture, but it is still no
 - Restrict document upload size, PDF page count, accepted MIME types, extracted-text size, and scan uploaded files.
 - Run the API behind TLS and a gateway with rate limits.
 - Return sanitized user-facing error messages for provider, parser, streaming, and infrastructure failures; keep detailed exception text in structured logs.
+- Add role-aware ACL filtering for broad plant-record RAG before exposing sensitive administrative records such as users, auth audit events, model operations, or learning artifacts to general assistants. Until that is implemented, treat those records as operationally useful but security-sensitive context that must not bypass endpoint RBAC.
 
 ## Data And Model Reliability
 

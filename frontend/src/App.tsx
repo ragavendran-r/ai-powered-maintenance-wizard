@@ -213,17 +213,21 @@ function ToastStack({
 }
 
 function WorkOrderReviewDialog({
+  assets,
   draft,
   onCancel,
   onChange,
   onSubmit,
   submitting,
+  technicians,
 }: {
+  assets: AssetListItem[]
   draft: WorkOrderCreateRequest
   onCancel: () => void
   onChange: (updates: Partial<WorkOrderCreateRequest>) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   submitting: boolean
+  technicians: AuthUser[]
 }) {
   return (
     <div className="modalOverlay" role="presentation">
@@ -239,7 +243,16 @@ function WorkOrderReviewDialog({
         <div className="workOrderReviewGrid">
           <label className="field">
             <span>Equipment</span>
-            <input value={draft.equipment_id} onChange={(event) => onChange({ equipment_id: event.target.value })} required />
+            <select value={draft.equipment_id} onChange={(event) => onChange({ equipment_id: event.target.value })} required>
+              {!assets.some((asset) => asset.id === draft.equipment_id) && (
+                <option value={draft.equipment_id}>{draft.equipment_id}</option>
+              )}
+              {assets.map((asset) => (
+                <option key={asset.id} value={asset.id}>
+                  {asset.id} - {asset.name}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="field">
             <span>Priority</span>
@@ -279,7 +292,17 @@ function WorkOrderReviewDialog({
           </label>
           <label className="field">
             <span>Assigned to</span>
-            <input value={draft.assigned_to} onChange={(event) => onChange({ assigned_to: event.target.value })} required />
+            <select value={draft.assigned_to} onChange={(event) => onChange({ assigned_to: event.target.value })}>
+              <option value="">Unassigned</option>
+              {draft.assigned_to && !technicians.some((technician) => technician.display_name === draft.assigned_to) && (
+                <option value={draft.assigned_to}>{draft.assigned_to}</option>
+              )}
+              {technicians.map((technician) => (
+                <option key={technician.id} value={technician.display_name}>
+                  {technician.display_name}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="field">
             <span>Supervisor</span>
@@ -460,7 +483,7 @@ function technicianInitialContextPrompt(workOrder: WorkOrder, userName?: string)
       `Top assigned item: ${workOrder.id} ${workOrder.title}.`,
       `Current status is ${statusLabel}, and field execution is blocked by material availability.`,
       `Material blocker: ${materialBlockReason}.`,
-      'Return one short lead sentence and numbered P1/P2 action items in this format: P1: WO-1234: why it matters: next permissible technician action. Each item must include the work order ID and must not start field execution while blocked.',
+      'Return a named lead sentence and a concise Markdown recommendation section, up to 10 lines. Use P1/P2 priority-labeled blocks, not ordered Markdown lists. Each P1/P2 item must include the work order ID, why it matters, and the next permissible technician action. Do not start field execution while blocked.',
     ].join(' ')
   }
   return [
@@ -469,7 +492,7 @@ function technicianInitialContextPrompt(workOrder: WorkOrder, userName?: string)
     `Top assigned item: ${workOrder.id} ${workOrder.title}.`,
     `Current status is ${statusLabel}.`,
     'Use the work order, material plan, asset evidence, and approved learning notes to rank what the technician should focus on first.',
-    'Return one short lead sentence and numbered P1/P2 action items in this format: P1: WO-1234: why it matters: next action. Each item must include the work order ID.',
+    'Return a named lead sentence and a concise Markdown recommendation section, up to 10 lines. Use P1/P2 priority-labeled blocks, not ordered Markdown lists. Each P1/P2 item must include the work order ID, why it matters, and the next technician action.',
   ].join(' ')
 }
 
@@ -508,7 +531,7 @@ function supervisorInitialContextPrompt(workOrder: WorkOrder | undefined, workOr
     'Open supervisor Work Execution with a prioritized action list.',
     selected,
     `Queue context: ${approvals.length} waiting approval, ${followUps.length} follow-up, ${materialBlocked.length} material-blocked.`,
-    'Rank waiting approval, material blockers, follow-ups, and urgent open work. Return one short lead sentence and numbered P1/P2/P3 action items in this format: P1: WO-1234: why it needs focus: next supervisor decision. Each item must include a work order ID.',
+    'Rank waiting approval, material blockers, follow-ups, and urgent open work. Return a named lead sentence and a concise Markdown recommendation section, up to 10 lines. Use P1/P2/P3 priority-labeled blocks, not ordered Markdown lists. Each P1/P2/P3 item must include a work order ID, why it needs focus, and the next supervisor decision.',
   ].join(' ')
 }
 
@@ -520,6 +543,11 @@ function supervisorContextKey(workOrder: WorkOrder | undefined, workOrders: Work
     .map((item) => item.id)
     .join('|')
   return [userId ?? 'anonymous', workOrder?.id ?? 'none', approvals, followUps, materialBlocked].join('::')
+}
+
+function assistantFinalMarkdown(response: Record<string, unknown>) {
+  const markdown = response.markdown
+  return typeof markdown === 'string' && markdown.trim() ? markdown : ''
 }
 
 function technicianTimeoutFallbackResponse(workOrder: WorkOrder, _prompt: string, timeoutMs: number): TechnicianAssistantResponse {
@@ -623,18 +651,21 @@ export function App() {
   const [technicianLoading, setTechnicianLoading] = useState(false)
   const [technicianStreaming, setTechnicianStreaming] = useState(false)
   const [technicianChat, setTechnicianChat] = useState<AssistantTurn[]>([])
+  const [technicianSessionId, setTechnicianSessionId] = useState<string | null>(null)
   const [supervisorQuestion, setSupervisorQuestion] = useState('Summarize follow-up actions for completed work orders.')
   const [supervisorAssistant, setSupervisorAssistant] = useState<SupervisorAssistantResponse | null>(null)
   const [supervisorLoading, setSupervisorLoading] = useState(false)
   const [supervisorStreaming, setSupervisorStreaming] = useState(false)
   const [supervisorChat, setSupervisorChat] = useState<AssistantTurn[]>([
   ])
+  const [supervisorSessionId, setSupervisorSessionId] = useState<string | null>(null)
   const [neoQuestion, setNeoQuestion] = useState('Show work orders needing follow-up')
   const [neoTable, setNeoTable] = useState<NeoTable | null>(null)
   const [neoLoading, setNeoLoading] = useState(false)
   const [neoStreaming, setNeoStreaming] = useState(false)
   const [neoMessages, setNeoMessages] = useState<AssistantTurn[]>([
   ])
+  const [neoSessionId, setNeoSessionId] = useState<string | null>(null)
   const [apiState, setApiState] = useState<'connected' | 'fallback'>('fallback')
   const [ingestSourceType, setIngestSourceType] = useState('sop')
   const [ingestTitle, setIngestTitle] = useState('')
@@ -813,8 +844,15 @@ export function App() {
     setMaintenanceInsightsMessage('')
     setTechnicianAssistant(null)
     setTechnicianChat([])
+    setTechnicianSessionId(null)
     setTechnicianLoading(false)
     setTechnicianStreaming(false)
+    setSupervisorAssistant(null)
+    setSupervisorChat([])
+    setSupervisorSessionId(null)
+    setSupervisorLoading(false)
+    setSupervisorStreaming(false)
+    setNeoSessionId(null)
     technicianInitialContextRef.current = ''
     supervisorInitialContextRef.current = ''
     setNeoTable(null)
@@ -1380,8 +1418,11 @@ export function App() {
     setNeoStreaming(false)
     let messageId: string | null = null
     let streamedContent = ''
+    let finalMarkdown = ''
     let streamProvider = 'openai'
     let streamUsedLiveProvider = true
+    let streamRuntimeFallback = false
+    let streamRuntimeFallbackReason: string | null = null
     const ensureMessage = () => {
       if (messageId) return messageId
       messageId = 'neo-welcome'
@@ -1393,6 +1434,8 @@ export function App() {
           content: '',
           provider: streamProvider,
           usedLiveProvider: streamUsedLiveProvider,
+          runtimeFallback: streamRuntimeFallback,
+          runtimeFallbackReason: streamRuntimeFallbackReason,
         },
       ])
       return messageId
@@ -1403,10 +1446,21 @@ export function App() {
     }
     return api
       .neoWelcomeStream((event) => {
+        if (event.type === 'session') {
+          setNeoSessionId(event.session_id)
+          return
+        }
         if (event.type === 'meta') {
           streamProvider = event.provider
           streamUsedLiveProvider = event.used_live_provider
-          updateMessage({ provider: streamProvider, usedLiveProvider: streamUsedLiveProvider })
+          streamRuntimeFallback = Boolean(event.runtime_fallback)
+          streamRuntimeFallbackReason = event.runtime_fallback_reason ?? null
+          updateMessage({
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
+          })
           return
         }
         if (event.type === 'token') {
@@ -1416,7 +1470,30 @@ export function App() {
             content: streamedContent,
             provider: streamProvider,
             usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
           })
+          return
+        }
+        if (event.type === 'error') {
+          ensureMessage()
+          updateMessage({
+            content: event.message,
+            provider: streamProvider || 'pydantic_ai',
+            usedLiveProvider: false,
+            runtimeFallback: true,
+            runtimeFallbackReason: event.message,
+          })
+          setNeoLoading(false)
+          setNeoStreaming(false)
+          return
+        }
+        if (event.type === 'final') {
+          finalMarkdown = assistantFinalMarkdown(event.response)
+          if (finalMarkdown) {
+            ensureMessage()
+            updateMessage({ content: finalMarkdown })
+          }
           return
         }
         if (event.type === 'done') {
@@ -1424,23 +1501,27 @@ export function App() {
           if (event.response.action) void refreshAfterNeoAction(event.response.action)
           if (messageId) {
             updateMessage({
-              content: streamedContent || event.response.answer,
+              content: finalMarkdown || streamedContent || event.response.answer,
               provider: event.response.provider,
               usedLiveProvider: event.response.used_live_provider,
+              runtimeFallback: streamRuntimeFallback,
+              runtimeFallbackReason: streamRuntimeFallbackReason,
             })
           } else {
             setNeoMessages([
               {
                 id: 'neo-welcome',
                 role: 'assistant',
-                content: event.response.answer,
+                content: finalMarkdown || event.response.answer,
                 provider: event.response.provider,
                 usedLiveProvider: event.response.used_live_provider,
+                runtimeFallback: streamRuntimeFallback,
+                runtimeFallbackReason: streamRuntimeFallbackReason,
               },
             ])
           }
         }
-      })
+      }, neoSessionId)
       .then(() => {
         setApiState('connected')
       })
@@ -1452,6 +1533,7 @@ export function App() {
             content: 'Sorry, Neo could not get a live LLM response right now. Please retry after confirming the LLM service is responding.',
             provider: 'fallback',
             usedLiveProvider: false,
+            runtimeFallback: true,
           },
         ])
         setApiState('fallback')
@@ -1793,8 +1875,11 @@ export function App() {
     try {
       let assistantMessageId: string | null = null
       let streamedContent = ''
+      let finalMarkdown = ''
       let streamProvider = 'openai'
       let streamUsedLiveProvider = true
+      let streamRuntimeFallback = false
+      let streamRuntimeFallbackReason: string | null = null
 
       const ensureAssistantMessage = () => {
         if (assistantMessageId) return assistantMessageId
@@ -1808,6 +1893,8 @@ export function App() {
             content: '',
             provider: streamProvider,
             usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
           },
         ])
         scrollStreamToBottom(neoTranscriptRef)
@@ -1821,10 +1908,21 @@ export function App() {
       }
 
       await api.neoChatStream(prompt, history, (event) => {
+        if (event.type === 'session') {
+          setNeoSessionId(event.session_id)
+          return
+        }
         if (event.type === 'meta') {
           streamProvider = event.provider
           streamUsedLiveProvider = event.used_live_provider
-          updateAssistantMessage({ provider: streamProvider, usedLiveProvider: streamUsedLiveProvider })
+          streamRuntimeFallback = Boolean(event.runtime_fallback)
+          streamRuntimeFallbackReason = event.runtime_fallback_reason ?? null
+          updateAssistantMessage({
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
+          })
           return
         }
         if (event.type === 'token') {
@@ -1834,33 +1932,62 @@ export function App() {
             content: streamedContent,
             provider: streamProvider,
             usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
           })
+          return
+        }
+        if (event.type === 'error') {
+          ensureAssistantMessage()
+          updateAssistantMessage({
+            content: event.message,
+            provider: streamProvider || 'pydantic_ai',
+            usedLiveProvider: false,
+            runtimeFallback: true,
+            runtimeFallbackReason: event.message,
+          })
+          setNeoLoading(false)
+          setNeoStreaming(false)
+          return
+        }
+        if (event.type === 'final') {
+          finalMarkdown = assistantFinalMarkdown(event.response)
+          if (finalMarkdown) {
+            ensureAssistantMessage()
+            updateAssistantMessage({ content: finalMarkdown })
+          }
           return
         }
         if (event.type === 'done') {
           setNeoTable(event.response.table ?? null)
           if (event.response.action) void refreshAfterNeoAction(event.response.action)
           if (assistantMessageId) {
-            const message = neoResponseMessage(event.response)
+            const message = finalMarkdown || neoResponseMessage(event.response)
             updateAssistantMessage({
               content: message,
               provider: event.response.provider,
               usedLiveProvider: event.response.used_live_provider,
+              runtimeFallback: streamRuntimeFallback,
+              runtimeFallbackReason: streamRuntimeFallbackReason,
             })
           } else {
             appendNeoResponse(event.response)
           }
         }
-      })
+      }, neoSessionId)
       setNeoQuestion('')
     } catch {
-      const fallback: NeoChatResponse = {
-        answer: 'Sorry, Neo could not get a live LLM response right now. Please retry after confirming the LLM service is responding.',
-        table: null,
-        used_live_provider: false,
-        provider: 'fallback',
-      }
-      appendNeoResponse(fallback)
+      setNeoMessages((turns) => [
+        ...turns,
+        {
+          id: assistantTurnId('neo-error'),
+          role: 'assistant',
+          content: 'Neo requires a live LLM response and could not reach the LLM service.',
+          provider: 'fallback',
+          usedLiveProvider: false,
+          runtimeFallback: true,
+        },
+      ])
     } finally {
       setNeoLoading(false)
       setNeoStreaming(false)
@@ -1970,7 +2097,7 @@ export function App() {
       failure_class: source?.probable_root_causes.join(' ').toLowerCase().includes('thermal') ? 'ELEC' : 'MECH',
       problem_code: source?.probable_root_causes.join(' ').toLowerCase().includes('connection') ? 'LWTQCONNECT' : 'INVESTIGATE',
       classification: source?.probable_root_causes[0] ?? 'Corrective inspection',
-      assigned_to: currentUser?.display_name ?? 'Maintenance Engineer',
+      assigned_to: '',
       supervisor: 'Maintenance Supervisor',
       due_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       recommended_action: source?.immediate_actions[0] ?? selectedHealth?.notes[0] ?? 'Inspect and update work log.',
@@ -2273,8 +2400,11 @@ export function App() {
     try {
       let assistantMessageId: string | null = null
       let streamedContent = ''
+      let finalMarkdown = ''
       let streamProvider = 'openai'
       let streamUsedLiveProvider = true
+      let streamRuntimeFallback = false
+      let streamRuntimeFallbackReason: string | null = null
 
       const ensureAssistantMessage = () => {
         if (!isCurrentContext()) return null
@@ -2289,6 +2419,8 @@ export function App() {
             content: '',
             provider: streamProvider,
             usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
           },
         ])
         return assistantMessageId
@@ -2301,10 +2433,21 @@ export function App() {
 
       await api.technicianAssistStream(workOrder.id, prompt, requestedStep, (event) => {
         if (!isCurrentContext()) return
+        if (event.type === 'session') {
+          setTechnicianSessionId(event.session_id)
+          return
+        }
         if (event.type === 'meta') {
           streamProvider = event.provider
           streamUsedLiveProvider = event.used_live_provider
-          updateAssistantMessage({ provider: streamProvider, usedLiveProvider: streamUsedLiveProvider })
+          streamRuntimeFallback = Boolean(event.runtime_fallback)
+          streamRuntimeFallbackReason = event.runtime_fallback_reason ?? null
+          updateAssistantMessage({
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
+          })
           return
         }
         if (event.type === 'token') {
@@ -2318,16 +2461,43 @@ export function App() {
             content: streamedContent,
             provider: streamProvider,
             usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
           })
+          return
+        }
+        if (event.type === 'error') {
+          ensureAssistantMessage()
+          updateAssistantMessage({
+            content: event.message,
+            provider: streamProvider || 'pydantic_ai',
+            usedLiveProvider: false,
+            runtimeFallback: true,
+            runtimeFallbackReason: event.message,
+          })
+          setWorkOrderMessage(event.message)
+          clearFirstTokenTimeout()
+          setTechnicianLoading(false)
+          setTechnicianStreaming(false)
+          return
+        }
+        if (event.type === 'final') {
+          finalMarkdown = assistantFinalMarkdown(event.response)
+          if (finalMarkdown) {
+            ensureAssistantMessage()
+            updateAssistantMessage({ content: finalMarkdown })
+          }
           return
         }
         if (event.type === 'done') {
           setTechnicianAssistant(event.response)
           if (assistantMessageId) {
             updateAssistantMessage({
-              content: streamedContent || event.response.next_prompt,
+              content: finalMarkdown || streamedContent || event.response.next_prompt,
               provider: event.response.provider,
               usedLiveProvider: event.response.used_live_provider,
+              runtimeFallback: streamRuntimeFallback,
+              runtimeFallbackReason: streamRuntimeFallbackReason,
             })
           } else {
             setTechnicianChat((turns) => [
@@ -2335,14 +2505,14 @@ export function App() {
               {
                 id: assistantTurnId('technician-assistant'),
                 role: 'assistant',
-                content: event.response.next_prompt,
+                content: finalMarkdown || event.response.next_prompt,
                 provider: event.response.provider,
                 usedLiveProvider: event.response.used_live_provider,
               },
             ])
           }
         }
-      }, controller?.signal)
+      }, controller?.signal, technicianSessionId)
       return true
     } catch (error) {
       if (isCurrentContext()) {
@@ -2362,6 +2532,8 @@ export function App() {
             content: timeoutResponse.next_prompt,
             provider: timeoutResponse.provider,
             usedLiveProvider: timeoutResponse.used_live_provider,
+            runtimeFallback: true,
+            runtimeFallbackReason: timeoutResponse.next_prompt,
           },
         ])
         const message = isAbortError(error)
@@ -2572,8 +2744,11 @@ export function App() {
     try {
       let assistantMessageId: string | null = null
       let streamedContent = ''
+      let finalMarkdown = ''
       let streamProvider = 'openai'
       let streamUsedLiveProvider = true
+      let streamRuntimeFallback = false
+      let streamRuntimeFallbackReason: string | null = null
       const ensureAssistantMessage = () => {
         if (!isCurrentContext()) return null
         if (assistantMessageId) return assistantMessageId
@@ -2587,6 +2762,8 @@ export function App() {
             content: '',
             provider: streamProvider,
             usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
           },
         ])
         return assistantMessageId
@@ -2599,12 +2776,24 @@ export function App() {
         work_order_id: workOrder?.id,
         queue_name: 'all_work',
         question: supervisorInitialContextPrompt(workOrder, workOrders, currentUser?.display_name),
+        session_id: supervisorSessionId,
       }, (event) => {
         if (!isCurrentContext()) return
+        if (event.type === 'session') {
+          setSupervisorSessionId(event.session_id)
+          return
+        }
         if (event.type === 'meta') {
           streamProvider = event.provider
           streamUsedLiveProvider = event.used_live_provider
-          updateAssistantMessage({ provider: streamProvider, usedLiveProvider: streamUsedLiveProvider })
+          streamRuntimeFallback = Boolean(event.runtime_fallback)
+          streamRuntimeFallbackReason = event.runtime_fallback_reason ?? null
+          updateAssistantMessage({
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
+          })
           return
         }
         if (event.type === 'token') {
@@ -2618,16 +2807,46 @@ export function App() {
             content: streamedContent,
             provider: streamProvider,
             usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
           })
+          return
+        }
+        if (event.type === 'error') {
+          ensureAssistantMessage()
+          updateAssistantMessage({
+            content: event.message,
+            provider: streamProvider || 'pydantic_ai',
+            usedLiveProvider: false,
+            runtimeFallback: true,
+            runtimeFallbackReason: event.message,
+          })
+          setWorkOrderMessage(event.message)
+          clearFirstTokenTimeout()
+          setSupervisorLoading(false)
+          setSupervisorStreaming(false)
+          return
+        }
+        if (event.type === 'final') {
+          finalMarkdown = assistantFinalMarkdown(event.response)
+          if (finalMarkdown) {
+            ensureAssistantMessage()
+            updateAssistantMessage({ content: finalMarkdown })
+          }
           return
         }
         if (event.type === 'done') {
           setSupervisorAssistant(event.response)
+          if (event.response.draft_work_order) {
+            setWorkOrderDraft(event.response.draft_work_order)
+          }
           if (assistantMessageId) {
             updateAssistantMessage({
-              content: streamedContent || event.response.summary,
+              content: finalMarkdown || streamedContent || event.response.summary,
               provider: event.response.provider,
               usedLiveProvider: event.response.used_live_provider,
+              runtimeFallback: streamRuntimeFallback,
+              runtimeFallbackReason: streamRuntimeFallbackReason,
             })
           } else {
             setSupervisorChat((turns) => [
@@ -2635,7 +2854,7 @@ export function App() {
               {
                 id: assistantTurnId('supervisor-assistant'),
                 role: 'assistant',
-                content: event.response.summary,
+                content: finalMarkdown || event.response.summary,
                 provider: event.response.provider,
                 usedLiveProvider: event.response.used_live_provider,
               },
@@ -2661,6 +2880,8 @@ export function App() {
             content: response.summary,
             provider: response.provider,
             usedLiveProvider: response.used_live_provider,
+            runtimeFallback: true,
+            runtimeFallbackReason: response.summary,
           },
         ])
       }
@@ -2704,8 +2925,11 @@ export function App() {
     try {
       let assistantMessageId: string | null = null
       let streamedContent = ''
+      let finalMarkdown = ''
       let streamProvider = 'openai'
       let streamUsedLiveProvider = true
+      let streamRuntimeFallback = false
+      let streamRuntimeFallbackReason: string | null = null
       const payload = {
         work_order_id: workOrderId,
         queue_name: supervisorQueueNameForPrompt(prompt),
@@ -2724,6 +2948,8 @@ export function App() {
             content: '',
             provider: streamProvider,
             usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
           },
         ])
         return assistantMessageId
@@ -2734,11 +2960,22 @@ export function App() {
         setSupervisorChat((turns) => turns.map((turn) => (turn.id === assistantMessageId ? { ...turn, ...updates } : turn)))
       }
 
-      await api.supervisorAssistStream(payload, (event) => {
+      await api.supervisorAssistStream({ ...payload, session_id: supervisorSessionId }, (event) => {
+        if (event.type === 'session') {
+          setSupervisorSessionId(event.session_id)
+          return
+        }
         if (event.type === 'meta') {
           streamProvider = event.provider
           streamUsedLiveProvider = event.used_live_provider
-          updateAssistantMessage({ provider: streamProvider, usedLiveProvider: streamUsedLiveProvider })
+          streamRuntimeFallback = Boolean(event.runtime_fallback)
+          streamRuntimeFallbackReason = event.runtime_fallback_reason ?? null
+          updateAssistantMessage({
+            provider: streamProvider,
+            usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
+          })
           return
         }
         if (event.type === 'token') {
@@ -2752,16 +2989,46 @@ export function App() {
             content: streamedContent,
             provider: streamProvider,
             usedLiveProvider: streamUsedLiveProvider,
+            runtimeFallback: streamRuntimeFallback,
+            runtimeFallbackReason: streamRuntimeFallbackReason,
           })
+          return
+        }
+        if (event.type === 'error') {
+          ensureAssistantMessage()
+          updateAssistantMessage({
+            content: event.message,
+            provider: streamProvider || 'pydantic_ai',
+            usedLiveProvider: false,
+            runtimeFallback: true,
+            runtimeFallbackReason: event.message,
+          })
+          setWorkOrderMessage(event.message)
+          clearFirstTokenTimeout()
+          setSupervisorLoading(false)
+          setSupervisorStreaming(false)
+          return
+        }
+        if (event.type === 'final') {
+          finalMarkdown = assistantFinalMarkdown(event.response)
+          if (finalMarkdown) {
+            ensureAssistantMessage()
+            updateAssistantMessage({ content: finalMarkdown })
+          }
           return
         }
         if (event.type === 'done') {
           setSupervisorAssistant(event.response)
+          if (event.response.draft_work_order) {
+            setWorkOrderDraft(event.response.draft_work_order)
+          }
           if (assistantMessageId) {
             updateAssistantMessage({
-              content: streamedContent || event.response.summary,
+              content: finalMarkdown || streamedContent || event.response.summary,
               provider: event.response.provider,
               usedLiveProvider: event.response.used_live_provider,
+              runtimeFallback: streamRuntimeFallback,
+              runtimeFallbackReason: streamRuntimeFallbackReason,
             })
           } else {
             setSupervisorChat((turns) => [
@@ -2769,7 +3036,7 @@ export function App() {
               {
                 id: assistantTurnId('supervisor-assistant'),
                 role: 'assistant',
-                content: event.response.summary,
+                content: finalMarkdown || event.response.summary,
                 provider: event.response.provider,
                 usedLiveProvider: event.response.used_live_provider,
               },
@@ -2797,6 +3064,8 @@ export function App() {
           content: response.summary,
           provider: response.provider,
           usedLiveProvider: response.used_live_provider,
+          runtimeFallback: true,
+          runtimeFallbackReason: response.summary,
         },
       ])
       setWorkOrderMessage(
@@ -3387,11 +3656,13 @@ export function App() {
       <ToastStack dismissToast={dismissToast} toasts={toasts} />
       {workOrderDraft && (
         <WorkOrderReviewDialog
+          assets={assets}
           draft={workOrderDraft}
           onCancel={cancelWorkOrderDraft}
           onChange={updateWorkOrderDraft}
           onSubmit={submitWorkOrderDraft}
           submitting={workOrderSubmitting}
+          technicians={technicians}
         />
       )}
       <header className="topBar">
