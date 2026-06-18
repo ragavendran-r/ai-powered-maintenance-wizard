@@ -146,7 +146,7 @@ test('keeps Neo, Morpheus, and Smith streams pinned while the page follows them'
   await expect(page.locator('.morpheusProgress')).toContainText('Morpheus validation chunk 14')
   await expectPinnedToBottom(page, '.morpheusProgress')
 
-  await page.getByLabel('Asset detail tabs').getByRole('button', { name: 'Reliability' }).click()
+  await page.getByLabel('Asset detail tabs').getByRole('tab', { name: 'Reliability' }).click()
   await expect(page.getByRole('heading', { name: 'Smith' })).toBeVisible()
   await expect(page.getByLabel('Smith failure prediction stream')).toContainText('Smith validation chunk 14')
   await expectPinnedToBottom(page, '.reliabilityPredictionStream')
