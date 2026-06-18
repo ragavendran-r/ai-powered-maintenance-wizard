@@ -91,16 +91,16 @@ LEARNING_RUNTIME_DEPLOYER_DEFAULT=llama_cpp
 LEARNING_ADAPTER_DEPLOYER_COMMAND="bash scripts/peft/deploy_llama_cpp_adapter.sh"
 LEARNING_ADAPTER_DEPLOYER_TIMEOUT_SECONDS=120
 OPENAI_BASE_URL=http://127.0.0.1:8080/v1
-OPENAI_MODEL=maintenance-wizard-qwen-lora
+OPENAI_MODEL=maintenance-wizard-qwen-lora-LJOB-7B7B7B7B7B7B
 LLAMA_CPP_BASE_MODEL_PATH=
-LLAMA_CPP_HF_REPO=Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
-LLAMA_CPP_HF_FILE=
-LLAMA_CPP_ADAPTER_GGUF_PATH=/path/to/trained-adapter.gguf
+LLAMA_CPP_HF_REPO=Qwen/Qwen2.5-7B-Instruct-GGUF
+LLAMA_CPP_HF_FILE=qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf
+LLAMA_CPP_ADAPTER_GGUF_PATH=/Users/ragaven/work/ai-powered-maintenance-wizard/backend/data/learning_adapters/LJOB-7B7B7B7B7B7B/adapter/adapter.gguf
 LLAMA_CPP_HOST=127.0.0.1
 LLAMA_CPP_PORT=8080
 ```
 
-If the trainer produced a PEFT adapter directory rather than a GGUF adapter file, set `LLAMA_CPP_CONVERT_LORA_SCRIPT` to `llama.cpp/convert_lora_to_gguf.py`. The deployer converts the adapter into `${MW_ADAPTER_ARTIFACT_URI}/adapter.gguf`, starts `llama-server` with `--model` or `--hf-repo`, `--lora`, and `--alias`, then the backend probes the OpenAI-compatible endpoint using the candidate alias. The base GGUF must match the model used to train the adapter; the local adapter generated in this project was trained from `Qwen/Qwen2.5-0.5B-Instruct`.
+If the trainer produced a PEFT adapter directory rather than a GGUF adapter file, set `LLAMA_CPP_CONVERT_LORA_SCRIPT` to `llama.cpp/convert_lora_to_gguf.py`. The deployer converts the adapter into `${MW_ADAPTER_ARTIFACT_URI}/adapter.gguf`, starts `llama-server` with `--model` or `--hf-repo`, `--lora`, and `--alias`, then the backend probes the OpenAI-compatible endpoint using the candidate alias. The base GGUF must match the model used to train the adapter; the local adapter generated in this project was trained from `Qwen/Qwen2.5-7B-Instruct`.
 
 Use `LLAMA_CPP_EXTRA_ARGS` for local performance flags such as context size, GPU layer offload, or Metal tuning. The script intentionally requires explicit model and adapter paths so the app never guesses at large local model files.
 

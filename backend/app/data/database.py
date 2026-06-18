@@ -445,6 +445,36 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS assistant_sessions (
+        id TEXT PRIMARY KEY,
+        assistant_id TEXT NOT NULL,
+        user_id TEXT,
+        user_role TEXT,
+        screen TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        metadata TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS assistant_messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        assistant_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        provider TEXT,
+        used_live_provider INTEGER NOT NULL DEFAULT 0,
+        tool_calls TEXT NOT NULL DEFAULT '[]',
+        tool_results TEXT NOT NULL DEFAULT '[]',
+        final_response TEXT,
+        metadata TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (session_id) REFERENCES assistant_sessions(id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS learning_examples (
         id TEXT PRIMARY KEY,
         source_type TEXT NOT NULL,
@@ -582,7 +612,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "19"
+SCHEMA_VERSION = "20"
 _INITIALIZING = False
 
 
@@ -1210,6 +1240,8 @@ def database_status() -> dict[str, Any]:
         "users",
         "auth_audit_events",
         "learning_interactions",
+        "assistant_sessions",
+        "assistant_messages",
         "learning_examples",
         "learning_dataset_snapshots",
         "learning_model_versions",
@@ -1218,6 +1250,7 @@ def database_status() -> dict[str, Any]:
         "learning_jobs",
         "learning_artifacts",
         "learning_model_promotions",
+        "learning_model_deployments",
     ]
     with connect() as connection:
         version_row = connection.execute(
@@ -1281,7 +1314,7 @@ def _seed_learning_defaults(connection: sqlite3.Connection) -> None:
                 "model-local-qwen2.5-current",
                 settings.llm_provider,
                 model_name,
-                "qwen2.5-instruct",
+                "qwen2.5-7b-instruct",
                 None,
                 "active",
                 "Current locally configured OpenAI-compatible model endpoint.",

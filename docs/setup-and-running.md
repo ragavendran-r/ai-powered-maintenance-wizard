@@ -39,7 +39,7 @@ For local llama.cpp adapter inference, set:
 LLM_PROVIDER=openai
 OPENAI_API_KEY=local-runtime
 OPENAI_BASE_URL=http://127.0.0.1:8080/v1
-OPENAI_MODEL=maintenance-wizard-qwen-lora
+OPENAI_MODEL=maintenance-wizard-qwen-lora-LJOB-7B7B7B7B7B7B
 LLM_TIMEOUT_SECONDS=15
 LLM_STREAM_TIMEOUT_SECONDS=60
 LLM_STRUCTURED_MAX_TOKENS=300
@@ -47,9 +47,9 @@ LLM_TEXT_MAX_TOKENS=600
 LEARNING_RUNTIME_DEPLOYER_DEFAULT=llama_cpp
 LEARNING_ADAPTER_DEPLOYER_COMMAND="bash scripts/peft/deploy_llama_cpp_adapter.sh"
 LLAMA_CPP_BASE_MODEL_PATH=
-LLAMA_CPP_HF_REPO=Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
-LLAMA_CPP_HF_FILE=
-LLAMA_CPP_ADAPTER_GGUF_PATH=/path/to/trained-adapter.gguf
+LLAMA_CPP_HF_REPO=Qwen/Qwen2.5-7B-Instruct-GGUF
+LLAMA_CPP_HF_FILE=qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf
+LLAMA_CPP_ADAPTER_GGUF_PATH=/Users/ragaven/work/ai-powered-maintenance-wizard/backend/data/learning_adapters/LJOB-7B7B7B7B7B7B/adapter/adapter.gguf
 ```
 
 For optional LM Studio base-model or fused-model inference, use `OPENAI_BASE_URL=http://localhost:1234/v1`, set `OPENAI_API_KEY=lm-studio-local`, and set `OPENAI_MODEL` to the loaded LM Studio model identifier.
@@ -151,7 +151,14 @@ The application uses local SQLite users, bcrypt password hashes, JWT bearer toke
 
 ## 8. Optional Local LLM Runtime Setup
 
-For llama.cpp adapter serving, install or build `llama-server`, configure the GGUF base model and adapter paths in `.env`, then let the Learning and Tuning deployment action run `scripts/peft/deploy_llama_cpp_adapter.sh`. The script starts `llama-server` on `http://127.0.0.1:8080` with the selected adapter alias and the backend verifies it through the OpenAI-compatible `/v1` endpoint.
+For llama.cpp adapter serving, install or build `llama-server`, configure the GGUF base model and adapter paths in `.env`, then run:
+
+```bash
+scripts/peft/start_llama_cpp_qwen_adapter.sh --check
+scripts/peft/start_llama_cpp_qwen_adapter.sh
+```
+
+The script starts `llama-server` on `http://127.0.0.1:8080` with the selected Qwen2.5 base model and adapter alias. See `docs/local-llm-llama-cpp-qwen-adapter.md` for the full setup, adapter conversion, and smoke-test flow. Learning and Tuning deployment actions use `scripts/peft/deploy_llama_cpp_adapter.sh` for the same runtime from the promotion workflow.
 
 LM Studio remains available for base-model or fused-model serving when you do not need raw LoRA adapter loading.
 

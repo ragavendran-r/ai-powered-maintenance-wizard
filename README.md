@@ -16,7 +16,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
   LLM_PROVIDER=openai
   OPENAI_API_KEY=local-runtime
   OPENAI_BASE_URL=http://127.0.0.1:8080/v1
-  OPENAI_MODEL=maintenance-wizard-qwen-lora
+  OPENAI_MODEL=maintenance-wizard-qwen-lora-LJOB-7B7B7B7B7B7B
   LLM_TIMEOUT_SECONDS=15
   LLM_STREAM_TIMEOUT_SECONDS=60
   LLM_STRUCTURED_MAX_TOKENS=300
@@ -25,7 +25,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
   LEARNING_ADAPTER_DEPLOYER_COMMAND="bash scripts/peft/deploy_llama_cpp_adapter.sh"
   ```
 
-  See `docs/peft-training.md` for the llama.cpp adapter deployment flow and `docs/local-llm-lm-studio.md` for the optional LM Studio base/fused-model setup.
+  See `docs/local-llm-llama-cpp-qwen-adapter.md` for the local llama.cpp Qwen2.5 base-plus-adapter setup, `docs/peft-training.md` for the Learning Review adapter deployment flow, and `docs/local-llm-lm-studio.md` for the optional LM Studio base/fused-model setup.
 - Evidence-grounded RAG and learning: Qdrant stores document chunks and approved learning examples for production-like retrieval, while SQLite-local vector scoring remains a fallback. Learning Review requires both human approval and LLM-as-a-Judge quality scoring before examples can be reused for RAG or exported as JSONL snapshots for PEFT.
 - Tuning handoff: NATS-backed learning jobs can prepare audited dataset and manifest artifacts, optionally invoke the bundled Qwen LoRA/QLoRA trainer template, and register adapter candidates. Evaluation, deployment verification, promotion, and rollback remain reviewer-controlled. See `docs/rag-peft-nats-learning-architecture.md` and `docs/peft-training.md` for the full design.
 
@@ -33,7 +33,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 
 | Layer | Technology |
 | --- | --- |
-| Backend API | Python 3, FastAPI, Pydantic, Uvicorn |
+| Backend API | Python 3, FastAPI, Pydantic, Pydantic AI runtime contracts, Uvicorn |
 | Backend persistence | SQLite for local/demo operational data, auth state, work orders, learning records, and lightweight startup migrations |
 | Frontend | React, TypeScript, Vite, CSS modules via `frontend/src/styles.css`, lucide-react icons |
 | Auth | Local SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI role guards, React session storage |
@@ -100,7 +100,8 @@ Important docs:
 - `docs/auth-authorization-plan.md`: local login, roles, permissions, and test strategy.
 - `docs/goal-tracker.md`: durable goal ledger from project start.
 - `docs/progress.md`: session-level progress notes and verification history.
-- `docs/setup-and-running.md`: local setup, stack startup, demo login, LM Studio, verification, and troubleshooting instructions.
+- `docs/setup-and-running.md`: local setup, stack startup, demo login, local LLM runtime, verification, and troubleshooting instructions.
+- `docs/local-llm-llama-cpp-qwen-adapter.md`: llama.cpp setup for Qwen2.5 GGUF base model plus GGUF LoRA adapter serving.
 - `docs/demo_script.md`: suggested demo walkthrough.
 - `docs/local-llm-lm-studio.md`: LM Studio setup for local OpenAI-compatible LLM inference.
 - `docs/peft-training.md`: optional Qwen/SLM LoRA or QLoRA trainer template setup and worker contract.
@@ -271,7 +272,7 @@ Set `LEARNING_ARTIFACT_RETENTION_DAYS` above `0` to report expired local learnin
 
 Production RAG uses Qdrant as the vector database. Set `RAG_VECTOR_STORE=qdrant`, `RAG_QDRANT_URL=http://localhost:6333`, and `RAG_QDRANT_COLLECTION=maintenance_wizard_documents`. `RAG_EMBEDDING_PROVIDER`, `RAG_EMBEDDING_MODEL`, `RAG_EMBEDDING_VERSION`, `RAG_EMBEDDING_DIMENSIONS`, and `RAG_EMBEDDING_DISTANCE` describe the embedding profile attached to indexed chunks and surfaced in Learning Review. Uploaded and seeded document chunks are indexed into Qdrant when it is available. Approved, judge-qualified learning examples are also synchronized into Qdrant as separate RAG entries during learning refresh, approval changes, rejudge, and reviewer reindex flows. Retrieval queries Qdrant for both plant documents and approved learning examples, then falls back to SQLite-local vectors only when the vector DB is unavailable or explicitly disabled for tests. Learning Review includes a reviewer-only RAG reindex action for rebuilding chunks and repopulating the configured collection after an embedding profile or collection migration.
 
-The current SQLite schema version is `19`. Lightweight startup migrations add `feedback.equipment_id`, create asset detail tables, `document_intelligence`, `maintenance_labels`, `streaming_messages`, local auth tables, work orders, work-order planning/dispatch metadata, work-order spare reservations with reorder/procurement/substitute/blocker fields, work-order logs, RCA cases, PM templates and PM plans, learning interactions, judged examples, dataset snapshots, model versions, prompt versions, evaluation runs, learning jobs, learning artifacts, model promotion audit records, adapter runtime deployment records, and RAG embedding profile metadata for older local databases.
+The current SQLite schema version is `20`. Lightweight startup migrations add `feedback.equipment_id`, create asset detail tables, `document_intelligence`, `maintenance_labels`, `streaming_messages`, local auth tables, work orders, work-order planning/dispatch metadata, work-order spare reservations with reorder/procurement/substitute/blocker fields, work-order logs, RCA cases, PM templates and PM plans, learning interactions, assistant sessions and persisted assistant message history, judged examples, dataset snapshots, model versions, prompt versions, evaluation runs, learning jobs, learning artifacts, model promotion audit records, adapter runtime deployment records, and RAG embedding profile metadata for older local databases.
 
 The current production-aligned learning scope is intentionally constrained to what can run on the local Mac stack: SQLite, Qdrant, NATS, filesystem/S3-compatible artifact registration, local PEFT trainer hooks, llama.cpp adapter serving, and OpenAI-compatible or Ollama-style LLM serving. Future production phases track Postgres migration, bucket-native object-store lifecycle/access hardening, and hardened environment-specific adapter-loader automation for llama.cpp, LM Studio, Ollama, or another serving runtime.
 
