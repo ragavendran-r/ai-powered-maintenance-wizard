@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [[ -x "${ROOT_DIR}/.venv-peft/bin/python" ]]; then
+  DEFAULT_CONVERT_PYTHON="${ROOT_DIR}/.venv-peft/bin/python"
+else
+  DEFAULT_CONVERT_PYTHON="python3"
+fi
 SERVER_BIN="${LLAMA_CPP_SERVER_BIN:-llama-server}"
 HOST="${LLAMA_CPP_HOST:-127.0.0.1}"
 PORT="${LLAMA_CPP_PORT:-8080}"
@@ -11,7 +17,8 @@ ADAPTER_GGUF="${LLAMA_CPP_ADAPTER_GGUF_PATH:-}"
 BASE_MODEL="${LLAMA_CPP_BASE_MODEL_PATH:-}"
 HF_REPO="${LLAMA_CPP_HF_REPO:-}"
 HF_FILE="${LLAMA_CPP_HF_FILE:-}"
-ALIAS="${LLAMA_CPP_ALIAS:-${MW_ADAPTER_SERVED_MODEL_NAME:-}}"
+ALIAS="${MW_ADAPTER_SERVED_MODEL_NAME:-${LLAMA_CPP_ALIAS:-}}"
+CONVERT_PYTHON="${LLAMA_CPP_CONVERT_PYTHON:-${DEFAULT_CONVERT_PYTHON}}"
 
 if [[ -z "${ALIAS}" ]]; then
   echo "MW_ADAPTER_SERVED_MODEL_NAME or LLAMA_CPP_ALIAS is required" >&2
@@ -36,6 +43,14 @@ fi
 
 mkdir -p "$(dirname "${PID_FILE}")" "$(dirname "${LOG_FILE}")"
 
+if [[ -z "${ADAPTER_GGUF}" && -n "${MW_ADAPTER_ARTIFACT_URI:-}" && -f "${MW_ADAPTER_ARTIFACT_URI}" ]]; then
+  ADAPTER_GGUF="${MW_ADAPTER_ARTIFACT_URI}"
+fi
+
+if [[ -z "${ADAPTER_GGUF}" && -n "${MW_ADAPTER_ARTIFACT_URI:-}" && -f "${MW_ADAPTER_ARTIFACT_URI%/}/adapter.gguf" ]]; then
+  ADAPTER_GGUF="${MW_ADAPTER_ARTIFACT_URI%/}/adapter.gguf"
+fi
+
 if [[ -z "${ADAPTER_GGUF}" ]]; then
   CONVERT_SCRIPT="${LLAMA_CPP_CONVERT_LORA_SCRIPT:-}"
   if [[ -z "${CONVERT_SCRIPT}" ]]; then
@@ -55,7 +70,7 @@ MSG
     exit 2
   fi
   ADAPTER_GGUF="${MW_ADAPTER_ARTIFACT_URI%/}/adapter.gguf"
-  python3 "${CONVERT_SCRIPT}" "${MW_ADAPTER_ARTIFACT_URI}" --outfile "${ADAPTER_GGUF}"
+  "${CONVERT_PYTHON}" "${CONVERT_SCRIPT}" "${MW_ADAPTER_ARTIFACT_URI}" --outfile "${ADAPTER_GGUF}"
 fi
 
 if [[ ! -f "${ADAPTER_GGUF}" ]]; then

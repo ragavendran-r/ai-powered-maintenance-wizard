@@ -2110,8 +2110,77 @@ h3 {
 }
 
 .learningAdapterGrid .adapterNotesField,
-.learningAdapterGrid button {
+.learningAdapterGrid button,
+.peftTrainingSummary {
   grid-column: 1 / -1;
+}
+
+.peftTrainingSummary {
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-soft-alt);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  padding: 10px 12px;
+}
+
+.peftTrainingSummary span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.peftTrainingSummary small {
+  color: var(--color-text-muted);
+  font-weight: 800;
+}
+
+.peftTrainingSummary strong {
+  overflow-wrap: anywhere;
+}
+
+.peftCurrentJob {
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-soft-alt);
+  border-left: 4px solid var(--color-brand-border-strong);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  padding: 10px 12px;
+}
+
+.peftCurrentJob.queued,
+.peftCurrentJob.published,
+.peftCurrentJob.running {
+  background: var(--state-warning-bg-soft);
+  border-left-color: var(--state-warning-fill);
+}
+
+.peftCurrentJob.completed {
+  background: var(--state-success-bg-soft);
+  border-left-color: var(--risk-low-fill);
+}
+
+.peftCurrentJob.failed {
+  background: var(--state-danger-bg-soft);
+  border-left-color: var(--state-danger-fill);
+}
+
+.peftCurrentJob span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.peftCurrentJob small {
+  color: var(--color-text-muted);
+  font-weight: 800;
+}
+
+.peftCurrentJob strong {
+  overflow-wrap: anywhere;
 }
 
 .learningAdapterGrid textarea {

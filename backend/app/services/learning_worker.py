@@ -58,7 +58,7 @@ def process_learning_job_message(
         return ProcessedLearningJob(job_id, job_type, "duplicate", job.get("output_refs") or {})
 
     retry_count = int(job.get("retry_count") or 0) + 1
-    repository.update_learning_job_status(
+    running_job = repository.update_learning_job_status(
         job_id,
         "running",
         output_refs={
@@ -66,24 +66,26 @@ def process_learning_job_message(
             "worker_started_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         },
         retry_count=retry_count,
-    )
+    ) or job
     try:
-        output_refs = _execute_learning_job(job, payload)
+        output_refs = _execute_learning_job(running_job, payload)
     except Exception as exc:
+        latest_job = repository.get_learning_job(job_id) or running_job
         repository.update_learning_job_status(
             job_id,
             "failed",
-            output_refs=job.get("output_refs") or {},
+            output_refs=latest_job.get("output_refs") or {},
             error=str(exc),
             retry_count=retry_count,
         )
         raise
 
+    latest_job = repository.get_learning_job(job_id) or running_job
     completed = repository.update_learning_job_status(
         job_id,
         "completed",
         output_refs={
-            **(job.get("output_refs") or {}),
+            **(latest_job.get("output_refs") or {}),
             **output_refs,
             "worker_completed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         },
