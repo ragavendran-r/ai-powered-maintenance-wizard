@@ -978,6 +978,9 @@ def test_pm_plan_morpheus_draft_stream_persists_plan(monkeypatch):
         if line.startswith("data:")
     ]
     assert events[0]["type"] == "meta"
+    assert "status" not in [event["type"] for event in events]
+    assert events[1]["type"] == "token"
+    assert events[1]["content"].startswith("### PM Plan")
     assert events[-1]["type"] == "done", events
     plan = events[-1]["response"]["plan"]
     assert plan["id"].startswith("PM-")

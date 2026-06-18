@@ -1137,7 +1137,6 @@ export interface PmPlanDraftResponse {
 
 export type PmPlanDraftStreamEvent =
   | { type: 'meta'; provider: string; used_live_provider: boolean }
-  | { type: 'status'; message: string }
   | { type: 'token'; content: string; provider: string; used_live_provider: boolean }
   | { type: 'done'; response: PmPlanDraftResponse }
   | { type: 'error'; message: string }

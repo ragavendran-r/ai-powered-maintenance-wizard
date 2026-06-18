@@ -86,10 +86,6 @@ def stream_draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> 
     provider = llm_client.provider_name
     used_live_provider = provider in {"openai", "ollama"}
     yield {"type": "meta", "provider": provider, "used_live_provider": used_live_provider}
-    yield {
-        "type": "status",
-        "message": "Preparing live PM draft context from prediction risk, maintenance history, spares, feedback, and retrieved evidence.",
-    }
     if not used_live_provider:
         yield {
             "type": "error",
@@ -97,7 +93,6 @@ def stream_draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> 
         }
         return
     context = _resolve_pm_context(request)
-    yield {"type": "status", "message": "PM context is ready; generating the plan through the live LLM stream."}
 
     chunks: list[str] = []
     emitted_answer = ""
@@ -134,7 +129,6 @@ def stream_draft_plan(request: PmPlanDraftRequest, current_user: UserPublic) -> 
         return
     saved = _save_pm_plan_base(context, request, draft)
     plan = PmPlan(**saved)
-    yield {"type": "status", "message": "Morpheus PM plan is drafted; Smith is streaming technician-ready execution steps."}
     smith_chunks: list[str] = []
     for chunk in llm_client.stream_text(
         _smith_prompt(plan, context["equipment"], context["evidence"]),
@@ -170,12 +164,12 @@ def _resolve_pm_context(request: PmPlanDraftRequest) -> dict[str, Any]:
     evidence = retrieve_evidence(
         _evidence_query(equipment, template, request),
         request.equipment_id,
-        limit=6,
+        limit=3,
         use_reranker=False,
     )
-    feedback = repository.list_feedback(request.equipment_id)[:5]
-    events = repository.list_maintenance_events(request.equipment_id)[:8]
-    spares = repository.list_spares(request.equipment_id)[:4]
+    feedback = repository.list_feedback(request.equipment_id)[:3]
+    events = repository.list_maintenance_events(request.equipment_id)[:4]
+    spares = repository.list_spares(request.equipment_id)[:3]
 
     prompt = _morpheus_prompt(equipment, template, request, prediction, evidence, feedback, events, spares)
     return {
@@ -364,19 +358,25 @@ def _morpheus_prompt(
         f"Request: convert_from_prediction={request.convert_from_prediction}; risk_threshold={request.risk_threshold}; focus={request.requested_focus or 'general PM'}",
         f"Prediction: risk={prediction.risk_level}; probability={prediction.failure_probability:.0%}; RUL={prediction.remaining_useful_life_days} days",
         "Prediction drivers:",
-        *[f"- {item}" for item in prediction.drivers[:6]],
+        *[f"- {_clip_pm_text(item, 140)}" for item in prediction.drivers[:4]],
         "Template:",
-        f"- {template['title']}: {template['description']}" if template else "- No template supplied",
-        *[f"- Template task: {item}" for item in (template or {}).get("task_list", [])[:6]],
-        *[f"- Template threshold: {item}" for item in (template or {}).get("thresholds", [])[:6]],
+        f"- {_clip_pm_text(template['title'], 80)}: {_clip_pm_text(template['description'], 160)}" if template else "- No template supplied",
+        *[f"- Template task: {_clip_pm_text(item, 120)}" for item in (template or {}).get("task_list", [])[:4]],
+        *[f"- Template threshold: {_clip_pm_text(item, 100)}" for item in (template or {}).get("thresholds", [])[:4]],
         "Evidence:",
-        *[f"- {item.title}: {item.excerpt}" for item in evidence[:6]],
+        *[f"- {_clip_pm_text(item.title, 80)}: {_clip_pm_text(item.excerpt, 180)}" for item in evidence[:3]],
         "Maintenance history:",
-        *[f"- {item['date']}: {item['issue']} | root cause={item['root_cause']} | action={item['action']}" for item in events[:6]],
+        *[
+            f"- {item['date']}: {_clip_pm_text(item['issue'], 100)} | root cause={_clip_pm_text(item['root_cause'], 80)} | action={_clip_pm_text(item['action'], 100)}"
+            for item in events[:4]
+        ],
         "Accepted/corrected feedback:",
-        *[f"- {item['status']}: {item.get('actual_root_cause') or item.get('corrected_diagnosis') or ''}; action={item.get('action_taken') or ''}" for item in feedback[:5]],
+        *[
+            f"- {item['status']}: {_clip_pm_text(item.get('actual_root_cause') or item.get('corrected_diagnosis') or '', 100)}; action={_clip_pm_text(item.get('action_taken') or '', 100)}"
+            for item in feedback[:3]
+        ],
         "Spares:",
-        *[f"- {item['name']}: qty={item['available_qty']} lead={item['lead_time_days']}d criticality={item['criticality']}" for item in spares[:4]],
+        *[f"- {_clip_pm_text(item['name'], 80)}: qty={item['available_qty']} lead={item['lead_time_days']}d criticality={item['criticality']}" for item in spares[:3]],
         "Output a PM plan with recurring and/or condition trigger, monitoring thresholds, task list, spares strategy, and adjustment notes after repeated failures or feedback.",
     ]
     return "\n".join(lines)
