@@ -64,6 +64,8 @@ import {
   diagnosisAssistantName,
   fallbackWorkOrders,
   fallbackWorkOrdersForUser,
+  learningJudgeProgressMessage,
+  learningRefreshMessage,
   mergeAssetDetail,
   metricValue,
   roleLabels,
@@ -1152,11 +1154,7 @@ export function App() {
       ])
       setLearningExamples(examplesPage.items)
       setLearningSummary(summary)
-      setLearningMessage(
-        examples.length > 0
-          ? `Refreshed ${examples.length} learning example${examples.length === 1 ? '' : 's'}`
-          : 'Refresh completed, but no learning examples were found. Add accepted feedback, usable maintenance labels, completed work orders, closed RCA cases, ingested documents, or approved assistant interactions, then refresh again.',
-      )
+      setLearningMessage(learningRefreshMessage(examples.length))
       setApiState('connected')
     } catch {
       setLearningMessage('Learning examples could not be refreshed')
@@ -1180,7 +1178,7 @@ export function App() {
 
   async function judgeLearningExample(example: LearningExample) {
     setLearningJudgingExampleId(example.id)
-    setLearningMessage(`Judging ${example.source_type.replace(/_/g, ' ')} example. Live LLM checks can take up to 15 seconds before falling back.`)
+    setLearningMessage(learningJudgeProgressMessage(example.source_type))
     try {
       const updated = await api.judgeLearningExample(example.id)
       setLearningExamples((items) => items.map((item) => (item.id === updated.id ? updated : item)))

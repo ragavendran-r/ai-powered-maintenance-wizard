@@ -7,7 +7,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { api } from '../services/api'
 import type {
   LearningArtifactCleanupResult,
@@ -178,13 +178,33 @@ export function LearningReviewRoute({
 }) {
   const [learningReviewTab, setLearningReviewTab] = useState<LearningReviewTab>('examples')
   const [selectedLearningExample, setSelectedLearningExample] = useState<LearningExample | null>(null)
-  const learningModels: LearningModelVersion[] = learningSummary?.model_versions ?? []
-  const adapterModelVersions = learningModels.filter((model) => Boolean(model.adapter_path) || model.status !== 'active')
-  const learningPrompts = learningSummary?.prompt_versions ?? []
-  const learningEvaluations: LearningEvaluationRun[] = learningSummary?.evaluation_runs ?? []
-  const learningJobs: LearningJob[] = learningSummary?.recent_jobs ?? []
-  const learningArtifacts: LearningArtifact[] = learningSummary?.recent_artifacts ?? []
-  const learningPromotions: LearningModelPromotion[] = learningSummary?.recent_promotions ?? []
+  const learningModels = useMemo<LearningModelVersion[]>(
+    () => learningSummary?.model_versions ?? [],
+    [learningSummary?.model_versions],
+  )
+  const adapterModelVersions = useMemo(
+    () => learningModels.filter((model) => Boolean(model.adapter_path) || model.status !== 'active'),
+    [learningModels],
+  )
+  const learningPrompts = useMemo(() => learningSummary?.prompt_versions ?? [], [learningSummary?.prompt_versions])
+  const learningEvaluations = useMemo<LearningEvaluationRun[]>(
+    () => learningSummary?.evaluation_runs ?? [],
+    [learningSummary?.evaluation_runs],
+  )
+  const learningJobs = useMemo<LearningJob[]>(() => learningSummary?.recent_jobs ?? [], [learningSummary?.recent_jobs])
+  const learningArtifacts = useMemo<LearningArtifact[]>(
+    () => learningSummary?.recent_artifacts ?? [],
+    [learningSummary?.recent_artifacts],
+  )
+  const learningPromotions = useMemo<LearningModelPromotion[]>(
+    () => learningSummary?.recent_promotions ?? [],
+    [learningSummary?.recent_promotions],
+  )
+  const hasActivePeftJob = useMemo(
+    () => learningJobs.some((job) => job.job_type === 'peft_tuning' && ['queued', 'published', 'running'].includes(job.status)),
+    [learningJobs],
+  )
+  const refreshLearningStatusRef = useRef(refreshLearningStatus)
   const learningDeploymentRecords = useMemo(
     () => mergeLearningDeployments(learningDeployments, learningSummary?.recent_deployments ?? []),
     [learningDeployments, learningSummary?.recent_deployments],
@@ -321,13 +341,14 @@ export function LearningReviewRoute({
   }, [learningDeploymentRecords, learningSummary?.counts.deployments])
 
   useEffect(() => {
-    const hasActivePeftJob = learningJobs.some(
-      (job) => job.job_type === 'peft_tuning' && ['queued', 'published', 'running'].includes(job.status),
-    )
+    refreshLearningStatusRef.current = refreshLearningStatus
+  }, [refreshLearningStatus])
+
+  useEffect(() => {
     if (learningReviewTab !== 'adapter' || !hasActivePeftJob) return
-    const intervalId = window.setInterval(refreshLearningStatus, 4000)
+    const intervalId = window.setInterval(() => refreshLearningStatusRef.current(), 4000)
     return () => window.clearInterval(intervalId)
-  }, [learningJobs, learningReviewTab, refreshLearningStatus])
+  }, [hasActivePeftJob, learningReviewTab])
 
   const setTableLoading = (key: LifecycleTableKey, loading: boolean) => {
     const applyLoading = <T,>(setPage: Dispatch<SetStateAction<TablePageState<T>>>) =>

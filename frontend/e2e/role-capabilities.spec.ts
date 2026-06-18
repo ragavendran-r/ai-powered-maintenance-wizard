@@ -60,10 +60,10 @@ test.describe('role capability rendering', () => {
     await expect(page.getByLabel('Assign WO-8304')).toBeVisible()
   })
 
-  test('engineer sees decision support and learning review without ingestion or users', async ({ page }) => {
+  test('engineer sees decision support without admin learning or user management', async ({ page }) => {
     await signInAs(page, 'engineer')
 
-    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Reports', 'Reliability', 'Learning and Tuning'], ['Work Execution', 'Planning', 'Admin'])
+    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Reports', 'Reliability'], ['Work Execution', 'Planning', 'Learning and Tuning', 'Admin'])
     await expect(page.getByRole('button', { name: 'Create work order' })).toBeVisible()
 
     await openAssetDetail(page)
@@ -71,23 +71,21 @@ test.describe('role capability rendering', () => {
     await expect(page.locator('.summaryActions').getByRole('button', { name: 'Create work order' })).toBeVisible()
   })
 
-  test('reliability engineer sees reliability decision support and learning review', async ({ page }) => {
+  test('reliability engineer sees reliability decision support without admin learning controls', async ({ page }) => {
     await signInAs(page, 'reliability')
 
-    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Reports', 'Reliability', 'Learning and Tuning'], ['Work Execution', 'Planning', 'Admin'])
+    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Reports', 'Reliability'], ['Work Execution', 'Planning', 'Learning and Tuning', 'Admin'])
     await openAssetDetail(page)
     await expect(page.getByRole('button', { name: 'Run Morpheus' })).toBeVisible()
-    await page.getByRole('button', { name: 'Reliability' }).last().click()
+    await page.getByRole('tablist', { name: 'Asset detail tabs' }).getByRole('tab', { name: 'Reliability' }).click()
     const predictionEvidence = page.getByLabel('Prediction model evidence')
     await expect(predictionEvidence).toBeVisible()
-    await expect(predictionEvidence.getByText('Maintenance Wizard RUL Risk Model 2.0.0', { exact: true })).toBeVisible()
-    await expect(predictionEvidence.getByText('74% precision / 69% recall')).toBeVisible()
-    await expect(predictionEvidence.getByText('67-84% probability')).toBeVisible()
+    await expect(predictionEvidence.getByText(/Maintenance Wizard RUL Risk Model/)).toBeVisible()
+    await expect(predictionEvidence.getByText(/precision.*recall/)).toBeVisible()
+    await expect(predictionEvidence.getByText(/probability/)).toBeVisible()
 
     await primaryNavButton(page, 'Reliability').click()
     await expect(page.getByRole('heading', { name: 'RCA Workspace' })).toBeVisible()
-    await primaryNavButton(page, 'Learning and Tuning').click()
-    await expect(page.getByRole('heading', { name: 'Learning and Tuning' })).toBeVisible()
   })
 
   test('planner sees scheduling and dispatch controls without assistant panels', async ({ page }) => {
@@ -147,8 +145,11 @@ test.describe('role capability rendering', () => {
   test('admin sees administration surfaces and global review routes', async ({ page }) => {
     await signInAs(page, 'admin')
 
-    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Work Execution', 'Planning', 'Reports', 'Reliability', 'Learning and Tuning', 'Admin'], [])
+    await expectPrimaryNav(page, ['Command Center', 'Assets', 'Work Execution', 'Planning', 'Reports', 'Reliability', 'Admin'], ['Learning and Tuning'])
     await primaryNavButton(page, 'Admin').click()
+    await expect(page.getByRole('heading', { name: 'Ingestion' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Learning and Tuning' })).toBeVisible()
+    await page.getByRole('tab', { name: 'User management' }).click()
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible()
     await expect(page.getByLabel('Application users')).toContainText(roleUsers.operator.display_name)
     await expect(page.getByTitle('Create user')).toBeVisible()

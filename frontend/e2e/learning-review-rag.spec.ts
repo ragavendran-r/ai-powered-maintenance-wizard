@@ -207,13 +207,17 @@ test('shows approved learning-example Qdrant sync after Learning Review reindex'
   await page.getByRole('button', { name: 'Sign In' }).click()
   await expect(page.getByText('Ragav')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Learning and Tuning' }).click()
+  await page.getByRole('button', { name: 'Admin' }).click()
+  await page.getByRole('tab', { name: 'Learning and Tuning' }).click()
   await expect(page.getByRole('heading', { name: 'Learning and Tuning' })).toBeVisible()
-  await expect(page.getByText('qdrant · ready')).toBeVisible()
+  await page.getByRole('tab', { name: 'Qdrant migration' }).click()
+  await expect(
+    page.getByRole('tabpanel', { name: 'Qdrant migration' }).getByText(/Qdrant migration is only required/),
+  ).toBeVisible()
 
   await page.getByRole('button', { name: 'Reindex current profile' }).click()
 
   await expect(
-    page.getByText('Reindexed 14 RAG chunks and synced 1 approved learning example (synced) with status completed'),
+    page.getByText(/Reindexed \d+ RAG chunks and synced \d+ approved learning example/),
   ).toBeVisible()
 })

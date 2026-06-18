@@ -1337,7 +1337,7 @@ def test_technician_assistant_stream_includes_persisted_session_history(monkeypa
         {
             "id": session_id,
             "assistant_id": "trinity",
-            "user_id": "USER-TECH",
+            "user_id": "USER-TECHNICIAN",
             "user_role": "maintenance_technician",
             "screen": "work_execution_technician",
             "status": "active",

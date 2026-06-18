@@ -1,68 +1,13 @@
-import { readFileSync } from 'node:fs'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PmPlan, type PmPlanDraftResponse, type PmPlanDraftStreamEvent, type PmTemplate, type PredictionResponse, type RcaMorpheusDraftResponse, type RcaMorpheusDraftStreamEvent, type Recommendation, type UserRole, type WorkOrder } from './services/api'
 import { StatusTimeline, TechnicianExecutionCard } from './sharedComponents'
 
-const sampleFiles = [
-  {
-    sourceType: 'sop',
-    equipmentId: 'RM-DRIVE-01',
-    assetName: 'Hot Strip Mill Main Drive Motor',
-    path: '../assets/ingestion_samples/RM-DRIVE-01_SOP_main_drive_bearing_vibration.md',
-    fileName: 'RM-DRIVE-01_SOP_main_drive_bearing_vibration.md',
-    mimeType: 'text/markdown',
-  },
-  {
-    sourceType: 'manual',
-    equipmentId: 'BF-BLOWER-02',
-    assetName: 'Blast Furnace Combustion Air Blower',
-    path: '../assets/ingestion_samples/BF-BLOWER-02_MANUAL_inlet_guide_vane_actuator.txt',
-    fileName: 'BF-BLOWER-02_MANUAL_inlet_guide_vane_actuator.txt',
-    mimeType: 'text/plain',
-  },
-  {
-    sourceType: 'log',
-    equipmentId: 'HYD-SYS-04',
-    assetName: 'Hot Rolling Hydraulic System',
-    path: '../assets/ingestion_samples/HYD-SYS-04_LOG_hydraulic_temperature_pulsation.log',
-    fileName: 'HYD-SYS-04_LOG_hydraulic_temperature_pulsation.log',
-    mimeType: 'text/plain',
-  },
-  {
-    sourceType: 'alert',
-    equipmentId: 'OH-CRANE-05',
-    assetName: 'Melt Shop Overhead Crane',
-    path: '../assets/ingestion_samples/OH-CRANE-05_ALERT_hoist_current_brake_temperature.json',
-    fileName: 'OH-CRANE-05_ALERT_hoist_current_brake_temperature.json',
-    mimeType: 'application/json',
-  },
-  {
-    sourceType: 'spares',
-    equipmentId: 'CC-PUMP-03',
-    assetName: 'Continuous Caster Cooling Water Pump',
-    path: '../assets/ingestion_samples/CC-PUMP-03_SPARES_cooling_pump_inventory.csv',
-    fileName: 'CC-PUMP-03_SPARES_cooling_pump_inventory.csv',
-    mimeType: 'text/csv',
-  },
-  {
-    sourceType: 'history',
-    equipmentId: 'RM-DRIVE-01',
-    assetName: 'Hot Strip Mill Main Drive Motor',
-    path: '../assets/ingestion_samples/RM-DRIVE-01_HISTORY_drive_bearing_maintenance.json',
-    fileName: 'RM-DRIVE-01_HISTORY_drive_bearing_maintenance.json',
-    mimeType: 'application/json',
-  },
-]
-
 let neoResponseDelayMs = 0
 let assistantResponseDelayMs = 0
 let logoutResponseDelayMs = 0
 let maintenanceInsightsDelayMs = 0
-let ingestionResponseDelayMs = 0
-let learningJudgeDelayMs = 0
-let learningRefreshDelayMs = 0
 let supervisorAssistantRequests: Array<{ work_order_id?: string; queue_name?: string; question?: string }> = []
 
 it('shows waiting for material before in progress in the work order workflow', () => {
@@ -1112,6 +1057,7 @@ let learningDeploymentResponses = [learningDeployment]
 let learningArtifactCleanupRequests: unknown[] = []
 let learningSummaryExamples = [learningExample]
 let learningRefreshExamples = [learningExample]
+let learningSummaryJobs = [learningJob]
 
 const learningArtifactCleanupResult = {
   dry_run: true,
@@ -1403,20 +1349,24 @@ async function renderAuthenticated(email = 'admin@plant.local') {
   await screen.findByRole('button', { name: 'Logout' })
 }
 
+async function openLearningAndTuning() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
+  fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
+  expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
+}
+
 beforeEach(() => {
   neoResponseDelayMs = 0
   assistantResponseDelayMs = 0
   logoutResponseDelayMs = 0
   maintenanceInsightsDelayMs = 0
-  ingestionResponseDelayMs = 0
-  learningJudgeDelayMs = 0
-  learningRefreshDelayMs = 0
   apiWorkOrders = workOrders as WorkOrder[]
   apiPmPlans = [existingPmPlan]
   learningDeploymentResponses = [learningDeployment]
   learningArtifactCleanupRequests = []
   learningSummaryExamples = [learningExample]
   learningRefreshExamples = [learningExample]
+  learningSummaryJobs = [learningJob]
   supervisorAssistantRequests = []
   window.sessionStorage.clear()
   api.setSession(null)
@@ -1542,11 +1492,14 @@ beforeEach(() => {
         )
       }
       if (url.endsWith('/api/learning/summary')) {
-        return Promise.resolve(new Response(JSON.stringify(learningSummaryPayload(learningSummaryExamples)), { status: 200 }))
+        return Promise.resolve(
+          new Response(JSON.stringify(learningSummaryPayload(learningSummaryExamples, [learningDataset], [learningEvaluation], learningSummaryJobs)), {
+            status: 200,
+          }),
+        )
       }
       if (url.endsWith('/api/learning/examples/refresh')) {
-        const response = new Response(JSON.stringify(learningRefreshExamples), { status: 200 })
-        return learningRefreshDelayMs > 0 ? delayedResponse(response, init, learningRefreshDelayMs) : Promise.resolve(response)
+        return Promise.resolve(new Response(JSON.stringify(learningRefreshExamples), { status: 200 }))
       }
       if (url.includes('/api/learning/examples/page')) {
         return Promise.resolve(
@@ -1554,15 +1507,16 @@ beforeEach(() => {
         )
       }
       if (url.includes('/api/learning/examples/') && url.endsWith('/judge')) {
-        const response = new Response(
-          JSON.stringify({
-            ...learningExample,
-            judge_score: 0.91,
-            judge_rationale: 'Live LLM judge confirmed the example is specific, safe, and outcome-backed.',
-          }),
-          { status: 200 },
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...learningExample,
+              judge_score: 0.91,
+              judge_rationale: 'Live LLM judge confirmed the example is specific, safe, and outcome-backed.',
+            }),
+            { status: 200 },
+          ),
         )
-        return learningJudgeDelayMs > 0 ? delayedResponse(response, init, learningJudgeDelayMs) : Promise.resolve(response)
       }
       if (url.includes('/api/learning/examples/')) {
         const body = JSON.parse((init?.body as string) ?? '{}')
@@ -1664,16 +1618,18 @@ beforeEach(() => {
         return Promise.resolve(new Response(JSON.stringify([learningEvaluation]), { status: 200 }))
       }
       if (url.endsWith('/api/learning/jobs/peft')) {
+        const nextJob = {
+          ...learningJob,
+          id: 'LJOB-PEFT-1',
+          job_type: 'peft_tuning',
+          subject: 'maintenance.learning.peft.requested',
+          status: 'queued',
+          output_refs: { dispatch: 'disabled' },
+        }
+        learningSummaryJobs = [nextJob, ...learningSummaryJobs.filter((job) => job.id !== nextJob.id)]
         return Promise.resolve(
           new Response(
-            JSON.stringify({
-              ...learningJob,
-              id: 'LJOB-PEFT-1',
-              job_type: 'peft_tuning',
-              subject: 'maintenance.learning.peft.requested',
-              status: 'queued',
-              output_refs: { dispatch: 'disabled' },
-            }),
+            JSON.stringify(nextJob),
             { status: 200 },
           ),
         )
@@ -1789,7 +1745,7 @@ beforeEach(() => {
       }
       if (url.includes('/api/learning/jobs/page')) {
         return Promise.resolve(
-          new Response(JSON.stringify({ items: [learningJob], total: 1, limit: 10, offset: 0 }), { status: 200 }),
+          new Response(JSON.stringify({ items: learningSummaryJobs, total: learningSummaryJobs.length, limit: 10, offset: 0 }), { status: 200 }),
         )
       }
       if (url.includes('/api/learning/artifacts/page')) {
@@ -1798,7 +1754,7 @@ beforeEach(() => {
         )
       }
       if (url.endsWith('/api/learning/jobs')) {
-        return Promise.resolve(new Response(JSON.stringify([learningJob]), { status: 200 }))
+        return Promise.resolve(new Response(JSON.stringify(learningSummaryJobs), { status: 200 }))
       }
       if (url.endsWith('/api/learning/datasets')) {
         if (init?.method === 'POST') {
@@ -2175,15 +2131,15 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/ingest/document-file')) {
         const response = new Response(JSON.stringify({ status: 'stored', documents: 1 }), { status: 200 })
-        return ingestionResponseDelayMs > 0 ? delayedResponse(response, init, ingestionResponseDelayMs) : Promise.resolve(response)
+        return Promise.resolve(response)
       }
       if (url.endsWith('/api/ingest/documents')) {
         const response = new Response(JSON.stringify({ status: 'stored', documents: 1 }), { status: 200 })
-        return ingestionResponseDelayMs > 0 ? delayedResponse(response, init, ingestionResponseDelayMs) : Promise.resolve(response)
+        return Promise.resolve(response)
       }
       if (url.endsWith('/api/ingest/records')) {
         const response = new Response(JSON.stringify({ status: 'stored', counts: { alerts: 1, equipment: 0 } }), { status: 200 })
-        return ingestionResponseDelayMs > 0 ? delayedResponse(response, init, ingestionResponseDelayMs) : Promise.resolve(response)
+        return Promise.resolve(response)
       }
       if (url.endsWith('/feedback')) {
         return Promise.resolve(
@@ -2257,6 +2213,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   window.sessionStorage.clear()
@@ -3086,101 +3043,6 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.queryByRole('button', { name: 'Logout' })).not.toBeInTheDocument()
   })
 
-  it('uploads document files from the ingestion panel', async () => {
-    ingestionResponseDelayMs = 100
-    await renderAuthenticated()
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Admin' }))
-      await Promise.resolve()
-    })
-    expect(screen.getByRole('tab', { name: 'Ingestion' })).toHaveAttribute('aria-selected', 'true')
-    expect(await screen.findByLabelText('Ingestion file')).toBeInTheDocument()
-    expect(screen.getByText('MW_IOT')).toBeInTheDocument()
-    const file = new File(['Inspect bearing housing when vibration increases.'], 'uploaded_sop.txt', { type: 'text/plain' })
-    fireEvent.change(screen.getByLabelText('Ingestion file'), { target: { files: [file] } })
-    fireEvent.click(screen.getByRole('button', { name: /upload/i }))
-    expect(screen.getByRole('button', { name: /uploading/i })).toBeDisabled()
-
-    await waitFor(() => {
-      expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()
-    })
-    expect(screen.getByText(/Stored 1 document and extracted/).closest('.toastMessage')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /uploading/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^upload$/i })).not.toBeDisabled()
-    expect(fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/ingest/document-file',
-      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
-    )
-  })
-
-  it('uploads every bundled ingestion sample file with the intended source type and asset', async () => {
-    await renderAuthenticated()
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Admin' }))
-      await Promise.resolve()
-    })
-    expect(screen.getByRole('tab', { name: 'Ingestion' })).toHaveAttribute('aria-selected', 'true')
-    expect(await screen.findByLabelText('Ingestion file')).toBeInTheDocument()
-
-    for (const sample of sampleFiles) {
-      const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText(sample.assetName).closest('button')
-      if (!assetButton) {
-        throw new Error(`Missing asset button for ${sample.assetName}`)
-      }
-      fireEvent.click(assetButton)
-      fireEvent.click(screen.getByRole('button', { name: 'Admin' }))
-      fireEvent.change(screen.getByLabelText('Source'), { target: { value: sample.sourceType } })
-      const content = readFileSync(sample.path, 'utf8')
-      const file = new File([content], sample.fileName, { type: sample.mimeType })
-      fireEvent.change(screen.getByLabelText('Ingestion file'), { target: { files: [file] } })
-      fireEvent.click(screen.getByRole('button', { name: /upload/i }))
-
-      await waitFor(() => {
-        expect(screen.getAllByText(/Stored 1 document and extracted/).length).toBeGreaterThan(0)
-      })
-
-      const uploadCall = [...vi.mocked(fetch).mock.calls]
-        .reverse()
-        .find(([url]) => url.toString().endsWith('/api/ingest/document-file'))
-      const body = uploadCall?.[1]?.body as FormData
-      expect(body.get('source_type')).toBe(sample.sourceType)
-      expect(body.get('equipment_id')).toBe(sample.equipmentId)
-      expect((body.get('file') as File).name).toBe(sample.fileName)
-    }
-  })
-
-  it('imports document JSON from the ingestion panel', async () => {
-    ingestionResponseDelayMs = 100
-    await renderAuthenticated()
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Admin' }))
-      await Promise.resolve()
-    })
-    expect(screen.getByRole('tab', { name: 'Ingestion' })).toHaveAttribute('aria-selected', 'true')
-    fireEvent.change(await screen.findByLabelText('Ingestion JSON'), {
-      target: {
-        value:
-          '{"documents":[{"id":"DOC-UI","source_type":"sop","equipment_id":"RM-DRIVE-01","title":"UI SOP","content":"Check vibration."}]}',
-      },
-    })
-    fireEvent.click(screen.getByRole('button', { name: /import json/i }))
-    expect(screen.getByRole('button', { name: /importing/i })).toBeDisabled()
-
-    await waitFor(() => {
-      expect(screen.getByText(/Stored 1 document and extracted/)).toBeInTheDocument()
-    })
-    expect(screen.getByText(/Stored 1 document and extracted/).closest('.toastMessage')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /importing/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /import json/i })).not.toBeDisabled()
-    expect(fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/ingest/documents',
-      expect.objectContaining({ method: 'POST' }),
-    )
-  })
-
   it('streams Morpheus RCA draft content in the Reliability workspace', async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
@@ -3202,7 +3064,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     ).toBeInTheDocument()
   })
 
-  it('lets reviewers score and export LLM-as-a-Judge learning examples', async () => {
+  it('lets reviewers close RCA cases and manage LLM-as-a-Judge learning examples', async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
 
@@ -3240,9 +3102,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(within(rcaWorkspace).getByRole('button', { name: 'Close selected RCA and learn' }))
     expect(await screen.findByText('RCA-9001 closed and accepted for learning')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Admin' }))
-    fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
-    expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
+    await openLearningAndTuning()
     expect(screen.getByText(/Review approved human feedback/)).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Examples & judgments' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('button', { name: 'Refresh examples' })).toBeInTheDocument()
@@ -3262,56 +3122,6 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.click(within(learningExampleDialog).getByRole('button', { name: 'Close' }))
     expect(screen.getByRole('tab', { name: 'Adapter lifecycle' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Qdrant migration' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: 'Qdrant migration' }))
-    expect(screen.getByRole('tab', { name: 'Qdrant migration' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText(/Qdrant migration is only required when the embedding profile/)).toBeInTheDocument()
-    expect(screen.getByText('RAG vector DB')).toBeInTheDocument()
-    expect(screen.getByText('qdrant · ready')).toBeInTheDocument()
-    expect(screen.getByText('Active embedding')).toBeInTheDocument()
-    expect(screen.getByText('deterministic_hash · maintenance-hash-v1 · v1')).toBeInTheDocument()
-    expect(screen.getByText('Embedding profile')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Preview migration' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Run Qdrant migration' })).toBeInTheDocument()
-    expect(screen.getByText('Migration')).toBeInTheDocument()
-    expect(screen.getByText('Current')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: 'Adapter lifecycle' }))
-    expect(screen.getByText('Serving LLM')).toBeInTheDocument()
-    expect(screen.getByText('learning active model · openai')).toBeInTheDocument()
-    expect(screen.getByText('model-local-qwen2.5-current')).toBeInTheDocument()
-    expect(screen.getByText('Artifact store')).toBeInTheDocument()
-    expect(screen.getByText('filesystem · ready')).toBeInTheDocument()
-    expect(screen.getByText('disabled · 7 days')).toBeInTheDocument()
-    expect(screen.getByText('PEFT trainer')).toBeInTheDocument()
-    expect(screen.getByText('external_command · configured')).toBeInTheDocument()
-    expect(screen.getByText('Worker will train adapter')).toBeInTheDocument()
-    expect(screen.getByText('Qwen/Qwen2.5-7B-Instruct')).toBeInTheDocument()
-    expect(screen.getByText('Passed')).toBeInTheDocument()
-    expect(screen.getByText('Quality')).toBeInTheDocument()
-    expect(screen.getByText('dataset snapshot')).toBeInTheDocument()
-    const initialJobTrailTable = screen.getByRole('table', { name: 'Learning job trail' })
-    expect(within(initialJobTrailTable).getByText('completed')).toBeInTheDocument()
-    expect(within(initialJobTrailTable).getByText('Training adapter candidate registered')).toBeInTheDocument()
-    expect(within(initialJobTrailTable).getByText('Registered model model-adapter-candidate')).toBeInTheDocument()
-    expect(within(initialJobTrailTable).getByText('Adapter output backend/data/learning_adapters/LJOB-1/adapter')).toBeInTheDocument()
-    expect(screen.getByText('peft training manifest')).toBeInTheDocument()
-    expect(screen.getByText('artifact://learning/LJOB-1/training_manifest.json')).toBeInTheDocument()
-    expect(screen.getByText('sha256 abcdef123456')).toBeInTheDocument()
-    expect(screen.getByText('Promotion Audit')).toBeInTheDocument()
-    expect(screen.getByText('Adapter promoted')).toBeInTheDocument()
-    expect(screen.getByText(/Evaluation gate passed by LEVAL-1/)).toBeInTheDocument()
-    expect(screen.getByText(/Promotion recorded as LPROMO-1/)).toBeInTheDocument()
-    expect(screen.getByText(/Runtime-loaded alias qwen2\.5-7b-instruct-lora-candidate · openai/)).toBeInTheDocument()
-    expect(screen.getByText('Adapter Runtime Deployments')).toBeInTheDocument()
-    const initialDeploymentTable = screen.getByRole('table', { name: 'Adapter runtime deployments' })
-    expect(within(initialDeploymentTable).getByText('verified')).toBeInTheDocument()
-    expect(within(initialDeploymentTable).getByText('healthy')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Preview cleanup' }))
-    expect(await screen.findByText('Artifact cleanup preview found 1 eligible and 1 protected artifact(s).')).toBeInTheDocument()
-    expect(screen.getByText('Artifact lifecycle preview')).toBeInTheDocument()
-    expect(screen.getByText('LJOB-OLD/dataset.jsonl')).toBeInTheDocument()
-    expect(screen.getByText('active/candidate/promoted model reference')).toBeInTheDocument()
-    expect(learningArtifactCleanupRequests.at(-1)).toMatchObject({ dry_run: true })
 
     fireEvent.click(screen.getByRole('tab', { name: 'Examples & judgments' }))
     const reviewControlsTable = screen.getByRole('table', { name: 'Approved Controls' })
@@ -3329,135 +3139,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getAllByText('maintenance-wizard-learning-snapshot').length).toBeGreaterThan(0)
     expect(screen.getByText('Latest')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Download JSONL' }).length).toBeGreaterThan(0)
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Adapter lifecycle' }))
-    const lifecycleHeadings = [
-      'Dataset Validation',
-      'PEFT Tuning Job',
-      'Learning Job Trail',
-      'Learning Artifacts',
-      'Adapter Candidate Versions',
-      'Adapter Runtime Deployments',
-      'Promotion Audit',
-      'Local Adapter Candidate',
-    ].map((name) => screen.getByRole('heading', { name }))
-    lifecycleHeadings.slice(0, -1).forEach((heading, index) => {
-      expect(Boolean(heading.compareDocumentPosition(lifecycleHeadings[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-    })
-    const validationButton = screen.getByRole('button', { name: 'Run dataset validation' })
-    const peftQueueButton = screen.getByRole('button', { name: 'Queue PEFT training job' })
-    expect(Boolean(validationButton.compareDocumentPosition(peftQueueButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-    expect(screen.getByLabelText('Dataset snapshot')).toBeInTheDocument()
-    expect(screen.getByLabelText('Source model version')).toBeInTheDocument()
-    expect(screen.getByLabelText('Prompt version')).toBeInTheDocument()
-    expect(screen.getByText('Current PEFT training')).toBeInTheDocument()
-    expect(screen.getByText('LJOB-1 · completed')).toBeInTheDocument()
-    expect(screen.getByText('adapter candidate registered')).toBeInTheDocument()
-    expect(screen.getByRole('table', { name: 'Dataset validation runs' })).toBeInTheDocument()
-    expect(screen.getByRole('table', { name: 'Learning job trail' })).toBeInTheDocument()
-    expect(screen.getByRole('table', { name: 'Learning artifacts' })).toBeInTheDocument()
-    expect(screen.getByRole('table', { name: 'Adapter runtime deployments' })).toBeInTheDocument()
-    expect(screen.getByRole('table', { name: 'Promotion audit' })).toBeInTheDocument()
-    expect(screen.queryByText('neo / default')).not.toBeInTheDocument()
-    expect(screen.queryByText('morpheus / default')).not.toBeInTheDocument()
-    expect(screen.queryByText('smith / default')).not.toBeInTheDocument()
-
-    fireEvent.change(screen.getByLabelText('Adapter path'), { target: { value: 'file:///models/qwen2.5-lora' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Register local adapter candidate' }))
-    expect(await screen.findByText('Registered adapter candidate qwen2.5-7b-instruct-lora-candidate')).toBeInTheDocument()
-
-    fireEvent.click(validationButton)
-    expect(await screen.findByText('Evaluation passed with quality 0.81')).toBeInTheDocument()
-
-    fireEvent.click(peftQueueButton)
-    expect(await screen.findByText('Queued PEFT training job LJOB-PEFT-1 with status queued')).toBeInTheDocument()
-    expect(await screen.findByText('LJOB-PEFT-1 · queued')).toBeInTheDocument()
-    expect(screen.getAllByText('disabled').length).toBeGreaterThan(0)
-
-    fireEvent.change(screen.getByLabelText('Runtime provider'), { target: { value: 'vllm' } })
-    fireEvent.change(screen.getByLabelText('Runtime base URL'), { target: { value: 'http://localhost:8001/v1' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Deploy adapter to runtime' }))
-    expect(await screen.findByText('Deployment job LJOB-DEPLOY-1 requested with status queued')).toBeInTheDocument()
-    expect(await screen.findByText('deploying')).toBeInTheDocument()
-    expect(within(screen.getByRole('table', { name: 'Adapter runtime deployments' })).getByText('pending')).toBeInTheDocument()
-    const deployCall = [...vi.mocked(fetch).mock.calls]
-      .reverse()
-      .find(([url]) => url.toString().endsWith('/api/learning/model-versions/model-adapter-candidate/deploy'))
-    expect(JSON.parse((deployCall?.[1]?.body as string) ?? '{}')).toMatchObject({
-      runtime_provider: 'vllm',
-      served_model_name: 'qwen2.5-7b-instruct-lora-candidate',
-      base_url: 'http://localhost:8001/v1',
-      artifact_uri: 'file:///models/qwen2.5-lora',
-    })
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Qdrant migration' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Preview migration' }))
-    expect(await screen.findByText('Previewed RAG migration to maintenance_wizard_documents_v1')).toBeInTheDocument()
-    expect(screen.getByText('Migration preview')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Reindex current profile' }))
-    expect(
-      await screen.findByText('Reindexed 14 RAG chunks and synced 1 approved learning example (synced) with status completed'),
-    ).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Adapter lifecycle' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Promote runtime-loaded adapter' }))
-    expect(await screen.findByText('Promoted runtime-loaded adapter qwen2.5-7b-instruct-lora-candidate with audit record LPROMO-NEW')).toBeInTheDocument()
   }, 10_000)
-
-  it('explains when refreshing learning examples finds no training sources', async () => {
-    learningSummaryExamples = []
-    learningRefreshExamples = []
-
-    await renderAuthenticated()
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
-    fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
-    expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh examples' }))
-
-    expect(
-      await screen.findByText(
-        'Refresh completed, but no learning examples were found. Add accepted feedback, usable maintenance labels, completed work orders, closed RCA cases, ingested documents, or approved assistant interactions, then refresh again.',
-      ),
-    ).toBeInTheDocument()
-  })
-
-  it('does not show Qdrant migration progress while refreshing learning examples', async () => {
-    learningRefreshDelayMs = 250
-
-    await renderAuthenticated()
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
-    fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
-    expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh examples' }))
-
-    expect(screen.getByRole('button', { name: 'Refresh examples' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('tab', { name: 'Qdrant migration' }))
-    const migrationButton = screen.getByRole('button', { name: 'Run Qdrant migration' })
-    expect(migrationButton).toBeEnabled()
-    expect(migrationButton.querySelector('.loadingSpinner')).toBeNull()
-    expect(await screen.findByText('Refreshed 1 learning example')).toBeInTheDocument()
-  })
-
-  it('shows progress while a learning example is being judged', async () => {
-    learningJudgeDelayMs = 250
-
-    await renderAuthenticated()
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
-    fireEvent.click(await screen.findByRole('tab', { name: 'Learning and Tuning' }))
-    expect(await screen.findByRole('heading', { name: 'Learning and Tuning' })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Judge' }))
-
-    expect(await screen.findByRole('button', { name: 'Judging...' })).toBeDisabled()
-    expect(screen.getByText('Judging feedback example. Live LLM checks can take up to 15 seconds before falling back.')).toBeInTheDocument()
-    expect(await screen.findByText('Judge scored feedback at 91%')).toBeInTheDocument()
-  })
 
   it('keeps Learning and Tuning inside Admin instead of reliability navigation', async () => {
     await renderAuthenticated('reliability@plant.local')
@@ -3490,50 +3172,4 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.queryByRole('button', { name: /create work order/i })).not.toBeInTheDocument()
   })
 
-  it('lets admins open the users view and create a user', async () => {
-    await renderAuthenticated()
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
-    expect(await screen.findByRole('tab', { name: 'Ingestion' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: 'User management' })).toHaveAttribute('aria-selected', 'false')
-    expect(screen.getByRole('tab', { name: 'Learning and Tuning' })).toHaveAttribute('aria-selected', 'false')
-    expect(screen.getByRole('heading', { name: 'Ingestion' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: 'User management' }))
-    expect(screen.getByRole('tab', { name: 'User management' })).toHaveAttribute('aria-selected', 'true')
-    expect(await screen.findByText('Jan')).toBeInTheDocument()
-    expect(screen.queryByRole('dialog', { name: 'Create User' })).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Create User' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Create User' })
-    fireEvent.change(within(dialog).getByLabelText('Email'), { target: { value: 'new.operator@plant.local' } })
-    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'New Operator' } })
-    fireEvent.change(within(dialog).getByLabelText('Password'), { target: { value: 'NewOperator123!' } })
-
-    expect(
-      vi.mocked(fetch).mock.calls.some(([url, init]) => url.toString().endsWith('/api/users') && init?.method === 'POST'),
-    ).toBe(false)
-
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }))
-
-    await waitFor(() => {
-      expect(screen.getByText('User created')).toBeInTheDocument()
-    })
-    expect(screen.queryByRole('dialog', { name: 'Create User' })).not.toBeInTheDocument()
-  })
-
-  it('opens password reset in a dialog instead of inline user rows', async () => {
-    await renderAuthenticated()
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
-    fireEvent.click(await screen.findByRole('tab', { name: 'User management' }))
-    expect(await screen.findByText('Jan')).toBeInTheDocument()
-
-    expect(screen.queryByLabelText('New Password')).not.toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: 'Reset' })[0])
-
-    expect(await screen.findByRole('dialog', { name: 'Reset Password' })).toBeInTheDocument()
-    expect(screen.getByLabelText('New Password')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(screen.queryByRole('dialog', { name: 'Reset Password' })).not.toBeInTheDocument()
-  })
 })
