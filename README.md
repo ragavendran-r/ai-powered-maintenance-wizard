@@ -8,15 +8,15 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 
 - Steel-plant maintenance wizard for asset health review, diagnosis, work orders, preventive planning, reporting, ingestion, and feedback-driven learning.
 - Built with a FastAPI/Pydantic backend, React + TypeScript + Vite frontend, local SQLite persistence, and JWT role-based access control.
-- Uses NATS JetStream for IoT ingestion and async learning jobs, Qdrant for production-like vector retrieval, and deterministic local fallbacks for offline development.
-- LLM support is provider-agnostic across mock, OpenAI-compatible, and Ollama runtimes, with structured validation, token/time budgets, streaming, and deterministic fallback behavior.
+- Uses NATS JetStream for IoT ingestion and async learning jobs, Qdrant for production-like vector retrieval, and deterministic local fallbacks for offline or degraded development paths.
+- LLM support is provider-agnostic across mock, OpenAI-compatible, and Ollama runtimes, with structured validation, token/time budgets, live streaming, and explicit degraded-mode fallback behavior.
 - The recommended local LLM setup serves a Qwen2.5 7B GGUF base plus PEFT/LoRA adapter through llama.cpp's OpenAI-compatible API, with LM Studio still supported for base or fused-model workflows.
 
 ## AI Capabilities
 
 The AI layer is an audited maintenance copilot layered after deterministic backend controls. Raw IoT ingestion, anomaly scoring, risk calculation, role permissions, and persisted work-order updates stay in deterministic flows; AI explains, retrieves evidence, guides role-specific work, and helps turn reviewed outcomes into reusable learning material.
 
-- Provider modes: `mock` for deterministic offline development/tests, `openai` for OpenAI-compatible runtimes such as llama.cpp, LM Studio, or vLLM, and `ollama` for local Ollama. Live providers share structured-output validation, token limits, timeouts, streaming support, and deterministic fallback behavior.
+- Provider modes: `mock` for deterministic offline development/tests, `openai` for OpenAI-compatible runtimes such as llama.cpp, LM Studio, or vLLM, and `ollama` for local Ollama. Live providers share structured-output validation, token limits, timeouts, streaming support, and explicit error/degraded-mode handling; user-visible assistant prose streams from the configured live model when one is available.
 - Role-aware assistants: Neo supports command-center and work-order workflows, Morpheus supports diagnosis/RCA/PM planning, and Smith explains reliability prediction and technician-ready preventive-maintenance steps.
 - Local LLM runtime: The recommended adapter-serving setup is llama.cpp with a Qwen2.5 GGUF base model and a GGUF LoRA adapter served through the OpenAI-compatible endpoint at `http://127.0.0.1:8080/v1`. LM Studio remains supported as an optional OpenAI-compatible runtime for base models or fused adapter models:
 
@@ -66,7 +66,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 - SQLite-backed persistence seeded from five sample assets with equipment, asset profiles, asset metrics, recommendations, subsystems, reliability metrics, alerts, sensor readings, spares, maintenance events, work orders, PM templates, PM plans, planner schedules, dispatch metadata, spare reservations, reorder/procurement blockers, work logs, SOP/manual/log/history evidence, document chunks, document intelligence, maintenance labels, and feedback.
 - Local document chunk index with deterministic embeddings, hybrid retrieval scoring, optional LLM/SLM reranking, and relevance reasons for offline retrieval-augmented answers.
 - Time-series sensor readings with rolling-baseline anomaly detection, risk impact, and optional LLM/SLM context classification with inspection steps.
-- Provider-agnostic LLM/SLM adapters for OpenAI and Ollama with structured JSON validation and deterministic fallback reasoning.
+- Provider-agnostic LLM/SLM adapters for OpenAI and Ollama with readable text streaming, structured JSON validation, and explicit degraded fallback/error handling.
 - Markdown maintenance report export.
 - API and frontend ingestion for text/Markdown/CSV/log/JSON and embedded-text PDF documents.
 - Structured JSON record ingestion for equipment, alerts, spares, sensor readings, and maintenance history.
@@ -87,7 +87,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 - Proactive abnormality detection through rolling baseline, z-score, threshold breach, trend-delta analysis, and context classification.
 - Prioritized maintenance actions based on risk level, active alerts, equipment criticality, spares availability, lead time, maintenance history, and feedback signals.
 - Work-order lifecycle support with WAPPR, APPR, WMATL, INPRG, COMP, and CLOSE status tracking, assignment, priority, problem code, recommended action, follow-up flags, and work logs.
-- Preventive maintenance planning with seeded PM templates, Morpheus-drafted recurring or condition-based plans, monitoring thresholds, generated task lists, Smith technician-ready steps, and conversion from risk prediction into planned PM work orders.
+- Preventive maintenance planning with seeded PM templates, live formatted Morpheus PM draft streams, monitoring thresholds, generated task lists, streamed Smith technician-ready steps, and conversion from risk prediction into planned PM work orders.
 - Structured Markdown report export with diagnosis, risk, RUL, root causes, immediate actions, planned actions, spares strategy, learning notes, evidence, and summary.
 - Continuous-improvement loop through equipment-linked engineer feedback, maintenance labels, work-order outcomes, approved assistant interactions, and LLM-as-a-Judge scores reused in future recommendation ranking, RAG prompt context, JSONL tuning snapshots, reports, and prediction drivers.
 
@@ -260,9 +260,9 @@ Supported LLM provider values:
 
 For local llama.cpp adapter inference, use the `openai` provider mode with the endpoint and deployer settings summarized in `AI Capabilities`. For LM Studio base-model or fused-model inference, use `OPENAI_BASE_URL=http://localhost:1234/v1` and see `docs/local-llm-lm-studio.md` for install, model loading, `.env`, and smoke-test steps.
 
-When `LLM_USE_ACTIVE_LEARNING_MODEL=true`, real OpenAI-compatible or Ollama provider calls resolve the currently active `learning_model_versions` record before building the serving client. A promoted adapter candidate therefore changes the model id sent by Neo, Morpheus, Smith, recommendation, labeling, reranking, and document-intelligence calls without bypassing deterministic fallback or role checks. The `mock` provider intentionally ignores active model resolution so automated tests remain deterministic.
+When `LLM_USE_ACTIVE_LEARNING_MODEL=true`, real OpenAI-compatible or Ollama provider calls resolve the currently active `learning_model_versions` record before building the serving client. A promoted adapter candidate therefore changes the model id sent by Neo, Morpheus, Smith, recommendation, labeling, reranking, and document-intelligence calls without bypassing role checks or explicit degraded-mode handling. The `mock` provider intentionally ignores active model resolution so automated tests remain deterministic.
 
-Provider responses must return the structured JSON contract requested by each feature. Recommendation generation expects `summary`, `probable_root_causes`, `immediate_actions`, `planned_actions`, and `confidence_adjustment`; document intelligence, maintenance labels, anomaly context, retrieval reranking, and reasoning explanations each use their own Pydantic-validated JSON schemas. Missing keys, malformed JSON, timeout, or network failure automatically fall back to deterministic local reasoning so the prototype remains runnable without secrets.
+Provider responses must return the structured JSON contract requested by each feature. Recommendation generation expects `summary`, `probable_root_causes`, `immediate_actions`, `planned_actions`, and `confidence_adjustment`; document intelligence, maintenance labels, anomaly context, retrieval reranking, and reasoning explanations each use their own Pydantic-validated JSON schemas. Missing keys, malformed JSON, timeout, or network failure can fall back to deterministic local reasoning for offline structured enrichment so the prototype remains runnable without secrets. User-visible live assistant streams surface explicit provider/degraded-mode errors instead of replacing live prose with static deterministic answers.
 
 The backend creates and seeds `backend/data/maintenance_wizard.db` automatically on startup unless `DATABASE_PATH` is set to another SQLite file path. Asset-detail seed SQL loads normalized profile, metric, recommendation, subsystem, reliability, maintenance, work-order, and document evidence records for all five sample assets. Documents are chunked into `document_chunks` with deterministic local embeddings for retrieval.
 

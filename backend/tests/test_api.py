@@ -4927,6 +4927,74 @@ def test_learning_example_can_be_scored_by_judge_endpoint():
     assert payload["judge_rationale"]
 
 
+def test_learning_example_judge_endpoint_calls_configured_live_llm(monkeypatch):
+    headers = auth_headers()
+    refresh_response = client.post("/api/learning/examples/refresh", headers=headers)
+    example = refresh_response.json()[0]
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "```json\n"
+                                + json.dumps(
+                                    {
+                                        "score": 0.93,
+                                        "label": "training_worthy",
+                                        "reason": "Live judge verified that the example is specific, grounded, and safe.",
+                                        "strengths": ["Specific asset context", "Outcome-backed"],
+                                        "risks": [],
+                                        "used_live_provider": True,
+                                        "provider": "openai",
+                                    }
+                                )
+                                + "\n```"
+                            )
+                        }
+                    }
+                ]
+            }
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append({"url": url, "headers": headers, "payload": json, "timeout": timeout})
+        return FakeResponse()
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-live-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://llm.test/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "judge-test-model")
+    monkeypatch.setenv("LLM_USE_ACTIVE_LEARNING_MODEL", "false")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.services.llm.httpx.post", fake_post)
+    try:
+        response = client.post(f"/api/learning/examples/{example['id']}/judge", headers=headers)
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert calls
+    assert calls[0]["url"] == "http://llm.test/v1/chat/completions"
+    assert calls[0]["payload"]["model"] == "judge-test-model"
+    assert calls[0]["payload"]["max_tokens"] == 192
+    assert calls[0]["timeout"] == 45.0
+    assert calls[0]["payload"]["response_format"]["type"] == "json_object"
+    assert "LLM-as-a-Judge" in calls[0]["payload"]["messages"][0]["content"]
+    assert "Score whether this maintenance example" in calls[0]["payload"]["messages"][1]["content"]
+    assert payload["judge_score"] == 0.93
+    assert payload["judge_label"] == "training_worthy"
+    assert payload["judge_rationale"] == "Live judge verified that the example is specific, grounded, and safe."
+    assert payload["judge_used_live_provider"] is True
+    assert payload["judge_provider"] == "openai"
+
+
 def test_learning_example_approval_can_be_changed_by_admin():
     headers = auth_headers()
     refresh_response = client.post("/api/learning/examples/refresh", headers=headers)

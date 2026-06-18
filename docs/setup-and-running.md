@@ -181,7 +181,7 @@ In LM Studio, load a stable model identifier such as:
 qwen2.5-7b-instruct
 ```
 
-The backend uses both llama.cpp and LM Studio through the OpenAI-compatible provider mode. If no local LLM runtime is available, keep `LLM_PROVIDER=mock` or rely on the deterministic fallback behavior.
+The backend uses both llama.cpp and LM Studio through the OpenAI-compatible provider mode. If no local LLM runtime is available, keep `LLM_PROVIDER=mock` for offline deterministic development. Live assistant streams should use a reachable provider and surface explicit provider/degraded-mode errors rather than substituting static assistant prose.
 
 ## 9. Verify The Application
 

@@ -523,7 +523,7 @@ def _fallback_context(provider: str, reason: str) -> LLMContext:
 
 
 def _parse_model(content: str, response_model: type[T], provider: str) -> T:
-    payload = json.loads(content)
+    payload = json.loads(_structured_json_content(content))
     context = response_model.model_validate(payload)
     update_payload = {}
     if "used_live_provider" in response_model.model_fields:
@@ -531,3 +531,17 @@ def _parse_model(content: str, response_model: type[T], provider: str) -> T:
     if "provider" in response_model.model_fields:
         update_payload["provider"] = provider
     return context.model_copy(update=update_payload)
+
+
+def _structured_json_content(content: str) -> str:
+    value = content.strip()
+    if value.startswith("```"):
+        value = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", value)
+        value = re.sub(r"\s*```$", "", value).strip()
+    if value.startswith("{") and value.endswith("}"):
+        return value
+    start = value.find("{")
+    end = value.rfind("}")
+    if start >= 0 and end > start:
+        return value[start : end + 1]
+    return value
