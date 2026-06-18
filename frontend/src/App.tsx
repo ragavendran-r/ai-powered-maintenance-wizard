@@ -2076,21 +2076,25 @@ export function App() {
     scrollStreamToBottom(neoTranscriptRef)
   }
 
-  function sendFeedback(status: 'accepted' | 'rejected' | 'corrected') {
+  async function sendFeedback(status: 'accepted' | 'rejected' | 'corrected') {
     if (!recommendation) return
-    api
-      .feedback(recommendation.id, status, recommendation.equipment_id, {
+    setFeedbackMessage('')
+    try {
+      const response = await api.feedback(recommendation.id, status, recommendation.equipment_id, {
         actualRootCause: feedbackRootCause.trim() || undefined,
         actionTaken: feedbackActionTaken.trim() || undefined,
         outcome: feedbackOutcome.trim() || undefined,
         notes: feedbackNotes.trim() || undefined,
       })
-      .then(() => setFeedbackMessage(`${status} feedback stored`))
-      .catch(() => setFeedbackMessage('Feedback could not be stored'))
+      setFeedbackMessage(`${status} feedback stored. ${response.message}`)
+    } catch {
+      setFeedbackMessage('Feedback could not be stored or indexed in RAG')
+    }
   }
 
   async function downloadReport() {
     if (!recommendation) return
+    setReportMessage('')
     try {
       const markdown = await api.reportMarkdown(recommendation.equipment_id)
       const blob = new Blob([markdown], { type: 'text/markdown' })
@@ -2098,7 +2102,9 @@ export function App() {
       const link = document.createElement('a')
       link.href = url
       link.download = `${recommendation.equipment_id}-maintenance-report.md`
+      document.body.appendChild(link)
       link.click()
+      link.remove()
       window.URL.revokeObjectURL(url)
       setReportMessage('Report downloaded')
     } catch {
@@ -3479,12 +3485,14 @@ export function App() {
         diagnosisUsedLive={diagnosisUsedLive}
         downloadReport={downloadReport}
         feedbackActionTaken={feedbackActionTaken}
+        feedbackMessage={feedbackMessage}
         feedbackNotes={feedbackNotes}
         feedbackOutcome={feedbackOutcome}
         feedbackRootCause={feedbackRootCause}
         morpheusProgressRef={morpheusProgressRef}
         onOpenWorkOrder={openWorkOrderRoute}
         recommendation={recommendation}
+        reportMessage={reportMessage}
         reliabilityStreamRef={reliabilityStreamRef}
         runDiagnosis={runDiagnosis}
         selectedEquipment={selectedEquipment}

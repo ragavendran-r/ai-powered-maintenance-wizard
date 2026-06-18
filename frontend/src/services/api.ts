@@ -690,6 +690,12 @@ export interface MaintenanceLabelsResponse {
   labels: MaintenanceLabel[]
 }
 
+export interface FeedbackResponse {
+  recommendation_id: string
+  stored: boolean
+  message: string
+}
+
 export interface LearningExample {
   id: string
   source_type: string
@@ -1666,7 +1672,7 @@ export const api = {
     equipmentId?: string,
     details?: { actualRootCause?: string; actionTaken?: string; outcome?: string; notes?: string },
   ) =>
-    request(`/api/recommendations/${recommendationId}/feedback`, {
+    request<FeedbackResponse>(`/api/recommendations/${recommendationId}/feedback`, {
       method: 'POST',
       body: JSON.stringify({
         status,

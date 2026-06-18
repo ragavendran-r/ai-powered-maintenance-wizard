@@ -991,14 +991,16 @@ def predict(request: PredictionRequest):
     dependencies=[Depends(require_roles(*FEEDBACK_ROLES))],
 )
 def store_feedback(recommendation_id: str, feedback: FeedbackRequest):
-    repository.save_feedback(recommendation_id, feedback.model_dump())
+    rag_index_result = repository.save_feedback(recommendation_id, feedback.model_dump())
     saved_feedback = repository.list_feedback(feedback.equipment_id)[0] if feedback.equipment_id else repository.list_feedback()[0]
     label_feedback(saved_feedback)
     refresh_learning_examples(include_documents=False, include_interactions=False)
+    rag_state = str(rag_index_result.get("state") or "unknown").replace("_", " ")
+    rag_indexed = rag_index_result.get("indexed", 0)
     return FeedbackResponse(
         recommendation_id=recommendation_id,
         stored=True,
-        message="Feedback stored for future recommendation context.",
+        message=f"Feedback stored for future recommendation context. Plant RAG index {rag_state}; records indexed: {rag_indexed}.",
     )
 
 
