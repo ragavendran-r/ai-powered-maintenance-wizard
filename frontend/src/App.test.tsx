@@ -2147,7 +2147,16 @@ beforeEach(() => {
         return ingestionResponseDelayMs > 0 ? delayedResponse(response, init, ingestionResponseDelayMs) : Promise.resolve(response)
       }
       if (url.endsWith('/feedback')) {
-        return Promise.resolve(new Response(JSON.stringify({ stored: true }), { status: 200 }))
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              recommendation_id: 'REC-1',
+              stored: true,
+              message: 'Feedback stored for future recommendation context. Plant RAG index synced; records indexed: 1.',
+            }),
+            { status: 200 },
+          ),
+        )
       }
       if (url.includes('/api/reports/maintenance-insights/markdown')) {
         return Promise.resolve(new Response('# Structured Maintenance Insights', { status: 200 }))
@@ -2628,6 +2637,11 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
   })
 
   it('runs diagnosis and exposes report export action', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:morpheus-report')
+    const revokeObjectUrl = vi.fn()
+    Object.defineProperty(window.URL, 'createObjectURL', { configurable: true, value: createObjectUrl })
+    Object.defineProperty(window.URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl })
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
     await renderAuthenticated()
 
     const assetButton = within(screen.getByLabelText('Tracked priority assets')).getByText('Hot Strip Mill Main Drive Motor').closest('button')
@@ -2647,7 +2661,14 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     const diagnosisHeading = screen.getByRole('heading', { name: 'Diagnosis and recommendation' })
     expect(Boolean(diagnosisHeading.compareDocumentPosition(recommendationHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(screen.queryByRole('heading', { name: 'Engineer Query' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /export report/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /export report/i }))
+    expect(await screen.findByText('Report downloaded')).toBeInTheDocument()
+    expect(anchorClick).toHaveBeenCalled()
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob))
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:morpheus-report')
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) => url.toString().endsWith('/api/reports/RM-DRIVE-01/markdown')),
+    ).toBe(true)
     expect(screen.getAllByRole('button', { name: /create work order/i }).length).toBeGreaterThan(0)
   })
 
@@ -2662,15 +2683,27 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     fireEvent.change(screen.getByLabelText('Actual Root Cause'), { target: { value: 'Loose foundation bolt resonance' } })
     fireEvent.change(screen.getByLabelText('Action Taken'), { target: { value: 'Retorqued foundation bolts' } })
     fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'Vibration normalized' } })
-    fireEvent.click(screen.getByText('Correct'))
-
+    fireEvent.click(screen.getByText('Accept'))
     await waitFor(() => {
-      expect(screen.getByText('corrected feedback stored')).toBeInTheDocument()
+      expect(screen.getAllByText(/accepted feedback stored.*Plant RAG index synced/i).length).toBeGreaterThan(0)
     })
-    const feedbackCall = vi
+    fireEvent.click(screen.getByText('Correct'))
+    await waitFor(() => {
+      expect(screen.getAllByText(/corrected feedback stored.*Plant RAG index synced/i).length).toBeGreaterThan(0)
+    })
+    fireEvent.click(screen.getByText('Reject'))
+    await waitFor(() => {
+      expect(screen.getAllByText(/rejected feedback stored.*Plant RAG index synced/i).length).toBeGreaterThan(0)
+    })
+    const feedbackCalls = vi
       .mocked(fetch)
-      .mock.calls.find(([url]) => url.toString().endsWith('/feedback'))
-    expect(JSON.parse((feedbackCall?.[1] as RequestInit).body as string)).toMatchObject({
+      .mock.calls.filter(([url]) => url.toString().endsWith('/feedback'))
+    expect(feedbackCalls.map(([, init]) => JSON.parse((init as RequestInit).body as string).status)).toEqual([
+      'accepted',
+      'corrected',
+      'rejected',
+    ])
+    expect(JSON.parse((feedbackCalls[1]?.[1] as RequestInit).body as string)).toMatchObject({
       equipment_id: 'RM-DRIVE-01',
       status: 'corrected',
       actual_root_cause: 'Loose foundation bolt resonance',

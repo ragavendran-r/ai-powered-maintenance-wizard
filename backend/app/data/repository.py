@@ -1736,7 +1736,7 @@ def _learning_artifact_plant_record(artifact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def save_feedback(recommendation_id: str, feedback: dict[str, Any]) -> None:
+def save_feedback(recommendation_id: str, feedback: dict[str, Any]) -> dict[str, Any]:
     ensure_ready()
     with connect() as connection:
         connection.execute(
@@ -1766,7 +1766,8 @@ def save_feedback(recommendation_id: str, feedback: dict[str, Any]) -> None:
         )
     latest = _fetch_one("SELECT * FROM feedback WHERE recommendation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (recommendation_id,))
     if latest:
-        sync_plant_records_index([_feedback_plant_record(latest)])
+        return sync_plant_records_index([_feedback_plant_record(latest)])
+    return {"store": "unknown", "indexed": 0, "state": "missing_feedback"}
 
 
 def list_feedback(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:

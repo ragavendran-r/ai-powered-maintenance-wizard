@@ -3411,6 +3411,34 @@ def test_rag_reindex_syncs_approved_learning_examples(monkeypatch):
     assert any(example["source_type"] == "feedback" and example["approved"] for example in examples)
 
 
+def test_feedback_statuses_sync_plant_rag_records(monkeypatch):
+    captured_records: list[dict[str, object]] = []
+
+    def fake_sync_plant_records(records, *, collection_name=None):
+        captured_records.extend(records)
+        return {"store": "qdrant", "collection": collection_name, "indexed": len(records), "state": "synced"}
+
+    monkeypatch.setattr(repository, "sync_plant_records_index", fake_sync_plant_records)
+
+    for status in ["accepted", "corrected", "rejected"]:
+        result = repository.save_feedback(
+            f"rec-rag-feedback-{status}",
+            {
+                "equipment_id": "RM-DRIVE-01",
+                "status": status,
+                "actual_root_cause": f"{status} bearing root cause",
+                "action_taken": "Adjusted operating procedure",
+                "outcome": "Risk reduced",
+                "notes": "RAG sync regression.",
+            },
+        )
+        assert result["state"] == "synced"
+
+    assert [record["source_type"] for record in captured_records] == ["feedback", "feedback", "feedback"]
+    assert [record["equipment_id"] for record in captured_records] == ["RM-DRIVE-01", "RM-DRIVE-01", "RM-DRIVE-01"]
+    assert all("status" in str(record["content"]) for record in captured_records)
+
+
 def test_plant_rag_records_cover_persisted_operational_and_learning_tables(monkeypatch):
     repository.save_auth_audit_event(
         "login",
