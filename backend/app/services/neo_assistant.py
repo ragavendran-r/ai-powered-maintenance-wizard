@@ -567,7 +567,7 @@ def _neo_system_prompt(grounded_response: Optional[NeoChatResponse] = None) -> s
             "You are Neo, a concise AI copilot for a steel-plant maintenance dashboard. "
             "Answer only from the supplied role-aware queue as a prioritized action list. "
             "Do not write a welcome message, selected-work-order context, or meta commentary. "
-            "Greet the user by name in the lead sentence. "
+            "Begin the lead sentence with the user's first name followed by a comma. "
             "Use Markdown with one short lead sentence, one heading, and priority-labeled blocks for the top recommendations. "
             "Do not use ordered Markdown lists. Every priority block must start with a plain label like P1: category or P2: category, followed by Impact and Recommendation bullets. "
             "Do not repeat the same phrase or line. "
@@ -579,6 +579,7 @@ def _neo_system_prompt(grounded_response: Optional[NeoChatResponse] = None) -> s
         "You are Neo, a concise AI copilot for a steel-plant maintenance dashboard. "
         "Every user message has already been routed to you; answer the user's actual question before suggesting an action. "
         "Use the supplied deterministic application facts, retrieved evidence, and approved learning context as grounding. "
+        "Begin every answer with the user's first name followed by a comma. "
         "When grounded rows are supplied, summarize those exact rows and mention the relevant work-order or asset IDs. "
         "Do not override application-owned facts such as work-order status, material availability, inventory, permissions, or role guards. "
         "If the action context says an update was blocked, explain why it was not performed. "
@@ -640,7 +641,7 @@ def _neo_prompt(
             "Approved learning facts:",
             *(learning_lines or ["- No approved learning context is available."]),
             "Formatting contract:",
-            "- Begin by greeting the user by name when it fits the answer.",
+            f"- Begin the first sentence with {current_user.display_name.split()[0]}, exactly once.",
             "- Answer the current question directly before recommending an action.",
             "- Use at most 10 concise lines.",
             "- Use priority labels only when comparing multiple items.",
@@ -707,7 +708,7 @@ def _neo_role_queue_prompt(
             f"User question: {request.message}",
             f"Role-aware queue: {table.title if table else 'None'}",
             *(row_lines or ["- None"]),
-            "Begin by greeting the user by name in the lead sentence.",
+            f"Begin the lead sentence with {current_user.display_name.split()[0]}, exactly once.",
             "Final answer format: one short named lead sentence, one Markdown heading, then up to four priority-labeled recommendation blocks.",
             "Do not use ordered Markdown lists. Each block must start with a plain label like P1: category or P2: category, then add separate Impact and Recommendation bullets.",
             "The full answer can be up to 10 lines, but it must stay precise and operational.",
@@ -734,7 +735,7 @@ def _neo_welcome_prompt(current_user: UserPublic, grounded_response: NeoChatResp
             f"Screen context: {'Command Center plant priority updates' if table and table.title == 'Plant Priority Updates' else 'Work Execution role queue'}",
             f"Role-aware queue: {table.title if table else 'None'}",
             *(row_lines or ["- None"]),
-            f"Begin by greeting {current_user.display_name} by name in the lead sentence.",
+            f"Begin the lead sentence with {current_user.display_name.split()[0]}, exactly once.",
             "Final answer format: a named lead sentence, a Markdown heading, then up to four priority-labeled recommendation blocks. The response can be up to 10 lines, but must stay meaningful and precise.",
             "Do not use ordered Markdown lists. Use Markdown headings such as ### Plant Risk Priorities. Each block starts with a plain label like P1: category and is followed by Impact, Signal, and Recommendation bullets.",
             "For Command Center, focus on plant risk, urgent work, production impact, assets at risk, and overdue emergency work.",
@@ -843,13 +844,16 @@ def _quality_checked_general_answer(
         return _canonical_action_answer(grounded_response, current_user)
     if leaked_prompt and (not grounded_response or not grounded_response.table):
         return (
-            "Neo could not produce a clean live answer for that question. "
-            "Please retry, or ask for a specific asset, alert, or work order so Neo can use grounded plant context."
+            _ensure_named_lead(
+                "Neo could not produce a clean live answer for that question. "
+                "Please retry, or ask for a specific asset, alert, or work order so Neo can use grounded plant context.",
+                current_user,
+            )
         )
     if not grounded_response or not grounded_response.table:
-        return answer
+        return _ensure_named_lead(answer, current_user)
     if not leaked_prompt and len(normalized.split()) >= 6:
-        return answer
+        return _ensure_named_lead(answer, current_user)
     return _canonical_table_answer(grounded_response.table, current_user)
 
 
@@ -892,7 +896,20 @@ def _canonical_action_answer(grounded_response: NeoChatResponse, current_user: U
         return "\n".join(lines)
     if action and action.status == "blocked":
         return f"{first_name}, Neo could not complete that action: {action.detail or grounded_response.answer}"
-    return grounded_response.answer
+    return _ensure_named_lead(grounded_response.answer, current_user)
+
+
+def _ensure_named_lead(answer: str, current_user: UserPublic) -> str:
+    normalized = answer.strip()
+    if not normalized:
+        return normalized
+    first_name = current_user.display_name.split()[0] if current_user.display_name else ""
+    if not first_name:
+        return normalized
+    lowered = normalized.lower()
+    if lowered.startswith(f"{first_name.lower()},") or lowered.startswith(f"{first_name.lower()} "):
+        return normalized
+    return f"{first_name}, {normalized}"
 
 
 def _canonical_grounded_answer(grounded_response: NeoChatResponse, current_user: UserPublic) -> str:

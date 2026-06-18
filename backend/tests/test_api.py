@@ -1864,6 +1864,33 @@ def test_neo_chat_does_not_use_generic_table_resolver_for_read_roles():
     assert "Rows:" not in payload["answer"]
 
 
+def test_neo_chat_addresses_admin_by_name_when_live_model_omits_it(monkeypatch):
+    import app.services.neo_assistant as neo_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            return LLMTextResponse(
+                content="Review the critical asset trend and clear the highest priority blocker.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(neo_module, "_neo_llm_client", lambda: FakeClient())
+    response = client.post(
+        "/api/neo/chat",
+        json={"message": "what should I focus on now?"},
+        headers=auth_headers("admin@plant.local"),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["answer"].startswith("Ragav, ")
+
+
 def test_neo_chat_stream_returns_standardized_events_for_asset_decision():
     with client.stream(
         "POST",
@@ -1954,6 +1981,13 @@ def test_neo_chat_stream_uses_interactive_llm_timeout(monkeypatch):
 
     assert captured["timeout_seconds"] == 15.0
     assert "Neo dashboard bounded answer" in body
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ")
+    ]
+    done_events = [event for event in events if event["type"] == "done"]
+    assert done_events[-1]["response"]["answer"].startswith("Ragav, ")
 
 
 def test_neo_chat_stream_filters_prompt_label_leak_for_asset_decision(monkeypatch):
