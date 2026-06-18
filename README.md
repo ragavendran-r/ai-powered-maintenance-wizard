@@ -10,7 +10,7 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 - Built with a FastAPI/Pydantic backend, React + TypeScript + Vite frontend, local SQLite persistence, and JWT role-based access control.
 - Uses NATS JetStream for IoT ingestion and async learning jobs, Qdrant for production-like vector retrieval, and deterministic local fallbacks for offline development.
 - LLM support is provider-agnostic across mock, OpenAI-compatible, and Ollama runtimes, with structured validation, token/time budgets, streaming, and deterministic fallback behavior.
-- The recommended local LLM setup serves a Qwen2.5 7B GGUF base plus LoRA adapter through llama.cpp's OpenAI-compatible API, with LM Studio still supported for base or fused-model workflows.
+- The recommended local LLM setup serves a Qwen2.5 7B GGUF base plus PEFT/LoRA adapter through llama.cpp's OpenAI-compatible API, with LM Studio still supported for base or fused-model workflows.
 
 ## AI Capabilities
 
