@@ -119,6 +119,75 @@ export function FormattedAssistantContent({ content }: { content: string }) {
   )
 }
 
+export function normalizePmDraftMarkdown(content: string) {
+  const sectionHeadings = new Set([
+    'PM Plan',
+    'Trigger',
+    'Monitoring Thresholds',
+    'Generated Task List',
+    'Spares Strategy',
+    'Adjustment Notes',
+    'Smith Execution Steps',
+  ])
+  const listSections = new Set([
+    'Trigger',
+    'Monitoring Thresholds',
+    'Generated Task List',
+    'Spares Strategy',
+    'Adjustment Notes',
+    'Smith Execution Steps',
+  ])
+  const lines = content
+    .replace(/\r\n/g, '\n')
+    .replace(/(#{1,4}\s+[^\n]+?)(?=#{1,4}\s+)/g, '$1\n')
+    .replace(/([^\n])###\s+/g, '$1\n### ')
+    .split('\n')
+  const normalized: string[] = []
+  let activeSection = ''
+
+  lines.forEach((line) => {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      normalized.push('')
+      return
+    }
+
+    const markdownHeading = trimmed.match(/^#{1,4}\s+(.+)$/)
+    if (markdownHeading) {
+      const heading = stripMarkdownHeadingSuffix(markdownHeading[1]).replace(/:$/, '').trim()
+      activeSection = sectionHeadings.has(heading) ? heading : activeSection
+      normalized.push(`### ${heading}`)
+      return
+    }
+
+    const labelHeading = trimmed.match(/^([A-Za-z][A-Za-z ]+):\s*(.*)$/)
+    if (labelHeading && sectionHeadings.has(labelHeading[1].trim())) {
+      activeSection = labelHeading[1].trim()
+      normalized.push(`### ${activeSection}`)
+      if (labelHeading[2].trim()) {
+        normalized.push(normalizePmDraftListLine(labelHeading[2].trim(), activeSection, listSections))
+      }
+      return
+    }
+
+    if (sectionHeadings.has(trimmed.replace(/:$/, ''))) {
+      activeSection = trimmed.replace(/:$/, '')
+      normalized.push(`### ${activeSection}`)
+      return
+    }
+
+    normalized.push(normalizePmDraftListLine(trimmed, activeSection, listSections))
+  })
+
+  return normalized.join('\n').replace(/\n{3,}/g, '\n\n').trimStart()
+}
+
+function normalizePmDraftListLine(line: string, activeSection: string, listSections: Set<string>) {
+  if (/^[-*]\s+/.test(line) || /^\d+[.)]\s+/.test(line)) return line
+  if (listSections.has(activeSection)) return `- ${line}`
+  return line
+}
+
 function parseAssistantContent(content: string): AssistantContentBlock[] {
   const normalized = normalizeAssistantContent(content)
   const blocks: AssistantContentBlock[] = []

@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
+import { FormattedAssistantContent, normalizePmDraftMarkdown } from './assistantContent'
 import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PmPlan, type PmPlanDraftResponse, type PmPlanDraftStreamEvent, type PmTemplate, type PredictionResponse, type RcaMorpheusDraftResponse, type RcaMorpheusDraftStreamEvent, type Recommendation, type UserRole, type WorkOrder } from './services/api'
 import { StatusTimeline, TechnicianExecutionCard } from './sharedComponents'
 
@@ -23,6 +24,36 @@ it('shows waiting for material before in progress in the work order workflow', (
   expect(Boolean(approved.compareDocumentPosition(material) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   expect(Boolean(material.compareDocumentPosition(inProgress) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   expect(Boolean(inProgress.compareDocumentPosition(completed) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+})
+
+it('formats label-style PM draft streams as headings and lists', () => {
+  const rawDraft = [
+    'PM Plan',
+    'Task: Actuator linkage cleaning and calibration',
+    'Trigger: Outlet pressure variance exceeds 7.30% above baseline',
+    'Monitoring Thresholds: Outlet pressure variance > 7.30%',
+    'Generated Task List:',
+    'Clean and calibrate actuator linkage',
+    'Verify actuator response time',
+    'Log results and update maintenance records',
+    'Spares Strategy:',
+    'Maintain 1 spare blower inlet guide vane actuator with lead time of 12 days',
+    'Adjustment Notes:',
+    'Increase monitoring frequency to daily during furnace ramp-up',
+    'Review and update actuator calibration procedures### Smith Execution Steps',
+    'Review the latest sensor trends and active alerts for BF-BLOWER-02.',
+    'Inspect the actuator linkage for any signs of sticking or wear.',
+  ].join('\n')
+
+  render(<FormattedAssistantContent content={normalizePmDraftMarkdown(rawDraft)} />)
+
+  expect(screen.getByRole('heading', { name: 'PM Plan' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Generated Task List' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Smith Execution Steps' })).toBeInTheDocument()
+  expect(screen.getByText('Outlet pressure variance > 7.30%').closest('li')).not.toBeNull()
+  expect(screen.getByText('Clean and calibrate actuator linkage').closest('li')).not.toBeNull()
+  expect(screen.getByText('Verify actuator response time').closest('li')).not.toBeNull()
+  expect(screen.getByText('Review the latest sensor trends and active alerts for BF-BLOWER-02.').closest('li')).not.toBeNull()
 })
 
 function neoStreamResponse(response: NeoChatResponse, tokenChunks: string[] = [], finalMarkdown?: string) {
@@ -130,14 +161,11 @@ function rcaDraftStreamResponse(response: RcaMorpheusDraftResponse) {
 function pmDraftStreamResponse(response: PmPlanDraftResponse) {
   const events: PmPlanDraftStreamEvent[] = [
     { type: 'meta', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '### PM Plan\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: 'Main drive proactive PM plan\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '### Monitoring Thresholds\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '- drive_end_vibration >= 7.1 mm/s\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '### Generated Task List\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '- Inspect bearing condition and coupling alignment.\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '### Smith Execution Steps\n', provider: 'openai', used_live_provider: true },
-    { type: 'token', content: '1. Inspect bearing condition safely.\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'PM Plan\nMain drive proactive PM plan\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'Monitoring Thresholds: drive_end_vibration >= 7.1 mm/s\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'Generated Task List:\nInspect bearing condition and coupling alignment.\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'Adjustment Notes:\nReview cadence after repeat vibration.### Smith Execution Steps\n', provider: 'openai', used_live_provider: true },
+    { type: 'token', content: 'Inspect bearing condition safely.\n', provider: 'openai', used_live_provider: true },
     { type: 'done', response },
   ]
   return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {

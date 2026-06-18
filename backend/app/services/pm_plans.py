@@ -337,7 +337,9 @@ def _morpheus_stream_system_prompt() -> str:
         "Stream the final PM plan only in Markdown, not JSON. Use only the supplied SOP, manual, "
         "history, risk prediction, spares, and feedback context. Use each section exactly once: ### PM Plan, "
         "### Trigger, ### Monitoring Thresholds, ### Generated Task List, ### Spares Strategy, and "
-        "### Adjustment Notes. Keep each section to one or two short bullets, except PM Plan which is one title line. "
+        "### Adjustment Notes. Put every heading on its own line. Put a blank line after each heading. "
+        "Use '- ' bullet lines for Trigger, Monitoring Thresholds, Generated Task List, Spares Strategy, and "
+        "Adjustment Notes. Keep each section to one or two short bullets, except PM Plan which is one title line. "
         "Do not repeat headings, labels, bullet text, or metric names. Do not mention JSON, schemas, "
         "backend fields, table names, or row counts. Do not invent measurements, people, or parts."
     )
@@ -707,7 +709,8 @@ def _smith_system_prompt() -> str:
 def _smith_stream_system_prompt() -> str:
     return (
         f"{_smith_system_prompt()} Stream readable Markdown immediately. Start with the heading "
-        "### Smith Execution Steps, then provide concise numbered steps only."
+        "### Smith Execution Steps on its own line, then provide concise '- ' bullet steps only. "
+        "Do not append the heading to the previous sentence."
     )
 
 
