@@ -3203,7 +3203,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       'PEFT Tuning Job',
       'Learning Job Trail',
       'Learning Artifacts',
-      'Adapter and Prompt Versions',
+      'Adapter Candidate Versions',
       'Adapter Runtime Deployments',
       'Promotion Audit',
       'Local Adapter Candidate',
@@ -3225,6 +3225,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.getByRole('table', { name: 'Learning artifacts' })).toBeInTheDocument()
     expect(screen.getByRole('table', { name: 'Adapter runtime deployments' })).toBeInTheDocument()
     expect(screen.getByRole('table', { name: 'Promotion audit' })).toBeInTheDocument()
+    expect(screen.queryByText('neo / default')).not.toBeInTheDocument()
+    expect(screen.queryByText('morpheus / default')).not.toBeInTheDocument()
+    expect(screen.queryByText('smith / default')).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Adapter path'), { target: { value: 'file:///models/qwen2.5-lora' } })
     fireEvent.click(screen.getByRole('button', { name: 'Register local adapter candidate' }))
