@@ -4,6 +4,14 @@ Working prototype for an AI-powered maintenance decision-support system for stee
 
 The app helps maintenance engineers review plant health, diagnose equipment issues, inspect evidence, prioritize actions, ingest new maintenance context, export structured reports, and capture feedback that improves future recommendations.
 
+## Project Summary
+
+- Steel-plant maintenance wizard for asset health review, diagnosis, work orders, preventive planning, reporting, ingestion, and feedback-driven learning.
+- Built with a FastAPI/Pydantic backend, React + TypeScript + Vite frontend, local SQLite persistence, and JWT role-based access control.
+- Uses NATS JetStream for IoT ingestion and async learning jobs, Qdrant for production-like vector retrieval, and deterministic local fallbacks for offline development.
+- LLM support is provider-agnostic across mock, OpenAI-compatible, and Ollama runtimes, with structured validation, token/time budgets, streaming, and deterministic fallback behavior.
+- The recommended local LLM setup serves a Qwen2.5 7B GGUF base plus LoRA adapter through llama.cpp's OpenAI-compatible API, with LM Studio still supported for base or fused-model workflows.
+
 ## AI Capabilities
 
 The AI layer is an audited maintenance copilot layered after deterministic backend controls. Raw IoT ingestion, anomaly scoring, risk calculation, role permissions, and persisted work-order updates stay in deterministic flows; AI explains, retrieves evidence, guides role-specific work, and helps turn reviewed outcomes into reusable learning material.
