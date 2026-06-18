@@ -146,6 +146,7 @@ flowchart LR
   - `GET /api/pm-templates` returns seeded preventive-maintenance templates for an asset or all assets.
   - `GET /api/pm-plans` returns generated PM plans with optional asset/status filters.
   - `POST /api/pm-plans/morpheus-draft` drafts a RAG-grounded PM plan from template, prediction, history, feedback, and spares context.
+  - `POST /api/pm-plans/morpheus-draft/stream` streams the Morpheus PM draft and chained Smith execution steps as readable Markdown before persisting the final validated plan.
   - `POST /api/pm-plans/{plan_id}/convert-work-order` converts a PM plan into a planned PM work order and records the conversion on the plan.
   - `GET /api/work-orders/{work_order_id}` returns detail and work logs.
   - `PATCH /api/work-orders/{work_order_id}` updates lifecycle status, assignment, schedule window, material readiness, material blocker status/notes, spare reservations, reorder/procurement/substitute metadata, outage window, dispatch notes, problem code, follow-up, and completion summary. Dispatch is blocked when a work order still waits for approval, has no planned start, has blocked material readiness, or has unresolved top-level/per-spare material blockers.
@@ -182,7 +183,7 @@ flowchart LR
 9. Anomaly service evaluates sensor readings by signal using rolling baseline, z-score, threshold breach, and trend delta, then classifies context and inspection steps when enrichment is enabled.
 10. Risk and prediction services combine alerts, anomaly findings, asset criticality, spares constraints, maintenance history, normalized labels, and feedback signals to compute health score, risk level, failure probability, estimated RUL, model version metadata, backtest metrics, confidence intervals, prediction evidence, and degradation trend history.
 11. Recommendation service requests structured LLM context when configured, validates it, merges safe suggestions with deterministic fallback actions and prior engineer feedback, and returns diagnosis, root causes, actions, spares strategy, learning notes, reasoning explanation, confidence, and evidence.
-12. PM plan drafting combines PM templates, risk prediction, RAG evidence, maintenance history, spares, and accepted feedback. Morpheus drafts the plan; Smith turns plan tasks into technician-ready steps; accepted plans can convert to planned PM work orders.
+12. PM plan drafting combines PM templates, risk prediction, RAG evidence, maintenance history, spares, and accepted feedback. Morpheus streams readable PM-plan Markdown first; the backend parses and persists the final validated plan; Smith streams technician-ready steps before the response is finalized; accepted plans can convert to planned PM work orders.
 13. Report service converts recommendations into Markdown with diagnosis, risk, RUL, actions, spares strategy, learning notes, reasoning explanation, evidence, and summary.
 14. Feedback is stored in SQLite, normalized into labels, and reused in future recommendation prompts, deterministic action/root-cause ranking, learning notes, reports, prediction drivers, and PM adjustment notes.
 15. Candidate training examples are built from feedback, labels, completed work orders, approved assistant interactions, and ingested documents, then scored by LLM-as-a-Judge with deterministic fallback.
@@ -195,7 +196,7 @@ LLM/SLM use is isolated behind validated service contracts. Diagnosis, chat, and
 
 The LLM/SLM is not the source of truth for raw ingestion, NATS streaming ingestion, deterministic anomaly scores, risk scoring, RUL calculation, model evaluation metrics, confidence intervals, dashboard aggregation, work-order persistence, status transitions, or feedback persistence. These parts remain deterministic so the demo works without external credentials.
 
-Provider output must validate to the expected structured JSON contract. Missing credentials, network errors, malformed JSON, invalid schema, or provider timeout automatically fall back to deterministic local reasoning.
+Provider output must validate to the expected structured JSON contract. Missing credentials, network errors, malformed JSON, invalid schema, or provider timeout can fall back to deterministic local reasoning for offline structured enrichment where that is the feature contract. User-visible live assistant streams must not replace failed live model output with static deterministic prose; they emit explicit provider/degraded-mode errors instead.
 
 ## Continuous Improvement
 
@@ -221,11 +222,11 @@ The active continuous-learning implementation is production-aligned but scoped t
 ## Current Prototype Limits
 
 - Retrieval now defaults to Qdrant for production-grade vector storage while retaining deterministic local embeddings and SQLite fallback for offline tests. A stronger embedding model remains a production hardening item, and LLM/SLM reranking improves ordering when configured.
-- LLM providers are optional at runtime. Invalid provider responses, missing credentials, or network failures fall back to deterministic reasoning.
+- LLM providers are optional at runtime. Invalid provider responses, missing credentials, or network failures fall back to deterministic reasoning only for offline structured enrichment paths where that behavior is explicit.
 - SQLite persistence is implemented for the local/demo data model with lightweight startup migrations.
 - NATS JetStream ingestion is implemented as a production runtime path and requires an external NATS server when `STREAMING_ENABLED=true` or `LEARNING_ASYNC_ENABLED=true`.
 - Authentication and role-based authorization use local SQLite users and JWT bearer tokens. Production SSO remains a hardening item.
-- Live LLM calls are available through provider adapters when configured; deterministic fallback output remains the default local-demo behavior.
+- Mock mode keeps deterministic offline behavior for tests and disconnected demos. When a live provider is configured, user-visible Neo, Morpheus, and Smith prose is expected to stream from that provider; unavailable live paths show explicit errors or degraded-mode notices rather than static assistant answers.
 - LLM-as-a-Judge scoring improves dataset quality but is not a safety authority. Role checks, schema validation, approval controls, and deterministic backend workflow rules remain authoritative.
 - Anomaly scoring and RUL are heuristic and intended for demonstration until richer plant time-series data exists. LLM/SLM enrichment classifies and explains fixed prediction outputs, evidence, confidence, and trend history but does not compute final risk or RUL.
 - PDF extraction depends on embedded text; scanned PDFs would need OCR in a production version.

@@ -42,16 +42,17 @@ Keep functions focused and avoid broad utility modules.
 
 ## Local LLM Configuration
 
-The backend supports mock, OpenAI-compatible, and Ollama providers. Keep deterministic fallback behavior working for all LLM changes.
+The backend supports mock, OpenAI-compatible, and Ollama providers. Keep deterministic fallback behavior working for offline/degraded paths, but do not replace user-visible live assistant prose with static deterministic content when a live provider is configured.
 
-Recommended local setup for this Mac is LM Studio with Qwen2.5 7B Instruct GGUF:
+Recommended local setup for this Mac is llama.cpp serving a Qwen2.5 7B GGUF base plus the current LoRA adapter through an OpenAI-compatible endpoint:
 
-- Use `LLM_PROVIDER=openai` for LM Studio because LM Studio exposes OpenAI-compatible endpoints.
-- Set `OPENAI_BASE_URL=http://localhost:1234/v1`.
-- Set `OPENAI_API_KEY` to a non-secret local placeholder such as `lm-studio-local`.
-- Set `OPENAI_MODEL` to the exact model identifier shown by LM Studio, or load the model with a stable identifier such as `qwen2.5-7b-instruct`.
+- Use `LLM_PROVIDER=openai`.
+- Set `OPENAI_BASE_URL=http://127.0.0.1:8080/v1`.
+- Set `OPENAI_API_KEY` to a non-secret local placeholder such as `local-runtime`.
+- Set `OPENAI_MODEL` to the served adapter model, for example `maintenance-wizard-qwen-lora-LJOB-7B7B7B7B7B7B`.
+- Keep LM Studio available as an optional OpenAI-compatible runtime for base models or fused adapter models at `http://localhost:1234/v1`.
 - Keep `.env` untracked; update `.env.example` and docs instead of committing local runtime values.
-- See `docs/local-llm-lm-studio.md` for the full setup and smoke-test flow.
+- See `docs/local-llm-llama-cpp-qwen-adapter.md` for the base-plus-adapter runtime, `docs/peft-training.md` for adapter lifecycle, and `docs/local-llm-lm-studio.md` for the optional LM Studio path.
 
 ## Testing Guidelines
 

@@ -174,7 +174,7 @@
   <g transform="translate(1180 130)">
     <rect class="card" x="0" y="0" width="360" height="685" rx="18" fill="url(#aiGrad)"/>
     <text x="24" y="36" class="bandTitle">AI, RAG, and Learning</text>
-    <text x="24" y="61" class="small">Grounded assistants with deterministic fallback and reviewer gates</text>
+    <text x="24" y="61" class="small">Grounded assistants with live streams and reviewer gates</text>
 
     <rect class="node" x="24" y="90" width="312" height="76" rx="14"/>
     <text x="44" y="119" class="label">LLM Adapter</text>
@@ -182,7 +182,7 @@
 
     <rect class="node" x="24" y="186" width="312" height="76" rx="14"/>
     <text x="44" y="215" class="label">Local Runtime</text>
-    <text x="44" y="239" class="small">LM Studio Qwen, Ollama, or hosted gateway</text>
+    <text x="44" y="239" class="small">llama.cpp Qwen + LoRA, LM Studio, or Ollama</text>
 
     <rect class="node" x="24" y="282" width="312" height="82" rx="14"/>
     <text x="44" y="311" class="label">Retrieval Service</text>

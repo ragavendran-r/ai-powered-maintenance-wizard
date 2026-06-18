@@ -37,3 +37,5 @@ This prototype now has production-aligned local architecture, but it is still no
 - Require citations/evidence for high-impact recommendations.
 - Configure provider timeout, retry, and fallback behavior explicitly per environment.
 - Treat LLM-as-a-Judge scoring as advisory; keep role checks, schema validation, human approval, and deterministic workflow gates authoritative.
+- Monitor first-token latency, stream completion, and chained-call streaming health for Neo, Morpheus, and Smith.
+- Enforce the no-static-assistant-prose rule in regression tests for user-visible live assistant paths.

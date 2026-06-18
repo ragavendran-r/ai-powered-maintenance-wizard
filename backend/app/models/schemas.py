@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 
 RiskLevel = Literal["low", "medium", "high", "critical"]
@@ -962,7 +962,7 @@ class LearningExample(BaseModel):
 class LearningJudgeResult(BaseModel):
     score: float = Field(ge=0, le=1)
     label: Literal["training_worthy", "review", "reject"]
-    rationale: str
+    rationale: str = Field(validation_alias=AliasChoices("rationale", "reason"))
     strengths: list[str] = []
     risks: list[str] = []
     used_live_provider: bool = False

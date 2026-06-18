@@ -48,6 +48,7 @@ Use this file for durable product and engineering rules. Use `docs/hooks.md` for
 - Treat the application as production-targeted, not prototype-only. Prefer robust backend design, clear UX, strong UI validation, and proven open-source infrastructure when those choices improve reliability, operability, or maintainability.
 - Recommendations should include evidence/citations when available.
 - The deterministic fallback path must keep working without LLM credentials.
+- When a live provider is configured, user-visible Neo, Morpheus, and Smith responses must stream from the provider or surface an explicit provider/degraded-mode error; do not substitute static deterministic assistant prose for failed live calls.
 - Uploaded documents must be parsed into SQLite documents and retrieval chunks.
 - Feedback must be persisted so recommendation outcomes can support future learning.
 - Training/tuning data must pass both gates before export or prompt reuse as high-confidence learning context: an LLM-as-a-Judge score at or above the configured threshold and explicit approval from an authorized reviewer.
