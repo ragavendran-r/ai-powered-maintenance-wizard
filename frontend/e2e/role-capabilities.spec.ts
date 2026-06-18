@@ -101,6 +101,7 @@ test.describe('role capability rendering', () => {
     await expect(page.getByRole('heading', { name: 'Preventive Maintenance Plans' })).toBeVisible()
     await page.getByRole('button', { name: 'Morpheus PM draft' }).click()
     await expect(page.getByRole('heading', { name: 'Morpheus PM live draft' })).toBeVisible()
+    await expect(page.getByText(/Morpheus is collecting PM planning context/)).toBeVisible()
     await expect(page.getByText('Monitoring Thresholds').first()).toBeVisible()
     await expect(page.getByText('Main drive proactive PM plan').first()).toBeVisible()
     await expect(page.getByText('Confirm LOTO and permits.')).toBeVisible()

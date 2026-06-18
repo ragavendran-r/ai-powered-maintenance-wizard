@@ -2,7 +2,8 @@ from types import SimpleNamespace
 
 import httpx
 
-from app.models.schemas import DocumentIntelligence, RcaMorpheusDraftRequest, UserPublic
+from app.models.schemas import DocumentIntelligence, PmPlanDraftRequest, RcaMorpheusDraftRequest, UserPublic
+from app.services import pm_plans as pm_plans_service
 from app.services import rca as rca_service
 from app.services.rca import _draft_with_streaming, stream_draft_case
 from app.services.llm import LLMContext, LLMTextResponse, MockLLMClient, OpenAIClient, OllamaClient
@@ -198,6 +199,109 @@ def test_rca_streaming_draft_uses_scoped_timeout(monkeypatch):
 
     assert captured["max_tokens"] == 700
     assert captured["timeout_seconds"] == 45
+
+
+def test_pm_plan_streaming_draft_emits_progress_before_context_resolution(monkeypatch):
+    class FakeStreamingClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+    def fail_context_resolution(request):
+        raise AssertionError("context resolution should happen after initial stream feedback")
+
+    monkeypatch.setattr(pm_plans_service, "configured_llm_client", lambda: FakeStreamingClient())
+    monkeypatch.setattr(pm_plans_service, "_resolve_pm_context", fail_context_resolution)
+
+    events = pm_plans_service.stream_draft_plan(
+        PmPlanDraftRequest(equipment_id="RM-DRIVE-01"),
+        UserPublic(
+            id="user-1",
+            email="planner@plant.local",
+            display_name="Planner",
+            role="planner",
+        ),
+    )
+
+    assert next(events)["type"] == "meta"
+    progress = next(events)
+    assert progress["type"] == "token"
+    assert "collecting PM planning context" in progress["content"]
+
+
+def test_pm_plan_streaming_draft_uses_live_markdown_stream(monkeypatch):
+    captured = {}
+
+    class FakeStreamingClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            captured["prompt"] = prompt
+            captured["system_prompt"] = system_prompt
+            captured["max_tokens"] = max_tokens
+            yield LLMTextResponse(content="### PM Plan\n", used_live_provider=True, provider="openai")
+            yield LLMTextResponse(content="Main drive proactive PM plan\n", used_live_provider=True, provider="openai")
+
+    def fake_draft_from_stream(context, answer, provider, used_live_provider):
+        captured["answer"] = answer
+        captured["provider"] = provider
+        captured["used_live_provider"] = used_live_provider
+        return pm_plans_service._PmPlanDraft(
+            title="Main drive proactive PM plan",
+            trigger=pm_plans_service._PmTriggerDraft(description="Inspect drive vibration weekly."),
+            thresholds=["drive_end_vibration >= 7.1 mm/s"],
+            tasks=[pm_plans_service._PmTaskDraft(task="Inspect bearing condition and coupling alignment.")],
+        )
+
+    def fake_store_response(context, request, current_user, draft):
+        captured["stored_title"] = draft.title
+        return SimpleNamespace(
+            model_dump=lambda mode="json": {
+                "plan": {
+                    "id": "PM-9001",
+                    "equipment_id": request.equipment_id,
+                    "title": draft.title,
+                    "used_live_provider": True,
+                    "provider": "openai",
+                },
+                "templates": [],
+                "message": "stored",
+            }
+        )
+
+    monkeypatch.setattr(pm_plans_service, "configured_llm_client", lambda: FakeStreamingClient())
+    monkeypatch.setattr(pm_plans_service, "_resolve_pm_context", lambda request: {"prompt": "pm prompt"})
+    monkeypatch.setattr(pm_plans_service, "_draft_from_streamed_pm_answer", fake_draft_from_stream)
+    monkeypatch.setattr(pm_plans_service, "_store_pm_plan_response", fake_store_response)
+
+    events = pm_plans_service.stream_draft_plan(
+        PmPlanDraftRequest(equipment_id="RM-DRIVE-01"),
+        UserPublic(
+            id="user-1",
+            email="planner@plant.local",
+            display_name="Planner",
+            role="planner",
+        ),
+    )
+
+    assert next(events)["type"] == "meta"
+    assert "collecting PM planning context" in next(events)["content"]
+    first_delta = next(events)
+    assert first_delta["type"] == "token"
+    assert first_delta["content"] == "### PM Plan"
+    second_delta = next(events)
+    assert second_delta["content"] == "\nMain drive proactive PM plan"
+    done = next(events)
+    assert done["type"] == "done"
+    assert captured["prompt"] == "pm prompt"
+    assert "Stream the final PM plan" in captured["system_prompt"]
+    assert captured["max_tokens"] == 1200
+    assert captured["answer"] == "### PM Plan\nMain drive proactive PM plan"
+    assert captured["provider"] == "openai"
+    assert captured["used_live_provider"] is True
+    assert captured["stored_title"] == "Main drive proactive PM plan"
 
 
 def test_openai_text_completion_respects_local_token_cap(monkeypatch):
