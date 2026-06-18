@@ -301,6 +301,56 @@ def test_rca_stream_removes_repeated_fishbone_branches(monkeypatch):
     assert streamed_text.count("Why did outlet pressure oscillate") == 1
 
 
+def test_rca_stream_emits_incremental_tokens(monkeypatch):
+    import app.services.rca as rca_module
+    from app.services.llm import LLMTextResponse
+
+    class FakeClient:
+        @property
+        def provider_name(self):
+            return "openai"
+
+        def stream_text(self, prompt, system_prompt, fallback_factory, max_tokens=600, timeout_seconds=None):
+            yield LLMTextResponse(
+                content="### Probable Cause\n",
+                used_live_provider=True,
+                provider="openai",
+            )
+            yield LLMTextResponse(
+                content="- Bearing looseness remains the leading RCA candidate.\n",
+                used_live_provider=True,
+                provider="openai",
+            )
+            yield LLMTextResponse(
+                content="### Corrective Actions\n- Verify coupling alignment and bearing housing temperature.\n",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(rca_module, "configured_llm_client", lambda: FakeClient())
+    response = client.post(
+        "/api/rca-cases/morpheus-draft/stream",
+        headers=auth_headers("reliability@plant.local"),
+        json={
+            "case_id": "RCA-9001",
+            "question": "Draft RCA with hypotheses, 5-Why, fishbone, and missing checks.",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    event_types = [event["type"] for event in events]
+    assert event_types[:5] == ["meta", "token", "token", "token", "token"]
+    assert event_types[-1] == "done"
+    streamed_text = "".join(event["content"] for event in events if event["type"] == "token")
+    assert "Morpheus is collecting RCA context" in streamed_text
+    assert "Bearing looseness remains the leading RCA candidate" in streamed_text
+
+
 def test_embedding_profile_id_changes_with_model_version_and_dimensions():
     first = embedding_profile_id("deterministic_hash", "maintenance-hash-v1", "1", 64, "Cosine")
     second = embedding_profile_id("deterministic_hash", "maintenance-hash-v2", "2", 64, "Cosine")

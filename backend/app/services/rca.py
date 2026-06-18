@@ -161,6 +161,7 @@ def stream_draft_case(request: RcaMorpheusDraftRequest, current_user: UserPublic
         return
 
     chunks: list[str] = []
+    emitted_answer = ""
     for chunk in llm.stream_text(
         prompt,
         _stream_system_prompt(),
@@ -177,11 +178,22 @@ def stream_draft_case(request: RcaMorpheusDraftRequest, current_user: UserPublic
             yield {"type": "done", "response": response.model_dump(mode="json")}
             return
         chunks.append(chunk.content)
+        cleaned_so_far = _sanitize_repeated_markdown("".join(chunks).strip())
+        if cleaned_so_far and cleaned_so_far.startswith(emitted_answer):
+            delta = cleaned_so_far[len(emitted_answer):]
+            if delta:
+                emitted_answer = cleaned_so_far
+                yield {"type": "token", "content": delta, "provider": provider, "used_live_provider": True}
 
     streamed_answer = _sanitize_repeated_markdown("".join(chunks).strip())
     if streamed_answer:
         draft = _draft_from_streamed_answer(context, streamed_answer, provider, used_live_provider)
-        yield {"type": "token", "content": streamed_answer, "provider": provider, "used_live_provider": True}
+        if streamed_answer.startswith(emitted_answer):
+            delta = streamed_answer[len(emitted_answer):]
+            if delta:
+                yield {"type": "token", "content": delta, "provider": provider, "used_live_provider": True}
+        elif not emitted_answer:
+            yield {"type": "token", "content": streamed_answer, "provider": provider, "used_live_provider": True}
     else:
         draft = _fallback_draft(context, provider, "stream returned no content")
         yield {"type": "token", "content": draft.summary, "provider": provider, "used_live_provider": False}
