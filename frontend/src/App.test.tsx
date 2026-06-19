@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { FormattedAssistantContent, normalizePmDraftMarkdown } from './assistantContent'
-import { api, type Alert, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PmPlan, type PmPlanDraftResponse, type PmPlanDraftStreamEvent, type PmTemplate, type PredictionResponse, type RcaMorpheusDraftResponse, type RcaMorpheusDraftStreamEvent, type Recommendation, type UserRole, type WorkOrder } from './services/api'
+import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type NotificationEvent, type PmPlan, type PmPlanDraftResponse, type PmPlanDraftStreamEvent, type PmTemplate, type PredictionResponse, type RcaMorpheusDraftResponse, type RcaMorpheusDraftStreamEvent, type Recommendation, type UserRole, type WorkOrder } from './services/api'
 import { StatusTimeline, TechnicianExecutionCard } from './sharedComponents'
 
 let neoResponseDelayMs = 0
@@ -11,7 +11,37 @@ let assistantResponseDelayMs = 0
 let logoutResponseDelayMs = 0
 let maintenanceInsightsDelayMs = 0
 let supervisorAssistantRequests: Array<{ work_order_id?: string; queue_name?: string; question?: string }> = []
-let unseenAlertsResponse: Alert[] = []
+let notificationsResponse: NotificationEvent[] = []
+let unseenNotificationsResponse: NotificationEvent[] = []
+
+function notificationFixture(overrides: Partial<NotificationEvent> = {}): NotificationEvent {
+  return {
+    id: 'NTF-IOT-ANOMALY-HYD-SYS-04',
+    event_key: 'alert_registered:ALT-IOT-ANOMALY-HYD-SYS-04',
+    event_type: 'anomaly_alert_registered',
+    severity: 'critical',
+    title: 'Critical alert on HYD-SYS-04',
+    summary: 'IoT anomaly detected: hydraulic oil temperature exceeded the rolling threshold.',
+    recommended_action: 'Review the live sensor trend, confirm load reduction, and assign an owner.',
+    source_type: 'alert',
+    source_id: 'ALT-IOT-ANOMALY-HYD-SYS-04-HYDRAULIC-OIL-TEMPERATURE',
+    equipment_id: 'HYD-SYS-04',
+    work_order_id: null,
+    alert_id: 'ALT-IOT-ANOMALY-HYD-SYS-04-HYDRAULIC-OIL-TEMPERATURE',
+    recommendation_id: null,
+    actor_user_id: null,
+    actor_display_name: null,
+    recipient_roles: ['operator', 'maintenance_supervisor', 'admin'],
+    recipient_user_ids: [],
+    metadata: {},
+    llm_provider: 'mock',
+    llm_used_live_provider: false,
+    created_at: '2026-06-19T06:00:00Z',
+    seen_at: null,
+    dismissed_at: null,
+    ...overrides,
+  }
+}
 
 it('shows waiting for material before in progress in the work order workflow', () => {
   render(<StatusTimeline status="WMATL" />)
@@ -1401,7 +1431,8 @@ beforeEach(() => {
   learningRefreshExamples = [learningExample]
   learningSummaryJobs = [learningJob]
   supervisorAssistantRequests = []
-  unseenAlertsResponse = []
+  notificationsResponse = []
+  unseenNotificationsResponse = []
   window.sessionStorage.clear()
   api.setSession(null)
   api.onUnauthorized(null)
@@ -1437,17 +1468,20 @@ beforeEach(() => {
       if (url.endsWith('/api/auth/session-expired')) {
         return Promise.resolve(new Response(JSON.stringify({ status: 'purged' }), { status: 200 }))
       }
-      if (url.endsWith('/api/alerts/unseen')) {
-        return Promise.resolve(new Response(JSON.stringify(unseenAlertsResponse), { status: 200 }))
+      if (url.endsWith('/api/notifications')) {
+        return Promise.resolve(new Response(JSON.stringify(notificationsResponse), { status: 200 }))
       }
-      if (url.includes('/api/alerts/') && url.endsWith('/seen')) {
-        const alertId = decodeURIComponent(url.match(/\/api\/alerts\/([^/]+)\/seen/)?.[1] ?? 'ALT-1')
+      if (url.endsWith('/api/notifications/unseen')) {
+        return Promise.resolve(new Response(JSON.stringify(unseenNotificationsResponse), { status: 200 }))
+      }
+      if (url.includes('/api/notifications/') && url.endsWith('/seen')) {
+        const notificationId = decodeURIComponent(url.match(/\/api\/notifications\/([^/]+)\/seen/)?.[1] ?? 'NTF-1')
+        const notification = [...notificationsResponse, ...unseenNotificationsResponse].find((item) => item.id === notificationId)
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              user_id: userFromRequest(init).id,
-              alert_id: alertId,
-              first_seen_at: '2026-06-12T10:00:00+05:30',
+              ...(notification ?? notificationFixture({ id: notificationId })),
+              seen_at: '2026-06-12T10:00:00+05:30',
               dismissed_at: null,
             }),
             { status: 200 },
@@ -2324,40 +2358,30 @@ afterEach(() => {
 })
 
 describe('Intelligent Maintenance Wizard dashboard', () => {
-  it('shows unseen IoT anomaly alerts as centered popups instead of toast notifications', async () => {
-    unseenAlertsResponse = [
-      {
-        id: 'ALT-IOT-ANOMALY-HYD-SYS-04-HYDRAULIC-OIL-TEMPERATURE',
-        equipment_id: 'HYD-SYS-04',
-        timestamp: '2026-06-19T06:00:00Z',
-        signal: 'hydraulic_oil_temperature',
-        value: 104.8,
-        unit: 'C',
-        threshold: 82,
-        severity: 'critical',
-        message: 'IoT anomaly detected: hydraulic oil temperature exceeded the rolling threshold.',
-      },
-    ]
+  it('shows unseen role notifications as centered popups instead of toast notifications', async () => {
+    unseenNotificationsResponse = [notificationFixture()]
+    notificationsResponse = [notificationFixture()]
 
     await renderAuthenticated()
 
-    const dialog = await screen.findByRole('alertdialog', { name: 'Anomaly alert' })
-    expect(within(dialog).getByText('CRITICAL IoT alert on HYD-SYS-04')).toBeInTheDocument()
+    const dialog = await screen.findByRole('alertdialog', { name: 'Action required' })
+    expect(within(dialog).getByText('CRITICAL Critical alert on HYD-SYS-04')).toBeInTheDocument()
     expect(within(dialog).getByText(/hydraulic oil temperature exceeded/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Review the live sensor trend/i)).toBeInTheDocument()
     expect(screen.queryByLabelText('Application notifications')).not.toBeInTheDocument()
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/alerts/ALT-IOT-ANOMALY-HYD-SYS-04-HYDRAULIC-OIL-TEMPERATURE/seen'),
+        expect.stringContaining('/api/notifications/NTF-IOT-ANOMALY-HYD-SYS-04/seen'),
         expect.objectContaining({ method: 'POST' }),
       )
     })
 
-    fireEvent.click(within(dialog).getByRole('button', { name: /dismiss anomaly alert/i }))
+    fireEvent.click(within(dialog).getByRole('button', { name: /dismiss notification/i }))
 
-    expect(screen.queryByRole('alertdialog', { name: 'Anomaly alert' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: 'Action required' })).not.toBeInTheDocument()
   })
 
-  it('polls unseen anomaly alerts every 2 minutes', async () => {
+  it('polls unseen notifications every 2 minutes', async () => {
     const intervalSpy = vi.spyOn(window, 'setInterval')
 
     await renderAuthenticated()

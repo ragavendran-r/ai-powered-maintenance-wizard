@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.data import repository
 from app.models.schemas import Evidence
+from app.services.notifications import notify_work_order_changed, notify_work_order_created
 from app.services.retrieval import retrieve_evidence
 
 WORK_ORDER_ACTION_ROLES = {
@@ -298,6 +299,8 @@ def update_work_order_status(work_order_id: str, target_status: str, current_use
             "detail": reason,
         }
     updated = repository.update_work_order(work_order_id, {"status": normalized_status})
+    if updated:
+        notify_work_order_changed(work_order, updated, current_user)
     return {
         "status": "completed",
         "action_type": "update_work_order_status",
@@ -329,6 +332,8 @@ def update_work_order_material_ready(work_order_id: str, current_user: Optional[
     if work_order["status"] == "WMATL":
         payload["status"] = "APPR"
     updated = repository.update_work_order(work_order_id, payload)
+    if updated:
+        notify_work_order_changed(work_order, updated, current_user)
     return {
         "status": "completed",
         "action_type": "update_work_order_material_ready",
@@ -357,6 +362,8 @@ def assign_work_order(work_order_id: str, assignee: str, current_user: Optional[
         return _unknown_assignee_result(clean_assignee, work_order_id=work_order_id)
     resolved_assignee = assignee_user["display_name"]
     updated = repository.update_work_order(work_order_id, {"assigned_to": resolved_assignee})
+    if updated:
+        notify_work_order_changed(work_order, updated, current_user)
     return {
         "status": "completed",
         "action_type": "assign_work_order",
@@ -428,6 +435,7 @@ def create_work_order(
             "ai_summary": f"Neo created a role-authorized follow-up work order for {normalized_equipment_id}.",
         }
     )
+    notify_work_order_created(work_order, current_user)
     return {
         "status": "completed",
         "action_type": "create_work_order",

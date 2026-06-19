@@ -11,6 +11,7 @@ from app.services.ai_client import configured_llm_client
 from app.services.learning import learning_context_for_asset, record_assistant_interaction
 from app.services.llm import LLMTextResponse
 from app.services.maintenance_labeling import training_signal_summary
+from app.services.notifications import notify_recommendation_generated
 from app.services.reasoning_explainer import explain_reasoning
 from app.services.retrieval import retrieve_evidence
 from app.services.risk import health_summary, prediction_features
@@ -73,6 +74,7 @@ def generate_recommendation(request: DiagnosisRequest) -> Recommendation:
         used_live_provider=final.used_live_provider,
         source_refs=[item.model_dump(mode="json") for item in final.evidence[:6]],
     )
+    notify_recommendation_generated(final)
     return final
 
 
@@ -133,6 +135,7 @@ def stream_recommendation(request: DiagnosisRequest) -> Iterator[dict[str, objec
         used_live_provider=used_live_provider,
         source_refs=[item.model_dump(mode="json") for item in recommendation.evidence[:6]],
     )
+    notify_recommendation_generated(recommendation)
     yield {"type": "done", "recommendation": recommendation.model_dump(mode="json")}
 
 

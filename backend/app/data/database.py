@@ -409,6 +409,42 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS notification_events (
+        id TEXT PRIMARY KEY,
+        event_key TEXT NOT NULL UNIQUE,
+        event_type TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        recommended_action TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        equipment_id TEXT,
+        work_order_id TEXT,
+        alert_id TEXT,
+        recommendation_id TEXT,
+        actor_user_id TEXT,
+        actor_display_name TEXT,
+        recipient_roles TEXT NOT NULL DEFAULT '[]',
+        recipient_user_ids TEXT NOT NULL DEFAULT '[]',
+        metadata TEXT NOT NULL DEFAULT '{}',
+        llm_provider TEXT NOT NULL DEFAULT 'mock',
+        llm_used_live_provider INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_notification_views (
+        user_id TEXT NOT NULL,
+        notification_id TEXT NOT NULL,
+        first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        dismissed_at TEXT,
+        PRIMARY KEY (user_id, notification_id),
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (notification_id) REFERENCES notification_events(id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         email TEXT NOT NULL UNIQUE,
@@ -623,7 +659,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "21"
+SCHEMA_VERSION = "22"
 _INITIALIZING = False
 
 
@@ -1248,6 +1284,8 @@ def database_status() -> dict[str, Any]:
         "feedback",
         "maintenance_labels",
         "streaming_messages",
+        "notification_events",
+        "user_notification_views",
         "users",
         "auth_audit_events",
         "learning_interactions",

@@ -12,6 +12,7 @@ from app.models.schemas import PmPlan, PmPlanDraftRequest, PmPlanDraftResponse, 
 from app.services.ai_client import configured_llm_client
 from app.services.learning import record_assistant_interaction
 from app.services.llm import LLMTextResponse
+from app.services.notifications import notify_work_order_created
 from app.services.retrieval import retrieve_evidence
 from app.services.risk import prediction_features
 
@@ -282,6 +283,7 @@ def convert_plan_to_work_order(plan_id: str, current_user: UserPublic) -> WorkOr
         "ai_summary": f"Generated from PM plan {plan_id}: {', '.join(plan.get('thresholds', [])[:3])}",
     }
     work_order = repository.create_work_order(payload)
+    notify_work_order_created(work_order, current_user)
     repository.mark_pm_plan_converted(plan_id, work_order["id"])
     record_assistant_interaction(
         assistant="smith",

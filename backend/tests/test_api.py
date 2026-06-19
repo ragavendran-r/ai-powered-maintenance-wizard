@@ -156,7 +156,7 @@ def test_health_check():
 def test_database_status_reports_seeded_tables():
     status = database_status()
     assert Path(status["database_path"]) == TEST_DATABASE_PATH
-    assert status["schema_version"] == "20"
+    assert status["schema_version"] == "22"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["asset_profiles"] == 5
     assert status["counts"]["asset_metric_snapshots"] == 15
@@ -169,6 +169,8 @@ def test_database_status_reports_seeded_tables():
     assert "document_intelligence" in status["counts"]
     assert "maintenance_labels" in status["counts"]
     assert "streaming_messages" in status["counts"]
+    assert "notification_events" in status["counts"]
+    assert "user_notification_views" in status["counts"]
     assert "work_orders" in status["counts"]
     assert "work_order_spares" in status["counts"]
     assert status["counts"]["work_order_spares"] >= 4
@@ -723,6 +725,57 @@ def test_technician_sees_only_assigned_work_orders():
     assert payload
     assert {item["id"] for item in payload} == {"WO-8304"}
     assert {item["assigned_to"] for item in payload} == {"Vinoth"}
+
+
+def test_role_notifications_are_created_for_assigned_work_order_and_seen_per_user():
+    admin_headers = auth_headers()
+    technician_headers = auth_headers("technician@plant.local")
+    operator_headers = auth_headers("operator@plant.local")
+
+    create_response = client.post(
+        "/api/work-orders",
+        json={
+            "equipment_id": "BF-BLOWER-02",
+            "title": "Inspect blower actuator linkage",
+            "description": "Inspect inlet guide vane actuator linkage after pressure variance trend.",
+            "priority": 2,
+            "work_type": "CM",
+            "failure_class": "CTRL",
+            "problem_code": "IGVACT",
+            "classification": "Control actuator",
+            "assigned_to": "Vinoth",
+            "supervisor": "Dhruv",
+            "due_date": "2026-06-14T09:00:00+05:30",
+            "recommended_action": "Stroke actuator and verify position feedback.",
+        },
+        headers=admin_headers,
+    )
+    assert create_response.status_code == 201, create_response.text
+    work_order_id = create_response.json()["id"]
+
+    unseen_response = client.get("/api/notifications/unseen", headers=technician_headers)
+    assert unseen_response.status_code == 200
+    unseen = unseen_response.json()
+    assigned_notification = next(item for item in unseen if item["work_order_id"] == work_order_id)
+    assert assigned_notification["event_type"] == "work_order_assigned"
+    assert assigned_notification["recipient_user_ids"]
+    assert "Review the asset" in assigned_notification["recommended_action"]
+
+    operator_response = client.get("/api/notifications/unseen", headers=operator_headers)
+    assert operator_response.status_code == 200
+    assert all(item.get("work_order_id") != work_order_id for item in operator_response.json())
+
+    seen_response = client.post(
+        f"/api/notifications/{assigned_notification['id']}/seen",
+        json={"dismissed": True},
+        headers=technician_headers,
+    )
+    assert seen_response.status_code == 200
+    assert seen_response.json()["dismissed_at"] is not None
+
+    unseen_after_seen = client.get("/api/notifications/unseen", headers=technician_headers)
+    assert unseen_after_seen.status_code == 200
+    assert all(item["id"] != assigned_notification["id"] for item in unseen_after_seen.json())
 
 
 def test_admin_and_supervisor_can_list_assignment_technicians():

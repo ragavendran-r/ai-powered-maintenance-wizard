@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from app.core.config import get_settings
 from app.data import repository
+from app.services.notifications import notify_alerts_registered
 from app.models.schemas import AnomalyFinding, RiskLevel
 from app.services.anomaly import analyze_anomalies
 
@@ -49,6 +50,8 @@ def run_anomaly_alert_scan() -> dict[str, Any]:
                 continue
             generated.append(_alert_from_finding(finding))
     counts = repository.add_records({"alerts": generated}) if generated else {"alerts": 0}
+    if generated:
+        notify_alerts_registered(generated)
     return {
         "scanned_at": _now_iso(),
         "registered_alerts": counts.get("alerts", 0),
