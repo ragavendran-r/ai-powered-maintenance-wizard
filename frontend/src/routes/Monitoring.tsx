@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { Activity, AlertTriangle, RadioTower } from 'lucide-react'
 import { formatDate } from '../appModel'
 import type { MonitoringAsset, MonitoringDashboard, MonitoringSensorSeries, RiskLevel } from '../services/api'
@@ -104,29 +105,57 @@ function MonitoringAssetPanel({
 }
 
 function SensorChart({ series }: { series: MonitoringSensorSeries }) {
-  const width = 260
-  const height = 96
-  const padding = 10
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const [measuredWidth, setMeasuredWidth] = useState(640)
+  const width = Math.max(320, measuredWidth)
+  const height = 170
+  const paddingLeft = 46
+  const paddingRight = 18
+  const paddingTop = 12
+  const paddingBottom = 34
+  const plotWidth = width - paddingLeft - paddingRight
+  const plotHeight = height - paddingTop - paddingBottom
   const values = series.points.map((point) => point.value)
   const minValue = Math.min(...values, series.threshold)
   const maxValue = Math.max(...values, series.threshold)
   const valueRange = maxValue - minValue || 1
-  const xStep = series.points.length > 1 ? (width - padding * 2) / (series.points.length - 1) : 0
+  const xStep = series.points.length > 1 ? plotWidth / (series.points.length - 1) : 0
   const pointCoordinates = series.points.map((point, index) => {
-    const x = padding + index * xStep
-    const y = height - padding - ((point.value - minValue) / valueRange) * (height - padding * 2)
+    const x = paddingLeft + index * xStep
+    const y = paddingTop + plotHeight - ((point.value - minValue) / valueRange) * plotHeight
     return `${x},${y}`
   })
-  const thresholdY = height - padding - ((series.threshold - minValue) / valueRange) * (height - padding * 2)
+  const thresholdY = paddingTop + plotHeight - ((series.threshold - minValue) / valueRange) * plotHeight
+  const formattedSignal = series.signal.replace(/_/g, ' ')
+  const xAxisLabel = 'Time'
+  const yAxisLabel = `${formattedSignal} (${series.unit})`
+
+  useEffect(() => {
+    const element = svgRef.current
+    if (!element) return undefined
+    const updateWidth = () => {
+      const nextWidth = Math.round(element.getBoundingClientRect().width)
+      if (nextWidth > 0) setMeasuredWidth(nextWidth)
+    }
+    updateWidth()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   return (
     <section className={`sensorChart ${series.stale ? 'stale' : ''}`}>
       <div className="sensorChartHeader">
-        <h3>{series.signal.replace(/_/g, ' ')}</h3>
+        <h3>{formattedSignal}</h3>
         <span className={`riskBadge ${series.risk_level}`}>{riskLabel(series.risk_level)}</span>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${series.signal} sensor trend`}>
-        <line className="thresholdLine" x1={padding} x2={width - padding} y1={thresholdY} y2={thresholdY} />
+      <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${series.signal} sensor trend with ${xAxisLabel} x-axis and ${yAxisLabel} y-axis`}>
+        <line className="sensorAxis" x1={paddingLeft} x2={width - paddingRight} y1={paddingTop + plotHeight} y2={paddingTop + plotHeight} />
+        <line className="sensorAxis" x1={paddingLeft} x2={paddingLeft} y1={paddingTop} y2={paddingTop + plotHeight} />
+        <text className="sensorAxisLabel sensorAxisLabelX" x={paddingLeft + plotWidth / 2} y={height - 8}>{xAxisLabel}</text>
+        <text className="sensorAxisLabel sensorAxisLabelY" x={-(paddingTop + plotHeight / 2)} y={14} transform="rotate(-90)">{yAxisLabel}</text>
+        <line className="thresholdLine" x1={paddingLeft} x2={width - paddingRight} y1={thresholdY} y2={thresholdY} />
         {pointCoordinates.length > 1 && <polyline className="sensorLine" points={pointCoordinates.join(' ')} />}
         {series.points.map((point, index) => {
           const [cx, cy] = pointCoordinates[index].split(',').map(Number)

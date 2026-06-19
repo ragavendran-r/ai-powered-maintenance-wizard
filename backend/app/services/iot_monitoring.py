@@ -144,7 +144,7 @@ class IoTMonitoringScheduler:
 
 def _alert_from_finding(finding: AnomalyFinding) -> dict[str, Any]:
     return {
-        "id": f"ALT-IOT-ANOMALY-{_slug(finding.equipment_id)}-{_slug(finding.signal)}",
+        "id": f"ALT-IOT-ANOMALY-{_slug(finding.equipment_id)}-{_slug(finding.signal)}-{_slug(finding.timestamp)}",
         "equipment_id": finding.equipment_id,
         "timestamp": finding.timestamp,
         "signal": finding.signal,

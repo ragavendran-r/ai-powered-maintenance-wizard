@@ -4852,6 +4852,7 @@ h3 {
   .reportTwoColumn,
   .reportFactGrid,
   .rcaToolbar,
+  .monitoringGrid,
   .userCreateGrid,
   .userRow {
     grid-template-columns: 1fr;
@@ -4993,6 +4994,10 @@ h3 {
     gap: 12px;
   }
 
+  .monitoringGrid {
+    column-count: 1;
+  }
+
 }
 
 .appShell :where(
@@ -5069,17 +5074,22 @@ h3 {
 }
 
 .monitoringGrid {
-  display: grid;
+  column-count: 2;
+  column-gap: 14px;
+  display: block;
   gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
 .monitoringAssetPanel {
+  align-content: start;
+  align-self: start;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
   display: grid;
   gap: 12px;
+  break-inside: avoid;
+  margin: 0 0 14px;
   min-width: 0;
   padding: 16px;
 }
@@ -5114,7 +5124,7 @@ h3 {
 .sensorChartGrid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .sensorChart {
@@ -5139,8 +5149,25 @@ h3 {
 }
 
 .sensorChart svg {
-  height: 96px;
+  height: 170px;
   width: 100%;
+}
+
+.sensorAxis {
+  stroke: var(--chart-axis);
+  stroke-width: 1;
+}
+
+.sensorAxisLabel {
+  fill: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-anchor: middle;
+}
+
+.sensorAxisLabelY {
+  dominant-baseline: middle;
 }
 
 .sensorLine {
