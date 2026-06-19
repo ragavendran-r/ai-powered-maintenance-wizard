@@ -5,6 +5,7 @@ export type NavigationItemId = Exclude<AppView, 'asset'>
 
 export type NavigationIcon =
   | 'command'
+  | 'monitoring'
   | 'assets'
   | 'execution'
   | 'planning'
@@ -53,6 +54,22 @@ export const jobNavigationItems: JobNavigationItem[] = [
       reliability_engineer: 3,
       planner: 3,
       maintenance_technician: 4,
+    },
+  },
+  {
+    id: 'monitoring',
+    label: 'Monitoring',
+    icon: 'monitoring',
+    purpose: 'Live IoT sensor trends, alert state, and telemetry gaps.',
+    roles: allAppRoles,
+    rolePriority: {
+      operator: 1,
+      reliability_engineer: 1,
+      maintenance_engineer: 2,
+      maintenance_supervisor: 2,
+      planner: 3,
+      admin: 3,
+      maintenance_technician: 3,
     },
   },
   {

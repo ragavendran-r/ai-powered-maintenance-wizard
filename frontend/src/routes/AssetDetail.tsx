@@ -192,6 +192,26 @@ export function AssetDetailRoute({
           View data
         </button>
       </section>
+      <section className="detailPanel summaryIoTEvidence">
+        <h2>IoT Evidence</h2>
+        <div className="iotEvidenceList">
+          {(assetHealth?.active_alerts ?? []).slice(0, 2).map((alert) => (
+            <span key={alert.id}>
+              <strong>{alert.signal.replace(/_/g, ' ')}</strong>
+              <small>{alert.value}{alert.unit} vs {alert.threshold}{alert.unit} · {alert.severity}</small>
+            </span>
+          ))}
+          {(assetHealth?.anomalies ?? []).slice(0, 2).map((anomaly) => (
+            <span key={`${anomaly.signal}-${anomaly.timestamp}`}>
+              <strong>{anomaly.signal.replace(/_/g, ' ')}</strong>
+              <small>{anomaly.value}{anomaly.unit} · z-score {anomaly.z_score} · {anomaly.risk_level}</small>
+            </span>
+          ))}
+          {!assetHealth?.active_alerts.length && !assetHealth?.anomalies.length && (
+            <p className="emptyState">No active IoT alert or anomaly evidence for this asset.</p>
+          )}
+        </div>
+      </section>
       <section className="detailPanel summaryActions">
         <h2>Recommended actions</h2>
         <ol className="actionList">

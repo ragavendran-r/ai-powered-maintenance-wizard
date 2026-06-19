@@ -39,3 +39,16 @@ def decode_access_token(token: str) -> dict[str, Any]:
         return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
     except InvalidTokenError as exc:
         raise ValueError("Invalid or expired token") from exc
+
+
+def decode_access_token_allow_expired(token: str) -> dict[str, Any]:
+    settings = get_settings()
+    try:
+        return jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+            options={"verify_exp": False},
+        )
+    except InvalidTokenError as exc:
+        raise ValueError("Invalid token") from exc

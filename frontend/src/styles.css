@@ -4868,6 +4868,7 @@ h3 {
   .rcaWorkspace,
   .learningView,
   .ingestionView,
+  .monitoringView,
   .reportsRouteStack
 ) :where(p, li, dd, dt, span, small, button, input, select, textarea, strong),
 .loginShell :where(
@@ -4921,4 +4922,123 @@ h3 {
   font-size: var(--content-font-size);
   font-weight: 400;
   line-height: var(--content-line-height);
+}
+
+.monitoringView {
+  display: grid;
+  gap: 16px;
+}
+
+.monitoringGrid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.monitoringAssetPanel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.monitoringAssetPanel.stale {
+  border-color: rgba(185, 28, 28, 0.28);
+}
+
+.monitoringAssetHeader,
+.sensorChartHeader,
+.monitoringFacts,
+.sensorChart footer {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.monitoringFacts {
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.monitoringFacts span {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.sensorChartGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.sensorChart {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.sensorChart.stale {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.sensorChart h3 {
+  font-size: 0.86rem;
+  font-weight: 700;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-transform: capitalize;
+}
+
+.sensorChart svg {
+  height: 96px;
+  width: 100%;
+}
+
+.sensorLine {
+  fill: none;
+  stroke: #2563eb;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.thresholdLine {
+  stroke: #dc2626;
+  stroke-dasharray: 5 4;
+  stroke-width: 1.5;
+}
+
+.sensorPoint {
+  fill: #2563eb;
+}
+
+.anomalyPoint {
+  fill: #dc2626;
+}
+
+.iotEvidenceList {
+  display: grid;
+  gap: 8px;
+}
+
+.iotEvidenceList span {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+}
+
+.iotEvidenceList strong {
+  text-transform: capitalize;
 }

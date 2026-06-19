@@ -34,6 +34,7 @@ import {
   type LearningEmbeddingProfile,
   type LearningRagMigrationPlan,
   type LearningModelDeployment,
+  type MonitoringDashboard,
   type AbnormalAlertReport,
   type DigitalMaintenanceLogEntry,
   type LearningModelVersion,
@@ -101,6 +102,7 @@ import { LearningReviewRoute } from './routes/LearningReview'
 import { RcaWorkspace } from './routes/RcaWorkspace'
 import { UsersRoute } from './routes/Users'
 import { ReportsRoute } from './routes/Reports'
+import { MonitoringRoute } from './routes/Monitoring'
 
 const WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS = 60_000
 const LEARNING_JUDGE_REQUEST_TIMEOUT_MS = 95_000
@@ -457,6 +459,8 @@ function isAbortError(error: unknown) {
 
 function navigationIcon(icon: NavigationIcon) {
   switch (icon) {
+    case 'monitoring':
+      return <Activity size={17} />
     case 'assets':
       return <Activity size={17} />
     case 'execution':
@@ -617,6 +621,7 @@ export function App() {
   const [loginPassword, setLoginPassword] = useState('DemoPass123!')
   const [authMessage, setAuthMessage] = useState('')
   const [dashboard, setDashboard] = useState<DashboardSummary>(fallbackDashboard)
+  const [monitoring, setMonitoring] = useState<MonitoringDashboard | null>(null)
   const [assets, setAssets] = useState<AssetListItem[]>([])
   const [assetDetail, setAssetDetail] = useState<AssetDetail | null>(null)
   const [assetDetailLoading, setAssetDetailLoading] = useState(false)
@@ -831,6 +836,7 @@ export function App() {
     api.setSession(null)
     setSession(null)
     setActiveView('commandCenter')
+    setMonitoring(null)
     setWorkOrders(fallbackWorkOrders)
     setPmTemplates([])
     setPmPlans([])
@@ -909,6 +915,11 @@ export function App() {
     setAuthMessage(message)
   }
 
+  function expireSession(message = 'Session expired. Sign in again.') {
+    void api.notifySessionExpired().catch(() => undefined)
+    clearSession(message)
+  }
+
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setAuthMessage('')
@@ -951,6 +962,19 @@ export function App() {
         }
       })
       .catch(() => setApiState('fallback'))
+  }
+
+  function loadMonitoring() {
+    return api
+      .monitoring()
+      .then((summary) => {
+        setMonitoring(summary)
+        setApiState('connected')
+      })
+      .catch(() => {
+        setMonitoring(null)
+        setApiState('fallback')
+      })
   }
 
   function loadAssets() {
@@ -1660,7 +1684,7 @@ export function App() {
   }
 
   useEffect(() => {
-    api.onUnauthorized(() => clearSession('Session expired. Sign in again.'))
+    api.onUnauthorized(() => expireSession('Session expired. Sign in again.'))
     const restored = api.restoreSession()
     if (!restored) {
       setAuthReady(true)
@@ -1675,7 +1699,7 @@ export function App() {
         setWorkOrders(fallbackWorkOrdersForUser(user))
         setActiveView((current) => canAccessAppView(user.role, current) ? current : homeViewForRole(user.role))
       })
-      .catch(() => clearSession('Session expired. Sign in again.'))
+      .catch(() => expireSession('Session expired. Sign in again.'))
       .finally(() => setAuthReady(true))
     return () => api.onUnauthorized(null)
   }, [])
@@ -1684,6 +1708,7 @@ export function App() {
     if (!authReady || !session || session.user.role === 'iot_service') return
     currentUserIdRef.current = session.user.id
     loadDashboard()
+    loadMonitoring()
     loadAssets()
     loadWorkOrders()
     loadNeoWelcome(null)
@@ -1709,6 +1734,41 @@ export function App() {
       void loadPmPlanning()
     }
   }, [activeView, canAssignWorkOrders])
+
+  useEffect(() => {
+    if (!authReady || !session || activeView !== 'monitoring') return
+    void loadMonitoring()
+    const intervalId = window.setInterval(() => {
+      void loadMonitoring()
+    }, 15_000)
+    return () => window.clearInterval(intervalId)
+  }, [authReady, session?.user.id, activeView])
+
+  useEffect(() => {
+    if (!authReady || !session || session.user.role === 'iot_service') return
+    let cancelled = false
+    const pollUnseenAlerts = () => {
+      api
+        .unseenAlerts()
+        .then((alerts) => {
+          if (cancelled) return
+          alerts
+            .filter((alert) => ['high', 'critical'].includes(alert.severity))
+            .slice(0, 3)
+            .forEach((alert) => {
+              showToast(`${alert.severity.toUpperCase()} IoT alert on ${alert.equipment_id}: ${alert.message}`)
+              void api.markAlertSeen(alert.id).catch(() => undefined)
+            })
+        })
+        .catch(() => undefined)
+    }
+    pollUnseenAlerts()
+    const intervalId = window.setInterval(pollUnseenAlerts, 20_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [authReady, session?.user.id, showToast])
 
   useEffect(() => {
     if (activeView === 'reliability') {
@@ -3512,6 +3572,11 @@ export function App() {
       <AssetsRoute
         assetMessage={assetMessage}
         assets={assets}
+        onOpenAsset={openAsset}
+      />
+    ) : activeView === 'monitoring' ? (
+      <MonitoringRoute
+        monitoring={monitoring}
         onOpenAsset={openAsset}
       />
     ) : activeView === 'asset' ? (

@@ -592,6 +592,51 @@ class AnomalyFinding(BaseModel):
     recommended_inspection_steps: list[str] = []
 
 
+class AlertViewState(BaseModel):
+    user_id: str
+    alert_id: str
+    first_seen_at: str
+    dismissed_at: Optional[str] = None
+
+
+class AlertSeenRequest(BaseModel):
+    dismissed: bool = False
+
+
+class MonitoringSensorPoint(BaseModel):
+    id: str
+    timestamp: str
+    value: float
+    threshold: float
+
+
+class MonitoringSensorSeries(BaseModel):
+    signal: str
+    unit: str
+    threshold: float
+    latest_value: float
+    latest_timestamp: str
+    risk_level: RiskLevel
+    stale: bool = False
+    points: list[MonitoringSensorPoint] = []
+
+
+class MonitoringAsset(BaseModel):
+    equipment: Equipment
+    latest_reading_timestamp: Optional[str] = None
+    active_sensor_count: int = 0
+    active_alert_count: int = 0
+    highest_severity: RiskLevel = "low"
+    stale: bool = True
+    series: list[MonitoringSensorSeries] = []
+
+
+class MonitoringDashboard(BaseModel):
+    generated_at: str
+    stale_after_seconds: int
+    assets: list[MonitoringAsset] = []
+
+
 class HealthSummary(BaseModel):
     equipment: Equipment
     risk_level: RiskLevel

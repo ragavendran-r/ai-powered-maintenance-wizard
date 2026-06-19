@@ -27,6 +27,7 @@ from app.services.iot_streaming import (
     build_dead_letter_payload,
     process_iot_message,
 )
+from app.services.iot_monitoring import purge_iot_sensor_readings, run_anomaly_alert_scan
 from app.services.llm import LLMTextResponse
 from app.services.retrieval import retrieve_evidence
 from app.services.document_intelligence import document_intelligence
@@ -1842,6 +1843,87 @@ def test_persistence_failure_naks_nats_message(monkeypatch):
     assert message.nacked is True
     assert service.status().failed_count == 1
     assert service.status().last_error == "database locked"
+
+
+def test_iot_anomaly_scan_registers_stable_alert_from_streamed_reading():
+    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    message = {
+        "message_id": f"iot-anomaly-sensor-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
+        "schema_version": "1",
+        "source": "anomaly-test-gateway",
+        "type": "sensor_reading",
+        "timestamp": timestamp,
+        "payload": {
+            "equipment_id": "CC-PUMP-03",
+            "signal": "cooling_water_flow",
+            "value": 1450.0,
+            "unit": "m3/h",
+            "threshold": 1100.0,
+        },
+    }
+    process_iot_message(message, "steelplant.iot.sensor_readings")
+
+    result = run_anomaly_alert_scan()
+
+    assert result["registered_alerts"] >= 1
+    alerts = repository.list_alerts("CC-PUMP-03")
+    alert = next(item for item in alerts if item["id"] == "ALT-IOT-ANOMALY-CC-PUMP-03-COOLING-WATER-FLOW")
+    assert alert["severity"] in {"high", "critical"}
+    assert "IoT anomaly detected" in alert["message"]
+
+
+def test_unseen_alerts_are_marked_seen_per_user():
+    headers = auth_headers("operator@plant.local")
+    unseen_before = client.get("/api/alerts/unseen", headers=headers)
+    assert unseen_before.status_code == 200
+    assert unseen_before.json()
+    alert_id = unseen_before.json()[0]["id"]
+
+    seen = client.post(f"/api/alerts/{alert_id}/seen", json={"dismissed": True}, headers=headers)
+
+    assert seen.status_code == 200
+    assert seen.json()["alert_id"] == alert_id
+    unseen_after = client.get("/api/alerts/unseen", headers=headers)
+    assert unseen_after.status_code == 200
+    assert alert_id not in {alert["id"] for alert in unseen_after.json()}
+
+
+def test_iot_sensor_purge_removes_streamed_readings_only():
+    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    message = {
+        "message_id": f"iot-purge-sensor-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
+        "schema_version": "1",
+        "source": "purge-test-gateway",
+        "type": "sensor_reading",
+        "timestamp": timestamp,
+        "payload": {
+            "equipment_id": "CC-PUMP-03",
+            "signal": "cooling_water_flow",
+            "value": 1200.0,
+            "unit": "m3/h",
+            "threshold": 1100.0,
+        },
+    }
+    process_iot_message(message, "steelplant.iot.sensor_readings")
+    assert any(reading["id"].startswith("SR-IOT-") for reading in repository.list_sensor_readings("CC-PUMP-03"))
+
+    result = purge_iot_sensor_readings("test")
+
+    assert result.deleted_count >= 1
+    readings = repository.list_sensor_readings("CC-PUMP-03")
+    assert not any(reading["id"].startswith("SR-IOT-") for reading in readings)
+    assert readings
+
+
+def test_monitoring_assets_endpoint_returns_live_series():
+    response = client.get("/api/monitoring/assets", headers=auth_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["stale_after_seconds"] >= 30
+    assert payload["assets"]
+    first_asset = payload["assets"][0]
+    assert {"equipment", "active_sensor_count", "series", "highest_severity"}.issubset(first_asset)
 
 
 @pytest.mark.parametrize(
