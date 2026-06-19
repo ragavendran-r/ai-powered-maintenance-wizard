@@ -398,6 +398,17 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS user_alert_views (
+        user_id TEXT NOT NULL,
+        alert_id TEXT NOT NULL,
+        first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        dismissed_at TEXT,
+        PRIMARY KEY (user_id, alert_id),
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (alert_id) REFERENCES alerts(id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         email TEXT NOT NULL UNIQUE,
@@ -612,7 +623,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "20"
+SCHEMA_VERSION = "21"
 _INITIALIZING = False
 
 

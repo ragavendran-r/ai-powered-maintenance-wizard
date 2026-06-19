@@ -1432,6 +1432,26 @@ beforeEach(() => {
         }
         return Promise.resolve(new Response(JSON.stringify({ status: 'logged_out' }), { status: 200 }))
       }
+      if (url.endsWith('/api/auth/session-expired')) {
+        return Promise.resolve(new Response(JSON.stringify({ status: 'purged' }), { status: 200 }))
+      }
+      if (url.endsWith('/api/alerts/unseen')) {
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+      }
+      if (url.includes('/api/alerts/') && url.endsWith('/seen')) {
+        const alertId = decodeURIComponent(url.match(/\/api\/alerts\/([^/]+)\/seen/)?.[1] ?? 'ALT-1')
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              user_id: userFromRequest(init).id,
+              alert_id: alertId,
+              first_seen_at: '2026-06-12T10:00:00+05:30',
+              dismissed_at: null,
+            }),
+            { status: 200 },
+          ),
+        )
+      }
       if (url.endsWith('/api/users')) {
         if (init?.method === 'POST') {
           const body = JSON.parse((init.body as string) ?? '{}')
@@ -1816,6 +1836,47 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/dashboard/summary')) {
         return Promise.resolve(new Response(JSON.stringify(dashboard), { status: 200 }))
+      }
+      if (url.endsWith('/api/monitoring/assets')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              generated_at: '2026-06-12T10:00:00+05:30',
+              stale_after_seconds: 300,
+              assets: assets.slice(0, 2).map((asset) => ({
+                equipment: {
+                  id: asset.id,
+                  name: asset.name,
+                  area: asset.area,
+                  process: asset.process,
+                  criticality: asset.criticality,
+                  status: asset.status,
+                },
+                latest_reading_timestamp: '2026-06-12T10:00:00+05:30',
+                active_sensor_count: 1,
+                active_alert_count: asset.active_alerts,
+                highest_severity: asset.risk_level,
+                stale: false,
+                series: [
+                  {
+                    signal: 'drive_end_vibration',
+                    unit: 'mm/s',
+                    threshold: 7.1,
+                    latest_value: 8.2,
+                    latest_timestamp: '2026-06-12T10:00:00+05:30',
+                    risk_level: asset.risk_level,
+                    stale: false,
+                    points: [
+                      { id: `${asset.id}-p1`, timestamp: '2026-06-12T09:59:00+05:30', value: 6.1, threshold: 7.1 },
+                      { id: `${asset.id}-p2`, timestamp: '2026-06-12T10:00:00+05:30', value: 8.2, threshold: 7.1 },
+                    ],
+                  },
+                ],
+              })),
+            }),
+            { status: 200 },
+          ),
+        )
       }
       if (url.endsWith('/api/assets')) {
         return Promise.resolve(new Response(JSON.stringify(assets), { status: 200 }))
@@ -2349,6 +2410,17 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       problem_code: 'INVESTIGATE',
       assigned_to: '',
     })
+  })
+
+  it('opens the Monitoring page with live sensor charts', async () => {
+    await renderAuthenticated()
+
+    fireEvent.click(within(screen.getByLabelText('Maintenance navigation')).getByRole('button', { name: 'Monitoring' }))
+
+    expect(await screen.findByRole('heading', { name: 'Live Sensors' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Alerting Assets' })).toBeInTheDocument()
+    expect(screen.getAllByText('drive end vibration').length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('img', { name: /sensor trend/i }).length).toBeGreaterThan(0)
   })
 
   it('opens an Assets page with a company asset table and data-backed asset detail', async () => {

@@ -111,6 +111,56 @@ def list_alerts(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
     return _fetch_all("SELECT * FROM alerts ORDER BY timestamp DESC")
 
 
+def list_unseen_alerts(user_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    return _fetch_all(
+        """
+        SELECT a.*
+        FROM alerts a
+        LEFT JOIN user_alert_views v
+            ON v.alert_id = a.id
+            AND v.user_id = ?
+        WHERE v.alert_id IS NULL
+        ORDER BY
+            CASE a.severity
+                WHEN 'critical' THEN 4
+                WHEN 'high' THEN 3
+                WHEN 'medium' THEN 2
+                ELSE 1
+            END DESC,
+            a.timestamp DESC
+        LIMIT ?
+        """,
+        (user_id, limit),
+    )
+
+
+def mark_alert_seen(user_id: str, alert_id: str, dismissed: bool = False) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    if not _fetch_one("SELECT id FROM alerts WHERE id = ?", (alert_id,)):
+        return None
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO user_alert_views (user_id, alert_id, dismissed_at)
+            VALUES (?, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END)
+            ON CONFLICT(user_id, alert_id) DO UPDATE SET
+                dismissed_at = CASE
+                    WHEN excluded.dismissed_at IS NOT NULL THEN excluded.dismissed_at
+                    ELSE user_alert_views.dismissed_at
+                END
+            """,
+            (user_id, alert_id, 1 if dismissed else 0),
+        )
+    return _fetch_one(
+        """
+        SELECT user_id, alert_id, first_seen_at, dismissed_at
+        FROM user_alert_views
+        WHERE user_id = ? AND alert_id = ?
+        """,
+        (user_id, alert_id),
+    )
+
+
 def list_spares(equipment_id: str) -> list[dict[str, Any]]:
     return _fetch_all(
         """
@@ -131,6 +181,46 @@ def list_sensor_readings(equipment_id: Optional[str] = None, signal: Optional[st
     if equipment_id:
         return _fetch_all("SELECT * FROM sensor_readings WHERE equipment_id = ? ORDER BY signal ASC, timestamp ASC", (equipment_id,))
     return _fetch_all("SELECT * FROM sensor_readings ORDER BY equipment_id ASC, signal ASC, timestamp ASC")
+
+
+def list_recent_sensor_readings(equipment_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    rows = _fetch_all(
+        """
+        SELECT *
+        FROM sensor_readings
+        WHERE equipment_id = ?
+        ORDER BY timestamp DESC
+        LIMIT ?
+        """,
+        (equipment_id, limit),
+    )
+    return list(reversed(rows))
+
+
+def get_sensor_reading_by_identity(equipment_id: str, signal: str, timestamp: str) -> Optional[dict[str, Any]]:
+    return _fetch_one(
+        """
+        SELECT *
+        FROM sensor_readings
+        WHERE equipment_id = ? AND signal = ? AND timestamp = ?
+        LIMIT 1
+        """,
+        (equipment_id, signal, timestamp),
+    )
+
+
+def purge_iot_sensor_readings() -> dict[str, Any]:
+    ensure_ready()
+    rows = _fetch_all("SELECT id FROM sensor_readings WHERE id LIKE 'SR-IOT-%' ORDER BY id ASC")
+    reading_ids = [row["id"] for row in rows]
+    if not reading_ids:
+        return {"deleted_count": 0, "vector_index_result": delete_plant_records_index([])}
+    with connect() as connection:
+        connection.executemany("DELETE FROM sensor_readings WHERE id = ?", [(reading_id,) for reading_id in reading_ids])
+    return {
+        "deleted_count": len(reading_ids),
+        "vector_index_result": delete_plant_records_index([f"sensor_reading:{reading_id}" for reading_id in reading_ids]),
+    }
 
 
 def list_maintenance_events(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:

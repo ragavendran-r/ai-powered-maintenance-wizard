@@ -161,6 +161,47 @@ export interface AnomalyFinding {
   recommended_inspection_steps?: string[]
 }
 
+export interface AlertViewState {
+  user_id: string
+  alert_id: string
+  first_seen_at: string
+  dismissed_at?: string | null
+}
+
+export interface MonitoringSensorPoint {
+  id: string
+  timestamp: string
+  value: number
+  threshold: number
+}
+
+export interface MonitoringSensorSeries {
+  signal: string
+  unit: string
+  threshold: number
+  latest_value: number
+  latest_timestamp: string
+  risk_level: RiskLevel
+  stale: boolean
+  points: MonitoringSensorPoint[]
+}
+
+export interface MonitoringAsset {
+  equipment: Equipment
+  latest_reading_timestamp?: string | null
+  active_sensor_count: number
+  active_alert_count: number
+  highest_severity: RiskLevel
+  stale: boolean
+  series: MonitoringSensorSeries[]
+}
+
+export interface MonitoringDashboard {
+  generated_at: string
+  stale_after_seconds: number
+  assets: MonitoringAsset[]
+}
+
 export interface ReasoningExplanation {
   subject_type: 'prediction' | 'anomaly' | 'recommendation' | 'retrieval'
   summary: string
@@ -545,6 +586,17 @@ async function request<T>(path: string, init?: RequestInit, includeAuth = true):
   })
   if (!response.ok) {
     if (response.status === 401 && includeAuth) unauthorizedHandler?.()
+    throw new ApiError(response.status, `Request failed: ${response.status}`)
+  }
+  return response.json() as Promise<T>
+}
+
+async function sessionEndRequest<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: authHeaders(),
+  })
+  if (!response.ok) {
     throw new ApiError(response.status, `Request failed: ${response.status}`)
   }
   return response.json() as Promise<T>
@@ -1249,6 +1301,7 @@ export const api = {
     ),
   me: () => request<AuthUser>('/api/auth/me'),
   logout: () => request<{ status: string }>('/api/auth/logout', { method: 'POST' }),
+  notifySessionExpired: () => sessionEndRequest<{ status: string }>('/api/auth/session-expired'),
   users: () => request<AuthUser[]>('/api/users'),
   technicians: () => request<AuthUser[]>('/api/users/technicians'),
   createUser: (payload: UserCreateRequest) =>
@@ -1280,9 +1333,16 @@ export const api = {
       onEvent,
     ),
   dashboard: () => request<DashboardSummary>('/api/dashboard/summary'),
+  monitoring: () => request<MonitoringDashboard>('/api/monitoring/assets'),
   streamingStatus: () => request<StreamingStatus>('/api/streaming/status'),
   health: (equipmentId: string) => request<HealthSummary>(`/api/equipment/${equipmentId}/health`),
   alerts: () => request<Alert[]>('/api/alerts'),
+  unseenAlerts: () => request<Alert[]>('/api/alerts/unseen'),
+  markAlertSeen: (alertId: string, dismissed = false) =>
+    request<AlertViewState>(`/api/alerts/${encodeURIComponent(alertId)}/seen`, {
+      method: 'POST',
+      body: JSON.stringify({ dismissed }),
+    }),
   diagnose: (equipmentId: string, alertId?: string) =>
     request<Recommendation>('/api/diagnose', {
       method: 'POST',

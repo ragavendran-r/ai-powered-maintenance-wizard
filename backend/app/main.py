@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Optional
 
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -22,12 +22,15 @@ from app.core.auth import (
     require_roles,
 )
 from app.core.config import get_settings
-from app.core.security import create_access_token, verify_password
+from app.core.security import create_access_token, decode_access_token_allow_expired, verify_password
 from app.data import repository
 from app.data.database import initialize_database
 from app.models.schemas import (
     AssetDetail,
     AssetListItem,
+    Alert,
+    AlertSeenRequest,
+    AlertViewState,
     ChatRequest,
     ChatMessage,
     ChatResponse,
@@ -69,6 +72,7 @@ from app.models.schemas import (
     MaintenanceInsightReportBundle,
     MaintenanceInsightReportSummary,
     LoginRequest,
+    MonitoringDashboard,
     NeoChatRequest,
     NeoChatResponse,
     PasswordResetRequest,
@@ -112,6 +116,7 @@ from app.services.assets import stream_asset_reliability_prediction
 from app.services.artifact_store import cleanup_registered_learning_artifacts
 from app.services.document_intelligence import analyze_documents, document_intelligence
 from app.services.iot_streaming import StreamingIngestionService
+from app.services.iot_monitoring import IoTMonitoringScheduler, monitoring_dashboard, purge_iot_sensor_readings
 from app.services.learning import (
     activate_rag_embedding_profile,
     create_dataset_snapshot,
@@ -183,11 +188,15 @@ MATERIAL_UNREADY_STATUSES = {"blocked", "pending"}
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     initialize_database(seed=True)
     streaming_service = StreamingIngestionService()
+    monitoring_scheduler = IoTMonitoringScheduler()
     app.state.streaming_service = streaming_service
+    app.state.monitoring_scheduler = monitoring_scheduler
     await streaming_service.start()
+    await monitoring_scheduler.start()
     try:
         yield
     finally:
+        await monitoring_scheduler.stop()
         await streaming_service.stop()
 
 
@@ -239,7 +248,7 @@ def me(current_user: UserPublic = Depends(get_current_user)):
 
 
 @app.post("/api/auth/logout")
-def logout(current_user: UserPublic = Depends(get_current_user)) -> dict[str, str]:
+def logout(current_user: UserPublic = Depends(get_current_user)) -> dict[str, Any]:
     repository.save_auth_audit_event(
         "logout",
         True,
@@ -248,7 +257,28 @@ def logout(current_user: UserPublic = Depends(get_current_user)) -> dict[str, st
         role=current_user.role,
         detail="Client logout",
     )
-    return {"status": "logged_out"}
+    purge_result = None
+    if settings.iot_purge_on_session_end:
+        purge_result = purge_iot_sensor_readings("logout").as_dict()
+    return {"status": "logged_out", "iot_sensor_purge": purge_result}
+
+
+@app.post("/api/auth/session-expired")
+def session_expired(authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:
+    if not settings.iot_purge_on_session_end:
+        return {"status": "ignored", "iot_sensor_purge": None}
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        payload = decode_access_token_allow_expired(token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+    user_id = payload.get("sub")
+    if not isinstance(user_id, str) or not repository.get_user_by_id(user_id):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token subject")
+    purge_result = purge_iot_sensor_readings("session_expired").as_dict()
+    return {"status": "purged", "iot_sensor_purge": purge_result}
 
 
 @app.get("/api/users", response_model=list[UserPublic], dependencies=[Depends(require_roles(*ADMIN_ROLES))])
@@ -397,9 +427,27 @@ def get_equipment_health(equipment_id: str):
         raise HTTPException(status_code=404, detail="Equipment not found") from exc
 
 
-@app.get("/api/alerts", dependencies=[Depends(require_roles(*READ_ROLES))])
+@app.get("/api/alerts", response_model=list[Alert], dependencies=[Depends(require_roles(*READ_ROLES))])
 def get_alerts():
     return active_alerts()
+
+
+@app.get("/api/alerts/unseen", response_model=list[Alert], dependencies=[Depends(require_roles(*READ_ROLES))])
+def get_unseen_alerts(current_user: UserPublic = Depends(get_current_user)):
+    return repository.list_unseen_alerts(current_user.id)
+
+
+@app.post("/api/alerts/{alert_id}/seen", response_model=AlertViewState, dependencies=[Depends(require_roles(*READ_ROLES))])
+def mark_alert_seen(alert_id: str, request: AlertSeenRequest, current_user: UserPublic = Depends(get_current_user)):
+    view_state = repository.mark_alert_seen(current_user.id, alert_id, request.dismissed)
+    if not view_state:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return view_state
+
+
+@app.get("/api/monitoring/assets", response_model=MonitoringDashboard, dependencies=[Depends(require_roles(*READ_ROLES))])
+def get_monitoring_assets(limit_per_asset: int = Query(120, ge=10, le=500)):
+    return monitoring_dashboard(limit_per_asset=limit_per_asset)
 
 
 @app.get("/api/equipment/{equipment_id}/sensor-readings", dependencies=[Depends(require_roles(*READ_ROLES))])

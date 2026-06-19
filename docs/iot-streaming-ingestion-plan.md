@@ -90,6 +90,36 @@ For `alert` and `sensor_reading` messages, the backend may derive `payload.id` f
 - Show disabled, connected, or error state.
 - Show processed count, failed count, last message timestamp, and last error.
 
+## Continuous Monitoring And Simulator
+
+The current monitoring layer extends the ingestion foundation into a live telemetry demo:
+
+- `scripts/publish-dummy-iot-readings.py` continuously publishes readings for every seeded asset.
+- The simulator generates normal readings most of the time and injects configurable anomaly scenarios every few minutes.
+- A backend anomaly scanner runs every 3 minutes by calling the anomaly service directly, not by making internal HTTP requests to the anomalies endpoint.
+- High and critical IoT anomaly findings register or update stable alert records.
+- Per-user alert popup visibility lets every logged-in user see each alert once without hiding it from other users.
+- The Monitoring view shows per-asset live telemetry status, sensor time-series graphs, threshold lines, anomaly markers, stale/no-data indicators, and links back to asset detail.
+- Asset detail includes an IoT evidence section so diagnosis and recommendations can show recent alert/anomaly context.
+- Raw streaming IoT sensor readings are purged every 15 minutes and their corresponding plant-record vectors are removed, while alert/anomaly records remain as durable operational evidence.
+
+Backend alert registration and UI popup display are separate concerns. Stable alert registration prevents the 3-minute scanner from inserting duplicate database alerts for the same ongoing sensor episode. Per-user seen/dismissed state prevents the same registered alert from popping up repeatedly for the same user.
+
+Raw IoT readings are intentionally short-lived demo telemetry. For longer trend history, add downsampled `sensor_window_summaries` such as 1-minute min/max/avg per equipment and signal; those summaries can be retained longer and indexed into RAG instead of every raw sensor point.
+
+Run the simulator against a running local stack:
+
+```bash
+scripts/publish-dummy-iot-readings.py \
+  --nats-url nats://127.0.0.1:4222 \
+  --assets all \
+  --interval-seconds 5 \
+  --anomaly-every-seconds 180 \
+  --scenario mixed
+```
+
+Use `--once` for a single publish batch or `--scenario normal` when you only want baseline readings.
+
 ## Test Plan
 
 - Valid sensor reading persists and appears in sensor/anomaly endpoints.

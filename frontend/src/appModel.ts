@@ -13,6 +13,7 @@ export const applicationTitle = 'Intelligent Maintenance Wizard'
 
 export type AppView =
   | 'commandCenter'
+  | 'monitoring'
   | 'assets'
   | 'asset'
   | 'workExecution'
