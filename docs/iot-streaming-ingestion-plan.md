@@ -98,13 +98,13 @@ The current monitoring layer extends the ingestion foundation into a live teleme
 - `scripts/publish-dummy-iot-readings.py` continuously publishes readings for every seeded asset.
 - The simulator generates normal readings most of the time and injects configurable anomaly scenarios every 2 minutes by default.
 - A backend anomaly scanner runs at startup and then every 2 minutes by calling the anomaly service directly, not by making internal HTTP requests to the anomalies endpoint.
-- High and critical IoT anomaly findings register or update stable alert records.
+- High and critical IoT anomaly findings register occurrence-specific alert records whose ids include the asset, signal, and anomaly timestamp.
 - Per-user alert popup visibility lets every logged-in user see each alert once without hiding it from other users.
 - The Monitoring view shows per-asset live telemetry status, sensor time-series graphs, threshold lines, anomaly markers, stale/no-data indicators, and links back to asset detail.
 - Asset detail includes an IoT evidence section so diagnosis and recommendations can show recent alert/anomaly context.
 - Raw streaming IoT sensor readings are purged every 15 minutes and their corresponding plant-record vectors are removed, while alert/anomaly records remain as durable operational evidence.
 
-Backend alert registration and UI popup display are separate concerns. Stable alert registration prevents the 3-minute scanner from inserting duplicate database alerts for the same ongoing sensor episode. Per-user seen/dismissed state prevents the same registered alert from popping up repeatedly for the same user.
+Backend alert registration and UI popup display are separate concerns. Each simulated anomaly occurrence is stored as its own alert so recurring simulator anomalies can surface again, while per-user seen/dismissed state prevents the same occurrence from popping up repeatedly for the same user. The simulator, backend scanner, and unseen-alert polling all default to a 2-minute cadence.
 
 Raw IoT readings are intentionally short-lived demo telemetry. For longer trend history, add downsampled `sensor_window_summaries` such as 1-minute min/max/avg per equipment and signal; those summaries can be retained longer and indexed into RAG instead of every raw sensor point.
 
