@@ -17,7 +17,7 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 The AI layer is an audited maintenance copilot layered after deterministic backend controls. Raw IoT ingestion, anomaly scoring, risk calculation, role permissions, and persisted work-order updates stay in deterministic flows; AI explains, retrieves evidence, guides role-specific work, and helps turn reviewed outcomes into reusable learning material.
 
 - Provider modes: `mock` for deterministic offline development/tests, `openai` for OpenAI-compatible runtimes such as llama.cpp, LM Studio, or vLLM, and `ollama` for local Ollama. Live providers share structured-output validation, token limits, timeouts, streaming support, and explicit error/degraded-mode handling; user-visible assistant prose streams from the configured live model when one is available.
-- Role-aware assistants: Neo supports command-center and work-order workflows, Morpheus supports diagnosis/RCA/PM planning, and Smith explains reliability prediction and technician-ready preventive-maintenance steps.
+- Role-aware assistants: Neo supports command-center workflows, Trinity supports technician and supervisor work-order execution, Morpheus supports diagnosis/RCA/PM planning, and Smith explains reliability prediction and technician-ready preventive-maintenance steps.
 - Local LLM runtime: The recommended adapter-serving setup is llama.cpp with a Qwen2.5 GGUF base model and a GGUF LoRA adapter served through the OpenAI-compatible endpoint at `http://127.0.0.1:8080/v1`. LM Studio remains supported as an optional OpenAI-compatible runtime for base models or fused adapter models:
 
   ```env
@@ -35,7 +35,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
   LEARNING_ADAPTER_DEPLOYER_COMMAND="bash scripts/peft/deploy_llama_cpp_adapter.sh"
   ```
 
-  See `docs/local-llm-llama-cpp-qwen-adapter.md` for the local llama.cpp Qwen2.5 base-plus-adapter setup, `docs/peft-training.md` for the Learning Review adapter deployment flow, and `docs/local-llm-lm-studio.md` for the optional LM Studio base/fused-model setup.
+  This llama-server path replaces the earlier LM Studio-first local runtime for adapter demos because it can load the GGUF base model and GGUF LoRA adapter together under the served alias used by Neo, Trinity, Morpheus, Smith, recommendations, RAG reranking, and learning judge flows. See `docs/local-llm-llama-cpp-qwen-adapter.md` for the local llama.cpp Qwen2.5 base-plus-adapter setup, `docs/peft-training.md` for the Learning Review adapter deployment flow, and `docs/local-llm-lm-studio.md` for the optional LM Studio base/fused-model setup.
 - Evidence-grounded RAG and learning: Qdrant stores document chunks, approved learning examples, and indexed plant records for production-like retrieval, while SQLite-local vector scoring remains a fallback. Learning Review requires both human approval and LLM-as-a-Judge quality scoring before examples can be reused for RAG or exported as JSONL snapshots for PEFT.
 - Tuning handoff: NATS-backed learning jobs can prepare audited dataset and manifest artifacts, optionally invoke the bundled Qwen LoRA/QLoRA trainer template, and register adapter candidates. Evaluation, deployment verification, promotion, and rollback remain reviewer-controlled. See `docs/rag-peft-nats-learning-architecture.md` and `docs/peft-training.md` for the full design.
 
@@ -49,7 +49,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 | Auth | Local SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI role guards, React session storage |
 | AI provider adapters | Mock deterministic provider, OpenAI-compatible chat completions, Ollama-compatible chat completions |
 | Local LLM runtime | llama.cpp OpenAI-compatible server for base GGUF + LoRA adapter serving; LM Studio remains optional for base or fused-model serving |
-| Assistants | Neo for dashboard/work execution, Morpheus for diagnosis/RCA/PM planning, Smith for reliability prediction and technician-ready planning |
+| Assistants | Neo for dashboard command-center workflows, Trinity for technician/supervisor work execution, Morpheus for diagnosis/RCA/PM planning, Smith for reliability prediction and technician-ready planning |
 | RAG/vector search | Qdrant for production-like document and approved-learning retrieval, deterministic hashed embeddings, SQLite/local-vector fallback |
 | Streaming and async jobs | NATS JetStream for IoT ingestion and learning jobs, durable consumers, explicit acknowledgments, DLQ handling |
 | Learning and tuning | LLM-as-a-Judge scoring, reviewer approval gates, JSONL dataset snapshots, PEFT/LoRA and QLoRA worker hooks, artifact registry |
@@ -63,7 +63,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 ## Current Capabilities
 
 - FastAPI backend with health, dashboard, asset list/detail section loading, equipment health, alert, chat, diagnosis, prediction, work order, preventive-maintenance planning, planning/scheduling/dispatch, spare reservation/procurement, assistant, report, feedback, and learning-review endpoints.
-- React + TypeScript + Vite frontend for an operational dashboard, a company Assets table, lazy-loaded data-backed asset details, work-order queue/detail/execution/review screens, left-nav ingestion view, engineer chat, recommendation panel, report export, and detailed feedback controls.
+- React + TypeScript + Vite frontend for an operational dashboard, a company Assets table, lazy-loaded data-backed asset details, continuous Monitoring view with live sensor graphs, work-order queue/detail/execution/review screens, left-nav ingestion view, engineer chat, recommendation panel, report export, and detailed feedback controls.
 - Sample steel-plant data for a hot strip mill drive, blast furnace blower, caster cooling pump, hot rolling hydraulic system, and melt shop overhead crane.
 - SQLite-backed persistence seeded from five sample assets with equipment, asset profiles, asset metrics, recommendations, subsystems, reliability metrics, alerts, sensor readings, spares, maintenance events, work orders, PM templates, PM plans, planner schedules, dispatch metadata, spare reservations, reorder/procurement blockers, work logs, SOP/manual/log/history evidence, document chunks, document intelligence, maintenance labels, and feedback.
 - Local document chunk index with deterministic embeddings, hybrid retrieval scoring, optional LLM/SLM reranking, and relevance reasons for offline retrieval-augmented answers.
@@ -78,7 +78,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 - Learning Review workflow for admin/engineer reviewers to score feedback, labels, completed work orders, approved assistant interactions, and ingested documents with an LLM-as-a-Judge rubric before approving them for RAG reuse or local PEFT tuning snapshots.
 - Durable NATS learning worker for queued judge/dataset/evaluation/PEFT jobs, including local PEFT dataset and training-manifest artifacts with content hashes, optional external trainer handoff, and a bundled Qwen/SLM LoRA or QLoRA trainer template.
 - Local login and role-based authorization for steel-plant users with admin, engineer, technician, supervisor, planner, operator, and API-only service roles.
-- Role-specific technician and supervisor LLM assistant flows for live work-order directions, problem-code suggestions, completion summaries, follow-up review, and draft follow-up work.
+- Trinity role-specific technician and supervisor LLM assistant flows for live work-order directions, problem-code suggestions, completion summaries, follow-up review, and draft follow-up work.
 - Backend and frontend tests for core prototype behavior.
 
 ## Decision-Support Features
@@ -86,7 +86,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 - Reactive troubleshooting through natural-language chat and diagnosis requests across the five tracked steel-plant assets.
 - Root-cause suggestions merged from deterministic rules, retrieved evidence, prior feedback, and optional LLM output.
 - Degradation and remaining useful life estimates using explainable heuristic risk drivers, normalized maintenance labels, and grounded reasoning explanations.
-- Proactive abnormality detection through rolling baseline, z-score, threshold breach, trend-delta analysis, and context classification.
+- Proactive abnormality detection through rolling baseline, z-score, threshold breach, trend-delta analysis, context classification, center-screen anomaly popups, and the continuous Monitoring dashboard.
 - Prioritized maintenance actions based on risk level, active alerts, equipment criticality, spares availability, lead time, maintenance history, and feedback signals.
 - Work-order lifecycle support with WAPPR, APPR, WMATL, INPRG, COMP, and CLOSE status tracking, assignment, priority, problem code, recommended action, follow-up flags, and work logs.
 - Preventive maintenance planning with seeded PM templates, live formatted Morpheus PM draft streams, monitoring thresholds, generated task lists, streamed Smith technician-ready steps, and conversion from risk prediction into planned PM work orders.
@@ -208,6 +208,15 @@ To run NATS JetStream, Qdrant, the streaming-enabled backend, the IoT simulator,
 scripts/run-local-stack.sh
 ```
 
+For live adapter-backed assistant demos, start llama.cpp before the app stack:
+
+```bash
+scripts/peft/start_llama_cpp_qwen_adapter.sh --check
+scripts/peft/start_llama_cpp_qwen_adapter.sh
+```
+
+This starts llama.cpp's OpenAI-compatible `llama-server` with the configured Qwen2.5 GGUF base model plus GGUF LoRA adapter and exposes the served alias on `http://127.0.0.1:8080/v1`. The local app stack still works in `LLM_PROVIDER=mock` mode when you do not need live LLM output.
+
 Useful stack commands:
 
 ```bash
@@ -276,7 +285,7 @@ Structured record ingestion supports `equipment`, `alerts`, `spares`, `work_orde
 
 NATS JetStream streaming ingestion is enabled in the local stack and should remain enabled for production. Set `STREAMING_ENABLED=true` and configure `NATS_URL` to consume IoT envelopes from `steelplant.iot.*` subjects into the same structured record tables used by JSON ingestion. The backend uses the `MW_IOT` stream, `maintenance-wizard-ingestor` durable consumer, explicit acknowledgments after persistence, and `steelplant.iot.dlq` for invalid messages.
 
-The continuous-monitoring layer builds on this stream with an automatically managed local IoT simulator, backend anomaly scans at startup and every 2 minutes after that, stable anomaly alert registration, per-user alert popup state, and a Monitoring UI with live sensor graphs. The simulator injects anomaly scenarios every 2 minutes by default, and logged-in users poll for unseen anomaly popups every 2 minutes. Raw streaming IoT sensor readings are short-lived demo telemetry that can be purged every 15 minutes and on logout/session expiry, with corresponding raw sensor vectors removed from Qdrant while alert/anomaly records remain. Caveat: logout/session-expiry purging is global to the local demo database, so one user's session ending can clear raw IoT readings for other active users; keep `IOT_PURGE_ON_SESSION_END=false` for production-style shared environments.
+The continuous-monitoring layer builds on this stream with an automatically managed local IoT simulator, backend anomaly scans at startup and every 2 minutes after that, occurrence-specific IoT anomaly alert records, per-user alert popup state, and a Monitoring UI with live sensor graphs. The simulator injects anomaly scenarios every 2 minutes by default, and logged-in users poll for unseen anomaly popups every 2 minutes. Each simulated anomaly occurrence gets its own alert id so every logged-in user can see that occurrence once in the centered alert dialog without replaying the same popup indefinitely. Raw streaming IoT sensor readings are short-lived demo telemetry that can be purged every 15 minutes and on logout/session expiry, with corresponding raw sensor vectors removed from Qdrant while alert/anomaly records remain. Caveat: logout/session-expiry purging is global to the local demo database, so one user's session ending can clear raw IoT readings for other active users; keep `IOT_PURGE_ON_SESSION_END=false` for production-style shared environments.
 
 The same NATS server also carries production learning jobs without mixing them with plant IoT payloads. Keep `LEARNING_ASYNC_ENABLED=true` to publish queued tuning jobs to `LEARNING_NATS_STREAM=MW_LEARNING` on `maintenance.learning.*` subjects. Run the worker with `python -m app.learning_worker`, or use the local stack scripts, to consume jobs with `LEARNING_NATS_CONSUMER=maintenance-wizard-learning-worker`. PEFT requests prepare a JSONL dataset and training manifest under `LEARNING_ARTIFACT_DIR`, then record artifact hashes for audit. When `LEARNING_PEFT_TRAINER_COMMAND` is configured, the worker invokes that external trainer with bounded timeout and registers the resulting adapter as a `candidate` adapter version only. Promotion requires a passing evaluation and a verified runtime-loaded deployment; the default deployment hook uses llama.cpp to serve the GGUF base model with the trained LoRA adapter alias.
 
@@ -325,18 +334,20 @@ npm run build
 
 ## Demo Flow
 
-1. Start the local stack with `scripts/run-local-stack.sh start`, or start the FastAPI backend and Vite frontend separately.
-2. Sign in as `admin@plant.local` with `DemoPass123!`.
-3. Open the dashboard and review high-risk assets.
-4. Select the hot strip mill main drive.
-5. Ask why the drive is vibrating or run diagnosis.
-6. Review sensor anomalies, cited evidence, root causes, immediate and planned actions, spares strategy, feedback controls, and Markdown report export.
-7. Open the Ingestion view from the left navigation and import an SOP/manual/log or paste JSON records/documents.
-8. Open Reports to review structured maintenance insights, abnormal alerts, decision summaries, digital log entries, and Markdown export.
-9. Open Work Execution and Planning to show role-aware work-order execution, PM planning, material blockers, and dispatch controls.
-10. Open Learning and Tuning to review judged examples, RAG status, PEFT jobs, artifacts, and model promotion gates.
-11. Open the Users view as admin to review role-based access.
-12. Submit detailed feedback with actual root cause, action taken, and outcome; run diagnosis again to see learning notes included.
+1. For a live adapter demo, start llama.cpp with `scripts/peft/start_llama_cpp_qwen_adapter.sh --check` and `scripts/peft/start_llama_cpp_qwen_adapter.sh`.
+2. Start the local stack with `scripts/run-local-stack.sh start`, or start the FastAPI backend and Vite frontend separately.
+3. Sign in as `admin@plant.local` with `DemoPass123!`.
+4. Open the dashboard and review high-risk assets.
+5. Open Monitoring to show the IoT simulator readings, two-column live sensor charts, anomaly markers, thresholds, and centered anomaly popups.
+6. Select the hot strip mill main drive.
+7. Ask why the drive is vibrating or run diagnosis.
+8. Review sensor anomalies, cited evidence, root causes, immediate and planned actions, spares strategy, feedback controls, and Markdown report export.
+9. Open the Ingestion view from the left navigation and import an SOP/manual/log or paste JSON records/documents.
+10. Open Reports to review structured maintenance insights, abnormal alerts, decision summaries, digital log entries, and Markdown export.
+11. Open Work Execution and Planning to show Trinity role-aware work-order execution, PM planning, material blockers, and dispatch controls.
+12. Open Learning and Tuning to review judged examples, RAG status, PEFT jobs, artifacts, and model promotion gates.
+13. Open the Users view as admin to review role-based access.
+14. Submit detailed feedback with actual root cause, action taken, and outcome; run diagnosis again to see learning notes included.
 
 ## Progress Tracking
 

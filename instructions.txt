@@ -15,7 +15,9 @@ Implemented features
 - Asset views with data-backed profiles, metrics, recommendations, subsystems, performance, reliability, history, work orders, documents, and prediction drivers.
 - Ingestion view for document uploads and structured JSON records.
 - IoT streaming ingestion through NATS JetStream with status reporting and DLQ handling.
+- Continuous Monitoring view with simulator-fed live sensor graphs, threshold lines, anomaly markers, stale telemetry status, and centered anomaly alert popups.
 - Neo role-aware assistant for dashboard, technician execution, supervisor follow-ups, and supported work-order actions.
+- Trinity role-aware assistant for technician and supervisor work-order execution.
 - Morpheus diagnosis, RCA, and PM planning flows grounded in asset state, alerts, work history, spares, RAG evidence, and feedback.
 - Work Execution view for assigned technician/supervisor work, execution guidance, material blockers, and approval actions.
 - Planning view for work order assignment, schedules, outage windows, material readiness, spare reservations, procurement status, and dispatch validation.
@@ -24,7 +26,7 @@ Implemented features
 - RAG retrieval over document chunks and approved learning examples using Qdrant when available, with SQLite/local-vector fallback.
 - Learning and Tuning workflow for example refresh, LLM-as-a-Judge scoring, approval, JSONL snapshots, PEFT job queueing, artifact tracking, adapter deployment, evaluation, promotion, and rollback.
 - Optional external PEFT trainer template for Qwen LoRA/QLoRA adapter generation.
-- Local full-stack runner for NATS, Qdrant, backend, learning worker, and Vite frontend.
+- Local full-stack runner for NATS, Qdrant, backend, IoT simulator, learning worker, and Vite frontend.
 - Local Kubernetes runner for disposable Kind-based deployments.
 - Demo assets and ingestion samples for steel-plant equipment including rolling mill drive, blast furnace blower, cooling pump, hydraulic system, and overhead crane.
 
@@ -32,8 +34,9 @@ Tech stack
 - Backend: Python, FastAPI, Pydantic, SQLite, pytest.
 - Frontend: React, TypeScript, Vite, Vitest, Playwright.
 - AI providers: mock deterministic provider, OpenAI-compatible chat completions, Ollama-compatible chat.
-- Recommended local LLM runtime: LM Studio with OpenAI-compatible endpoint at http://localhost:1234/v1.
-- Recommended local model: Qwen2.5 7B Instruct GGUF for inference; Qwen/Qwen2.5-7B-Instruct for Transformers-compatible PEFT training.
+- Recommended local LLM runtime: llama.cpp `llama-server` with OpenAI-compatible endpoint at http://127.0.0.1:8080/v1.
+- Recommended local model/runtime pairing: Qwen2.5 7B Instruct GGUF base model plus a GGUF LoRA adapter served together under the Maintenance Wizard adapter alias; Qwen/Qwen2.5-7B-Instruct remains the Transformers-compatible PEFT training source.
+- Optional local LLM runtime: LM Studio for base-model or fused/imported adapter workflows where raw LoRA adapter loading is not required.
 - RAG/vector store: Qdrant with deterministic hash embeddings by default, plus SQLite/local-vector fallback.
 - Streaming and async jobs: NATS JetStream.
 - PEFT tooling: Transformers, PEFT, optional bitsandbytes/CUDA QLoRA, local trainer script at scripts/peft/train_qwen_lora.py.
@@ -43,7 +46,7 @@ Tech stack
 Future phases
 - Move production persistence from SQLite to Postgres for multi-worker deployments.
 - Harden object-store lifecycle, access policies, and bucket-native artifact retention for S3/MinIO.
-- Automate adapter loading into LM Studio, Ollama, vLLM, or another runtime after reviewer promotion.
+- Harden adapter loading into llama.cpp, LM Studio, Ollama, vLLM, or another runtime after reviewer promotion.
 - Add richer plant time-series data and model-backed prediction/anomaly algorithms beyond current heuristic/demo-grade scoring.
 - Add production monitoring, tracing, audit dashboards, and model-quality drift tracking.
 - Expand mobile/responsive validation coverage where it has been paused or only partially covered.
@@ -53,7 +56,7 @@ Future phases
 Known open bugs and limitations
 - PEFT training is not fully click-only unless the trainer environment, dependencies, NATS, backend, and learning worker are already configured and running.
 - Local Qwen 7B PEFT training may exceed normal Mac memory/compute limits, especially with MW_PEFT_QUANTIZATION=none.
-- LM Studio GGUF model names are serving identifiers, not Transformers training sources; PEFT training needs a Hugging Face model id or local Transformers model directory.
+- llama.cpp and LM Studio GGUF model names are serving identifiers, not Transformers training sources; PEFT training needs a Hugging Face model id or local Transformers model directory.
 - Qdrant unavailable or mismatched vector dimensions cause RAG to fall back to local SQLite vector/lexical retrieval.
 - Prediction and anomaly detection remain heuristic/demo-grade until richer real plant telemetry and validated models are added.
 - Some UI validation has been desktop-focused; mobile/responsive coverage is not complete for every workflow.
@@ -70,6 +73,7 @@ Documentation paths
 - docs/hooks.md
 - docs/implementation-plan.md
 - docs/iot-streaming-ingestion-plan.md
+- docs/local-llm-llama-cpp-qwen-adapter.md
 - docs/local-llm-lm-studio.md
 - docs/peft-training.md
 - docs/production-hardening.md
@@ -163,6 +167,7 @@ Frontend paths
 - frontend/src/routes/Dashboard.tsx
 - frontend/src/routes/Ingestion.tsx
 - frontend/src/routes/LearningReview.tsx
+- frontend/src/routes/Monitoring.tsx
 - frontend/src/routes/RcaWorkspace.tsx
 - frontend/src/routes/Reports.tsx
 - frontend/src/routes/Users.tsx

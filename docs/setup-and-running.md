@@ -78,6 +78,15 @@ cd ..
 
 ## 5. Run The Full Local Stack
 
+For live adapter-backed demos, start llama.cpp before the app stack:
+
+```bash
+scripts/peft/start_llama_cpp_qwen_adapter.sh --check
+scripts/peft/start_llama_cpp_qwen_adapter.sh
+```
+
+This starts llama.cpp's OpenAI-compatible `llama-server` at `http://127.0.0.1:8080/v1` with the configured Qwen2.5 GGUF base model and GGUF LoRA adapter. Neo, Trinity, Morpheus, Smith, recommendations, RAG reranking, and learning judge calls use this served adapter alias when `.env` is configured with `LLM_PROVIDER=openai`. Skip this step only for deterministic `LLM_PROVIDER=mock` demos.
+
 The recommended path is the local stack script:
 
 ```bash
