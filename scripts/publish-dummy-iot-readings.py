@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--subject", default="steelplant.iot.sensor_readings")
     parser.add_argument("--source", default="dummy-iot-simulator")
     parser.add_argument("--interval-seconds", type=float, default=5.0)
-    parser.add_argument("--anomaly-every-seconds", type=float, default=180.0)
+    parser.add_argument("--anomaly-every-seconds", type=float, default=120.0)
     parser.add_argument("--scenario", choices=["normal", "spike", "degradation", "mixed"], default="mixed")
     parser.add_argument("--assets", default="all", help="Comma-separated equipment IDs or 'all'.")
     parser.add_argument("--once", action="store_true", help="Publish one batch and exit.")

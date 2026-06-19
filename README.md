@@ -202,7 +202,7 @@ Frontend URL: `http://localhost:5173`
 
 ## Local Full Stack
 
-To run NATS JetStream, Qdrant, the streaming-enabled backend, and the frontend together:
+To run NATS JetStream, Qdrant, the streaming-enabled backend, the IoT simulator, the learning worker, and the frontend together:
 
 ```bash
 scripts/run-local-stack.sh
@@ -215,7 +215,9 @@ scripts/run-local-stack.sh status
 scripts/run-local-stack.sh stop
 ```
 
-The script requires Docker for the temporary `nats:2` and `qdrant/qdrant` containers, an installed backend venv, and installed frontend `node_modules`. It writes backend and frontend logs under `.local-stack/`.
+The script requires Docker for the temporary `nats:2` and `qdrant/qdrant` containers, an installed backend venv, and installed frontend `node_modules`. It writes backend, IoT simulator, worker, and frontend logs under `.local-stack/`.
+
+The local stack starts `scripts/publish-dummy-iot-readings.py` automatically after backend streaming ingestion reports connected. Set `IOT_SIMULATOR_ENABLED=false` for quiet runs, or tune `IOT_SIMULATOR_INTERVAL_SECONDS`, `IOT_SIMULATOR_ANOMALY_EVERY_SECONDS`, `IOT_SIMULATOR_SCENARIO`, and `IOT_SIMULATOR_ASSETS`.
 
 `scripts/run-local-stack.sh status` uses the seeded demo admin login to check protected streaming status when local auth is enabled.
 
@@ -274,7 +276,7 @@ Structured record ingestion supports `equipment`, `alerts`, `spares`, `work_orde
 
 NATS JetStream streaming ingestion is enabled in the local stack and should remain enabled for production. Set `STREAMING_ENABLED=true` and configure `NATS_URL` to consume IoT envelopes from `steelplant.iot.*` subjects into the same structured record tables used by JSON ingestion. The backend uses the `MW_IOT` stream, `maintenance-wizard-ingestor` durable consumer, explicit acknowledgments after persistence, and `steelplant.iot.dlq` for invalid messages.
 
-The continuous-monitoring layer builds on this stream with `scripts/publish-dummy-iot-readings.py`, backend anomaly scans every 3 minutes, stable anomaly alert registration, per-user alert popup state, and a Monitoring UI with live sensor graphs. Raw streaming IoT sensor readings are short-lived demo telemetry that can be purged every 15 minutes and on logout/session expiry, with corresponding raw sensor vectors removed from Qdrant while alert/anomaly records remain. Caveat: logout/session-expiry purging is global to the local demo database, so one user's session ending can clear raw IoT readings for other active users; keep `IOT_PURGE_ON_SESSION_END=false` for production-style shared environments.
+The continuous-monitoring layer builds on this stream with an automatically managed local IoT simulator, backend anomaly scans at startup and every 2 minutes after that, stable anomaly alert registration, per-user alert popup state, and a Monitoring UI with live sensor graphs. The simulator injects anomaly scenarios every 2 minutes by default, and logged-in users poll for unseen anomaly popups every 2 minutes. Raw streaming IoT sensor readings are short-lived demo telemetry that can be purged every 15 minutes and on logout/session expiry, with corresponding raw sensor vectors removed from Qdrant while alert/anomaly records remain. Caveat: logout/session-expiry purging is global to the local demo database, so one user's session ending can clear raw IoT readings for other active users; keep `IOT_PURGE_ON_SESSION_END=false` for production-style shared environments.
 
 The same NATS server also carries production learning jobs without mixing them with plant IoT payloads. Keep `LEARNING_ASYNC_ENABLED=true` to publish queued tuning jobs to `LEARNING_NATS_STREAM=MW_LEARNING` on `maintenance.learning.*` subjects. Run the worker with `python -m app.learning_worker`, or use the local stack scripts, to consume jobs with `LEARNING_NATS_CONSUMER=maintenance-wizard-learning-worker`. PEFT requests prepare a JSONL dataset and training manifest under `LEARNING_ARTIFACT_DIR`, then record artifact hashes for audit. When `LEARNING_PEFT_TRAINER_COMMAND` is configured, the worker invokes that external trainer with bounded timeout and registers the resulting adapter as a `candidate` adapter version only. Promotion requires a passing evaluation and a verified runtime-loaded deployment; the default deployment hook uses llama.cpp to serve the GGUF base model with the trained LoRA adapter alias.
 

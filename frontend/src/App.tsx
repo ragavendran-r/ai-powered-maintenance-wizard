@@ -22,6 +22,7 @@ import {
 import {
   api,
   fallbackDashboard,
+  type Alert,
   type AssetDetail,
   type AssetDetailSection,
   type AssetListItem,
@@ -107,6 +108,7 @@ import { MonitoringRoute } from './routes/Monitoring'
 const WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS = 60_000
 const LEARNING_JUDGE_REQUEST_TIMEOUT_MS = 95_000
 const TOAST_TIMEOUT_MS = 4_500
+const ANOMALY_ALERT_POLL_INTERVAL_MS = 120_000
 const PLANNING_TABLE_PAGE_SIZE = 5
 
 type MaintenanceInsightSectionKey = 'summary' | 'structuredReports' | 'abnormalAlerts' | 'decisionSummaries' | 'logEntries'
@@ -215,6 +217,65 @@ function ToastStack({
           </article>
         )
       })}
+    </div>
+  )
+}
+
+function AnomalyAlertCenter({
+  alerts,
+  onDismiss,
+}: {
+  alerts: Alert[]
+  onDismiss: (alertId: string) => void
+}) {
+  if (!alerts.length) return null
+  return (
+    <div className="anomalyAlertOverlay" aria-label="Anomaly alert popup layer">
+      <section
+        aria-labelledby="anomaly-alert-title"
+        aria-live="assertive"
+        className="anomalyAlertDialog"
+        role="alertdialog"
+      >
+        <div className="anomalyAlertHeader">
+          <ShieldAlert size={28} />
+          <div>
+            <p className="eyebrow">Continuous Monitoring</p>
+            <h2 id="anomaly-alert-title">Anomaly alert</h2>
+          </div>
+        </div>
+        <div className="anomalyAlertList">
+          {alerts.map((alert) => (
+            <article className={`anomalyAlertCard ${alert.severity}`} key={alert.id}>
+              <div>
+                <strong>{alert.severity.toUpperCase()} IoT alert on {alert.equipment_id}</strong>
+                <p>{alert.message}</p>
+              </div>
+              <dl>
+                <div>
+                  <dt>Signal</dt>
+                  <dd>{alert.signal}</dd>
+                </div>
+                <div>
+                  <dt>Reading</dt>
+                  <dd>
+                    {alert.value} {alert.unit}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Threshold</dt>
+                  <dd>
+                    {alert.threshold} {alert.unit}
+                  </dd>
+                </div>
+              </dl>
+              <button type="button" onClick={() => onDismiss(alert.id)} aria-label={`Dismiss anomaly alert ${alert.id}`}>
+                <X size={16} />
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }
@@ -752,6 +813,7 @@ export function App() {
   const [resetUser, setResetUser] = useState<AuthUser | null>(null)
   const [resetPasswordValue, setResetPasswordValue] = useState('')
   const [toasts, setToasts] = useState<ToastNotification[]>([])
+  const [anomalyAlertPopups, setAnomalyAlertPopups] = useState<Alert[]>([])
   const neoTranscriptRef = useRef<HTMLDivElement | null>(null)
   const morpheusProgressRef = useRef<HTMLDivElement | null>(null)
   const reliabilityStreamRef = useRef<HTMLDivElement | null>(null)
@@ -788,6 +850,10 @@ export function App() {
 
   const dismissToast = useCallback((toastId: string) => {
     setToasts((current) => current.filter((toast) => toast.id !== toastId))
+  }, [])
+
+  const dismissAnomalyAlert = useCallback((alertId: string) => {
+    setAnomalyAlertPopups((current) => current.filter((alert) => alert.id !== alertId))
   }, [])
 
   const showToast = useCallback((message: string) => {
@@ -1752,23 +1818,26 @@ export function App() {
         .unseenAlerts()
         .then((alerts) => {
           if (cancelled) return
-          alerts
-            .filter((alert) => ['high', 'critical'].includes(alert.severity))
-            .slice(0, 3)
-            .forEach((alert) => {
-              showToast(`${alert.severity.toUpperCase()} IoT alert on ${alert.equipment_id}: ${alert.message}`)
-              void api.markAlertSeen(alert.id).catch(() => undefined)
-            })
+          const importantAlerts = alerts.filter((alert) => ['high', 'critical'].includes(alert.severity)).slice(0, 3)
+          if (!importantAlerts.length) return
+          setAnomalyAlertPopups((current) => {
+            const visibleIds = new Set(current.map((alert) => alert.id))
+            const nextAlerts = importantAlerts.filter((alert) => !visibleIds.has(alert.id))
+            return [...nextAlerts, ...current].slice(0, 3)
+          })
+          importantAlerts.forEach((alert) => {
+            void api.markAlertSeen(alert.id).catch(() => undefined)
+          })
         })
         .catch(() => undefined)
     }
     pollUnseenAlerts()
-    const intervalId = window.setInterval(pollUnseenAlerts, 20_000)
+    const intervalId = window.setInterval(pollUnseenAlerts, ANOMALY_ALERT_POLL_INTERVAL_MS)
     return () => {
       cancelled = true
       window.clearInterval(intervalId)
     }
-  }, [authReady, session?.user.id, showToast])
+  }, [authReady, session?.user.id])
 
   useEffect(() => {
     if (activeView === 'reliability') {
@@ -3849,6 +3918,7 @@ export function App() {
   return (
     <main className="appShell">
       <ToastStack dismissToast={dismissToast} toasts={toasts} />
+      <AnomalyAlertCenter alerts={anomalyAlertPopups} onDismiss={dismissAnomalyAlert} />
       {workOrderDraft && (
         <WorkOrderReviewDialog
           assets={assets}

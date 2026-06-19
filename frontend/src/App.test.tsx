@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { FormattedAssistantContent, normalizePmDraftMarkdown } from './assistantContent'
-import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PmPlan, type PmPlanDraftResponse, type PmPlanDraftStreamEvent, type PmTemplate, type PredictionResponse, type RcaMorpheusDraftResponse, type RcaMorpheusDraftStreamEvent, type Recommendation, type UserRole, type WorkOrder } from './services/api'
+import { api, type Alert, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type PmPlan, type PmPlanDraftResponse, type PmPlanDraftStreamEvent, type PmTemplate, type PredictionResponse, type RcaMorpheusDraftResponse, type RcaMorpheusDraftStreamEvent, type Recommendation, type UserRole, type WorkOrder } from './services/api'
 import { StatusTimeline, TechnicianExecutionCard } from './sharedComponents'
 
 let neoResponseDelayMs = 0
@@ -11,6 +11,7 @@ let assistantResponseDelayMs = 0
 let logoutResponseDelayMs = 0
 let maintenanceInsightsDelayMs = 0
 let supervisorAssistantRequests: Array<{ work_order_id?: string; queue_name?: string; question?: string }> = []
+let unseenAlertsResponse: Alert[] = []
 
 it('shows waiting for material before in progress in the work order workflow', () => {
   render(<StatusTimeline status="WMATL" />)
@@ -1400,6 +1401,7 @@ beforeEach(() => {
   learningRefreshExamples = [learningExample]
   learningSummaryJobs = [learningJob]
   supervisorAssistantRequests = []
+  unseenAlertsResponse = []
   window.sessionStorage.clear()
   api.setSession(null)
   api.onUnauthorized(null)
@@ -1436,7 +1438,7 @@ beforeEach(() => {
         return Promise.resolve(new Response(JSON.stringify({ status: 'purged' }), { status: 200 }))
       }
       if (url.endsWith('/api/alerts/unseen')) {
-        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+        return Promise.resolve(new Response(JSON.stringify(unseenAlertsResponse), { status: 200 }))
       }
       if (url.includes('/api/alerts/') && url.endsWith('/seen')) {
         const alertId = decodeURIComponent(url.match(/\/api\/alerts\/([^/]+)\/seen/)?.[1] ?? 'ALT-1')
@@ -2322,6 +2324,49 @@ afterEach(() => {
 })
 
 describe('Intelligent Maintenance Wizard dashboard', () => {
+  it('shows unseen IoT anomaly alerts as centered popups instead of toast notifications', async () => {
+    unseenAlertsResponse = [
+      {
+        id: 'ALT-IOT-ANOMALY-HYD-SYS-04-HYDRAULIC-OIL-TEMPERATURE',
+        equipment_id: 'HYD-SYS-04',
+        timestamp: '2026-06-19T06:00:00Z',
+        signal: 'hydraulic_oil_temperature',
+        value: 104.8,
+        unit: 'C',
+        threshold: 82,
+        severity: 'critical',
+        message: 'IoT anomaly detected: hydraulic oil temperature exceeded the rolling threshold.',
+      },
+    ]
+
+    await renderAuthenticated()
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Anomaly alert' })
+    expect(within(dialog).getByText('CRITICAL IoT alert on HYD-SYS-04')).toBeInTheDocument()
+    expect(within(dialog).getByText(/hydraulic oil temperature exceeded/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Application notifications')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/alerts/ALT-IOT-ANOMALY-HYD-SYS-04-HYDRAULIC-OIL-TEMPERATURE/seen'),
+        expect.objectContaining({ method: 'POST' }),
+      )
+    })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /dismiss anomaly alert/i }))
+
+    expect(screen.queryByRole('alertdialog', { name: 'Anomaly alert' })).not.toBeInTheDocument()
+  })
+
+  it('polls unseen anomaly alerts every 2 minutes', async () => {
+    const intervalSpy = vi.spyOn(window, 'setInterval')
+
+    await renderAuthenticated()
+
+    await waitFor(() => {
+      expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 120_000)
+    })
+  })
+
   it('renders dashboard metrics, anomalies, and selected asset details', async () => {
     await renderAuthenticated()
     fireEvent.click(await screen.findByRole('button', { name: 'Command Center' }))
