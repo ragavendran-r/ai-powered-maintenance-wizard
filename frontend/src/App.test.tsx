@@ -2465,7 +2465,9 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(await screen.findByRole('heading', { name: 'Live Sensors' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Alerting Assets' })).toBeInTheDocument()
     expect(screen.getAllByText('drive end vibration').length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('img', { name: /sensor trend/i }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('img', { name: /sensor trend with Time x-axis and drive end vibration \(mm\/s\) y-axis/i }).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Time').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('drive end vibration (mm/s)').length).toBeGreaterThan(0)
   })
 
   it('opens an Assets page with a company asset table and data-backed asset detail', async () => {

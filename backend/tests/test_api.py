@@ -1845,7 +1845,7 @@ def test_persistence_failure_naks_nats_message(monkeypatch):
     assert service.status().last_error == "database locked"
 
 
-def test_iot_anomaly_scan_registers_stable_alert_from_streamed_reading():
+def test_iot_anomaly_scan_registers_occurrence_alert_from_streamed_reading():
     timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     message = {
         "message_id": f"iot-anomaly-sensor-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
@@ -1867,9 +1867,68 @@ def test_iot_anomaly_scan_registers_stable_alert_from_streamed_reading():
 
     assert result["registered_alerts"] >= 1
     alerts = repository.list_alerts("CC-PUMP-03")
-    alert = next(item for item in alerts if item["id"] == "ALT-IOT-ANOMALY-CC-PUMP-03-COOLING-WATER-FLOW")
+    alert = next(item for item in alerts if item["id"].startswith("ALT-IOT-ANOMALY-CC-PUMP-03-COOLING-WATER-FLOW-"))
     assert alert["severity"] in {"high", "critical"}
     assert "IoT anomaly detected" in alert["message"]
+
+
+def test_iot_anomaly_scan_creates_new_unseen_alert_after_prior_occurrence_seen():
+    headers = auth_headers("operator@plant.local")
+    first_timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    process_iot_message(
+        {
+            "message_id": f"iot-anomaly-sensor-first-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
+            "schema_version": "1",
+            "source": "anomaly-test-gateway",
+            "type": "sensor_reading",
+            "timestamp": first_timestamp,
+            "payload": {
+                "equipment_id": "BF-BLOWER-02",
+                "signal": "outlet_pressure_variance",
+                "value": 27.0,
+                "unit": "kPa",
+                "threshold": 18.0,
+            },
+        },
+        "steelplant.iot.sensor_readings",
+    )
+    run_anomaly_alert_scan()
+    first_alert = next(
+        item
+        for item in repository.list_alerts("BF-BLOWER-02")
+        if item["id"].startswith("ALT-IOT-ANOMALY-BF-BLOWER-02-OUTLET-PRESSURE-VARIANCE-")
+    )
+    seen = client.post(f"/api/alerts/{first_alert['id']}/seen", json={"dismissed": False}, headers=headers)
+    assert seen.status_code == 200
+
+    second_timestamp = (datetime.now(timezone.utc) + timedelta(minutes=2)).isoformat().replace("+00:00", "Z")
+    process_iot_message(
+        {
+            "message_id": f"iot-anomaly-sensor-second-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
+            "schema_version": "1",
+            "source": "anomaly-test-gateway",
+            "type": "sensor_reading",
+            "timestamp": second_timestamp,
+            "payload": {
+                "equipment_id": "BF-BLOWER-02",
+                "signal": "outlet_pressure_variance",
+                "value": 28.0,
+                "unit": "kPa",
+                "threshold": 18.0,
+            },
+        },
+        "steelplant.iot.sensor_readings",
+    )
+    run_anomaly_alert_scan()
+
+    unseen = client.get("/api/alerts/unseen", headers=headers)
+    assert unseen.status_code == 200
+    unseen_ids = {item["id"] for item in unseen.json()}
+    assert first_alert["id"] not in unseen_ids
+    assert any(
+        item_id.startswith("ALT-IOT-ANOMALY-BF-BLOWER-02-OUTLET-PRESSURE-VARIANCE-")
+        for item_id in unseen_ids
+    )
 
 
 def test_unseen_alerts_are_marked_seen_per_user():
