@@ -1163,6 +1163,10 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.anomalyAlertCard .notificationRecommendation {
+  grid-column: 1 / -1;
+}
+
 .anomalyAlertCard button {
   align-items: center;
   background: var(--color-surface);
@@ -1174,6 +1178,141 @@ h3 {
   justify-content: center;
   padding: 0;
   width: 30px;
+}
+
+.notificationMenu {
+  position: relative;
+}
+
+.notificationButton {
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-panel);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  display: inline-flex;
+  height: 38px;
+  justify-content: center;
+  position: relative;
+  width: 38px;
+}
+
+.notificationButton.hasUnread {
+  border-color: var(--state-danger-border);
+  color: var(--state-danger-text);
+}
+
+.notificationButton span {
+  align-items: center;
+  background: var(--state-danger-bg);
+  border: 1px solid var(--state-danger-border);
+  border-radius: 999px;
+  color: var(--state-danger-text);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  height: 18px;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 4px;
+  position: absolute;
+  right: -6px;
+  top: -6px;
+}
+
+.notificationFeed {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-panel);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-modal);
+  color: var(--color-text-note);
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  width: min(420px, calc(100vw - 28px));
+  z-index: 65;
+}
+
+.notificationFeedHeader {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border-panel);
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.notificationFeedHeader strong {
+  color: var(--color-text-heading);
+}
+
+.notificationFeedHeader small {
+  color: var(--color-text-muted);
+}
+
+.notificationFeedList {
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.notificationFeedItem {
+  align-items: start;
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-panel);
+  border-left: 4px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px;
+}
+
+.notificationFeedItem.critical {
+  border-left-color: var(--state-danger-border);
+}
+
+.notificationFeedItem.high {
+  border-left-color: var(--state-warning-border);
+}
+
+.notificationFeedItem.medium {
+  border-left-color: var(--state-info-border);
+}
+
+.notificationFeedItem strong {
+  color: var(--color-text-heading);
+  display: block;
+  font-size: 14px;
+  line-height: 1.35;
+  margin-bottom: 4px;
+}
+
+.notificationFeedItem p,
+.notificationFeedItem small {
+  display: block;
+  line-height: 1.4;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.notificationFeedItem small {
+  color: var(--color-text-muted);
+  margin-top: 6px;
+}
+
+.notificationFeedItem button {
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-panel);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  width: 28px;
 }
 
 .anomalyAlertCard button:not(:disabled):hover {

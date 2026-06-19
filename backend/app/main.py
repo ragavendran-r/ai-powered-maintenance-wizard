@@ -73,6 +73,8 @@ from app.models.schemas import (
     MaintenanceInsightReportSummary,
     LoginRequest,
     MonitoringDashboard,
+    NotificationEvent,
+    NotificationSeenRequest,
     NeoChatRequest,
     NeoChatResponse,
     PasswordResetRequest,
@@ -148,6 +150,7 @@ from app.services.pm_plans import list_plans as list_pm_plan_records
 from app.services.pm_plans import list_templates as list_pm_template_records
 from app.services.pm_plans import stream_draft_plan as stream_pm_plan_draft
 from app.services.recommendations import generate_recommendation, stream_recommendation
+from app.services.notifications import notify_work_order_changed, notify_work_order_created
 from app.services.rca import create_case as create_rca_case_record
 from app.services.rca import draft_case as draft_rca_case_record
 from app.services.rca import get_case as get_rca_case_record
@@ -445,6 +448,50 @@ def mark_alert_seen(alert_id: str, request: AlertSeenRequest, current_user: User
     return view_state
 
 
+@app.get("/api/notifications", response_model=list[NotificationEvent], dependencies=[Depends(require_roles(*READ_ROLES))])
+def get_notifications(
+    event_type: Optional[str] = None,
+    severity: Optional[str] = None,
+    source_type: Optional[str] = None,
+    unread_only: bool = False,
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: UserPublic = Depends(get_current_user),
+):
+    return repository.list_notifications_for_user(
+        current_user.id,
+        current_user.role,
+        unseen_only=unread_only,
+        limit=limit,
+        event_type=event_type,
+        severity=severity,
+        source_type=source_type,
+    )
+
+
+@app.get("/api/notifications/unseen", response_model=list[NotificationEvent], dependencies=[Depends(require_roles(*READ_ROLES))])
+def get_unseen_notifications(
+    limit: int = Query(default=20, ge=1, le=50),
+    current_user: UserPublic = Depends(get_current_user),
+):
+    return repository.list_notifications_for_user(current_user.id, current_user.role, unseen_only=True, limit=limit)
+
+
+@app.post(
+    "/api/notifications/{notification_id}/seen",
+    response_model=NotificationEvent,
+    dependencies=[Depends(require_roles(*READ_ROLES))],
+)
+def mark_notification_seen(
+    notification_id: str,
+    request: NotificationSeenRequest,
+    current_user: UserPublic = Depends(get_current_user),
+):
+    notification = repository.mark_notification_seen(current_user.id, notification_id, request.dismissed)
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return notification
+
+
 @app.get("/api/monitoring/assets", response_model=MonitoringDashboard, dependencies=[Depends(require_roles(*READ_ROLES))])
 def get_monitoring_assets(limit_per_asset: int = Query(120, ge=10, le=500)):
     return monitoring_dashboard(limit_per_asset=limit_per_asset)
@@ -509,14 +556,18 @@ def list_work_orders(
     "/api/work-orders",
     response_model=WorkOrder,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_roles(*WORK_ORDER_ACTION_ROLES))],
 )
-def create_work_order(request: WorkOrderCreateRequest):
+def create_work_order(
+    request: WorkOrderCreateRequest,
+    current_user: UserPublic = Depends(require_roles(*WORK_ORDER_ACTION_ROLES)),
+):
     if not repository.get_equipment(request.equipment_id):
         raise HTTPException(status_code=404, detail="Equipment not found")
     payload = request.model_dump()
     _normalize_assignee_payload(payload)
-    return repository.create_work_order(payload)
+    work_order = repository.create_work_order(payload)
+    notify_work_order_created(work_order, current_user)
+    return work_order
 
 
 @app.get(
@@ -721,6 +772,8 @@ def update_work_order(
         if requested_status and requested_status not in {"INPRG", "COMP"}:
             raise HTTPException(status_code=403, detail="Technician status update is not permitted")
     work_order = repository.update_work_order(work_order_id, payload)
+    if work_order:
+        notify_work_order_changed(existing_work_order, work_order, current_user)
     return work_order
 
 

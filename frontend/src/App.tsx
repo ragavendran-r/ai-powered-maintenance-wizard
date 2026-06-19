@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import {
   Activity,
   AlertTriangle,
+  Bell,
   Bot,
   Briefcase,
   CalendarClock,
@@ -22,7 +23,6 @@ import {
 import {
   api,
   fallbackDashboard,
-  type Alert,
   type AssetDetail,
   type AssetDetailSection,
   type AssetListItem,
@@ -36,6 +36,7 @@ import {
   type LearningRagMigrationPlan,
   type LearningModelDeployment,
   type MonitoringDashboard,
+  type NotificationEvent,
   type AbnormalAlertReport,
   type DigitalMaintenanceLogEntry,
   type LearningModelVersion,
@@ -108,7 +109,7 @@ import { MonitoringRoute } from './routes/Monitoring'
 const WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS = 60_000
 const LEARNING_JUDGE_REQUEST_TIMEOUT_MS = 95_000
 const TOAST_TIMEOUT_MS = 4_500
-const ANOMALY_ALERT_POLL_INTERVAL_MS = 120_000
+const NOTIFICATION_POLL_INTERVAL_MS = 120_000
 const PLANNING_TABLE_PAGE_SIZE = 5
 
 type MaintenanceInsightSectionKey = 'summary' | 'structuredReports' | 'abnormalAlerts' | 'decisionSummaries' | 'logEntries'
@@ -221,55 +222,55 @@ function ToastStack({
   )
 }
 
-function AnomalyAlertCenter({
-  alerts,
+function NotificationPopupCenter({
+  notifications,
   onDismiss,
 }: {
-  alerts: Alert[]
-  onDismiss: (alertId: string) => void
+  notifications: NotificationEvent[]
+  onDismiss: (notificationId: string) => void
 }) {
-  if (!alerts.length) return null
+  if (!notifications.length) return null
   return (
-    <div className="anomalyAlertOverlay" aria-label="Anomaly alert popup layer">
+    <div className="anomalyAlertOverlay" aria-label="Notification popup layer">
       <section
-        aria-labelledby="anomaly-alert-title"
+        aria-labelledby="notification-popup-title"
         aria-live="assertive"
         className="anomalyAlertDialog"
         role="alertdialog"
       >
         <div className="anomalyAlertHeader">
-          <ShieldAlert size={28} />
+          <Bell size={28} />
           <div>
-            <p className="eyebrow">Continuous Monitoring</p>
-            <h2 id="anomaly-alert-title">Anomaly alert</h2>
+            <p className="eyebrow">Role Notification</p>
+            <h2 id="notification-popup-title">Action required</h2>
           </div>
         </div>
         <div className="anomalyAlertList">
-          {alerts.map((alert) => (
-            <article className={`anomalyAlertCard ${alert.severity}`} key={alert.id}>
+          {notifications.map((notification) => (
+            <article className={`anomalyAlertCard ${notification.severity}`} key={notification.id}>
               <div>
-                <strong>{alert.severity.toUpperCase()} IoT alert on {alert.equipment_id}</strong>
-                <p>{alert.message}</p>
+                <strong>{notification.severity.toUpperCase()} {notification.title}</strong>
+                <p>{notification.summary}</p>
               </div>
               <dl>
                 <div>
-                  <dt>Signal</dt>
-                  <dd>{alert.signal}</dd>
+                  <dt>Source</dt>
+                  <dd>{notification.source_type.replace(/_/g, ' ')}</dd>
                 </div>
                 <div>
-                  <dt>Reading</dt>
-                  <dd>
-                    {alert.value} {alert.unit}
-                  </dd>
+                  <dt>Asset</dt>
+                  <dd>{notification.equipment_id ?? 'n/a'}</dd>
                 </div>
                 <div>
-                  <dt>Threshold</dt>
-                  <dd>
-                    {alert.threshold} {alert.unit}
-                  </dd>
+                  <dt>Reference</dt>
+                  <dd>{notification.work_order_id ?? notification.alert_id ?? notification.recommendation_id ?? 'n/a'}</dd>
+                </div>
+                <div className="notificationRecommendation">
+                  <dt>Recommendation</dt>
+                  <dd>{notification.recommended_action}</dd>
                 </div>
               </dl>
-              <button type="button" onClick={() => onDismiss(alert.id)} aria-label={`Dismiss anomaly alert ${alert.id}`}>
+              <button type="button" onClick={() => onDismiss(notification.id)} aria-label={`Dismiss notification ${notification.id}`}>
                 <X size={16} />
               </button>
             </article>
@@ -813,7 +814,9 @@ export function App() {
   const [resetUser, setResetUser] = useState<AuthUser | null>(null)
   const [resetPasswordValue, setResetPasswordValue] = useState('')
   const [toasts, setToasts] = useState<ToastNotification[]>([])
-  const [anomalyAlertPopups, setAnomalyAlertPopups] = useState<Alert[]>([])
+  const [notificationPopups, setNotificationPopups] = useState<NotificationEvent[]>([])
+  const [notifications, setNotifications] = useState<NotificationEvent[]>([])
+  const [notificationFeedOpen, setNotificationFeedOpen] = useState(false)
   const neoTranscriptRef = useRef<HTMLDivElement | null>(null)
   const morpheusProgressRef = useRef<HTMLDivElement | null>(null)
   const reliabilityStreamRef = useRef<HTMLDivElement | null>(null)
@@ -838,6 +841,7 @@ export function App() {
     canTechnicianAssistant,
   } = useMemo(() => getUserPermissions(currentUser), [currentUser])
   const roleProfile = currentUser ? roleUiProfiles[currentUser.role] : null
+  const unreadNotificationCount = notifications.filter((notification) => !notification.seen_at).length
   const navigationItems = useMemo(
     () => currentUser ? navigationForRole(currentUser.role) : [],
     [currentUser?.role],
@@ -852,8 +856,12 @@ export function App() {
     setToasts((current) => current.filter((toast) => toast.id !== toastId))
   }, [])
 
-  const dismissAnomalyAlert = useCallback((alertId: string) => {
-    setAnomalyAlertPopups((current) => current.filter((alert) => alert.id !== alertId))
+  const dismissNotificationPopup = useCallback((notificationId: string) => {
+    setNotificationPopups((current) => current.filter((notification) => notification.id !== notificationId))
+    setNotifications((current) => current.map((notification) => (
+      notification.id === notificationId ? { ...notification, seen_at: notification.seen_at ?? new Date().toISOString(), dismissed_at: new Date().toISOString() } : notification
+    )))
+    void api.markNotificationSeen(notificationId, true).catch(() => undefined)
   }, [])
 
   const showToast = useCallback((message: string) => {
@@ -1813,26 +1821,38 @@ export function App() {
   useEffect(() => {
     if (!authReady || !session || session.user.role === 'iot_service') return
     let cancelled = false
-    const pollUnseenAlerts = () => {
+    const pollNotifications = () => {
+      void api
+        .notifications()
+        .then((items) => {
+          if (!cancelled) setNotifications(items)
+        })
+        .catch(() => undefined)
       api
-        .unseenAlerts()
-        .then((alerts) => {
+        .unseenNotifications()
+        .then((items) => {
           if (cancelled) return
-          const importantAlerts = alerts.filter((alert) => ['high', 'critical'].includes(alert.severity)).slice(0, 3)
-          if (!importantAlerts.length) return
-          setAnomalyAlertPopups((current) => {
-            const visibleIds = new Set(current.map((alert) => alert.id))
-            const nextAlerts = importantAlerts.filter((alert) => !visibleIds.has(alert.id))
-            return [...nextAlerts, ...current].slice(0, 3)
+          const unseen = items.slice(0, 3)
+          if (!unseen.length) return
+          setNotificationPopups((current) => {
+            const visibleIds = new Set(current.map((notification) => notification.id))
+            const nextItems = unseen.filter((notification) => !visibleIds.has(notification.id))
+            return [...nextItems, ...current].slice(0, 3)
           })
-          importantAlerts.forEach((alert) => {
-            void api.markAlertSeen(alert.id).catch(() => undefined)
+          unseen.forEach((notification) => {
+            void api.markNotificationSeen(notification.id).catch(() => undefined)
           })
+          const seenAt = new Date().toISOString()
+          setNotifications((current) => current.map((notification) => (
+            unseen.some((item) => item.id === notification.id)
+              ? { ...notification, seen_at: notification.seen_at ?? seenAt }
+              : notification
+          )))
         })
         .catch(() => undefined)
     }
-    pollUnseenAlerts()
-    const intervalId = window.setInterval(pollUnseenAlerts, ANOMALY_ALERT_POLL_INTERVAL_MS)
+    pollNotifications()
+    const intervalId = window.setInterval(pollNotifications, NOTIFICATION_POLL_INTERVAL_MS)
     return () => {
       cancelled = true
       window.clearInterval(intervalId)
@@ -3918,7 +3938,7 @@ export function App() {
   return (
     <main className="appShell">
       <ToastStack dismissToast={dismissToast} toasts={toasts} />
-      <AnomalyAlertCenter alerts={anomalyAlertPopups} onDismiss={dismissAnomalyAlert} />
+      <NotificationPopupCenter notifications={notificationPopups} onDismiss={dismissNotificationPopup} />
       {workOrderDraft && (
         <WorkOrderReviewDialog
           assets={assets}
@@ -3936,6 +3956,48 @@ export function App() {
           <h1>{applicationTitle}</h1>
         </div>
         <div className="statusCluster">
+          <div className="notificationMenu">
+            <button
+              type="button"
+              className={`notificationButton ${unreadNotificationCount ? 'hasUnread' : ''}`}
+              onClick={() => setNotificationFeedOpen((open) => !open)}
+              aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`}
+              title="Notifications"
+            >
+              <Bell size={17} />
+              {unreadNotificationCount > 0 && <span>{Math.min(unreadNotificationCount, 9)}</span>}
+            </button>
+            {notificationFeedOpen && (
+              <section className="notificationFeed" aria-label="Notifications">
+                <div className="notificationFeedHeader">
+                  <strong>Notifications</strong>
+                  <small>{notifications.length} recent</small>
+                </div>
+                {notifications.length ? (
+                  <div className="notificationFeedList">
+                    {notifications.slice(0, 8).map((notification) => (
+                      <article className={`notificationFeedItem ${notification.severity}`} key={notification.id}>
+                        <div>
+                          <strong>{notification.title}</strong>
+                          <p>{notification.summary}</p>
+                          <small>{notification.recommended_action}</small>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => dismissNotificationPopup(notification.id)}
+                          aria-label={`Dismiss notification ${notification.id}`}
+                        >
+                          <X size={14} />
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="emptyState">No role notifications yet.</p>
+                )}
+              </section>
+            )}
+          </div>
           <div className="userPill">
             <strong>{currentUser?.display_name}</strong>
             <span>{currentUser ? roleLabels[currentUser.role] : ''}</span>

@@ -22,6 +22,7 @@ RcaCaseStatus = Literal["open", "investigating", "actions_defined", "closed"]
 RcaCorrectiveActionStatus = Literal["proposed", "approved", "in_progress", "complete", "rejected"]
 PmPlanStatus = Literal["draft", "active", "converted", "paused"]
 PmTriggerType = Literal["recurring", "condition", "risk_prediction"]
+NotificationSeverity = Literal["info", "low", "medium", "high", "critical"]
 AnomalyContextClass = Literal[
     "requires_investigation",
     "startup_transient",
@@ -600,6 +601,36 @@ class AlertViewState(BaseModel):
 
 
 class AlertSeenRequest(BaseModel):
+    dismissed: bool = False
+
+
+class NotificationEvent(BaseModel):
+    id: str
+    event_key: str
+    event_type: str
+    severity: NotificationSeverity = "info"
+    title: str
+    summary: str
+    recommended_action: str
+    source_type: str
+    source_id: str
+    equipment_id: Optional[str] = None
+    work_order_id: Optional[str] = None
+    alert_id: Optional[str] = None
+    recommendation_id: Optional[str] = None
+    actor_user_id: Optional[str] = None
+    actor_display_name: Optional[str] = None
+    recipient_roles: list[UserRole] = []
+    recipient_user_ids: list[str] = []
+    metadata: dict[str, Any] = {}
+    llm_provider: str = "mock"
+    llm_used_live_provider: bool = False
+    created_at: str
+    seen_at: Optional[str] = None
+    dismissed_at: Optional[str] = None
+
+
+class NotificationSeenRequest(BaseModel):
     dismissed: bool = False
 
 

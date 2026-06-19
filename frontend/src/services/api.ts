@@ -168,6 +168,32 @@ export interface AlertViewState {
   dismissed_at?: string | null
 }
 
+export interface NotificationEvent {
+  id: string
+  event_key: string
+  event_type: string
+  severity: RiskLevel | 'info'
+  title: string
+  summary: string
+  recommended_action: string
+  source_type: string
+  source_id: string
+  equipment_id?: string | null
+  work_order_id?: string | null
+  alert_id?: string | null
+  recommendation_id?: string | null
+  actor_user_id?: string | null
+  actor_display_name?: string | null
+  recipient_roles: UserRole[]
+  recipient_user_ids: string[]
+  metadata: Record<string, unknown>
+  llm_provider: string
+  llm_used_live_provider: boolean
+  created_at: string
+  seen_at?: string | null
+  dismissed_at?: string | null
+}
+
 export interface MonitoringSensorPoint {
   id: string
   timestamp: string
@@ -1340,6 +1366,16 @@ export const api = {
   unseenAlerts: () => request<Alert[]>('/api/alerts/unseen'),
   markAlertSeen: (alertId: string, dismissed = false) =>
     request<AlertViewState>(`/api/alerts/${encodeURIComponent(alertId)}/seen`, {
+      method: 'POST',
+      body: JSON.stringify({ dismissed }),
+    }),
+  notifications: (unreadOnly = false) => {
+    const query = unreadOnly ? '?unread_only=true' : ''
+    return request<NotificationEvent[]>(`/api/notifications${query}`)
+  },
+  unseenNotifications: () => request<NotificationEvent[]>('/api/notifications/unseen'),
+  markNotificationSeen: (notificationId: string, dismissed = false) =>
+    request<NotificationEvent>(`/api/notifications/${encodeURIComponent(notificationId)}/seen`, {
       method: 'POST',
       body: JSON.stringify({ dismissed }),
     }),

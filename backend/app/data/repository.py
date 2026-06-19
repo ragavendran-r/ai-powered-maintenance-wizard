@@ -161,6 +161,160 @@ def mark_alert_seen(user_id: str, alert_id: str, dismissed: bool = False) -> Opt
     )
 
 
+def create_notification_event(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_ready()
+    notification_id = payload.get("id") or f"NTF-{uuid.uuid4().hex[:12].upper()}"
+    recipient_roles = _json_dump(payload.get("recipient_roles", []))
+    recipient_user_ids = _json_dump(payload.get("recipient_user_ids", []))
+    metadata = _json_dump_any(payload.get("metadata", {}))
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO notification_events (
+                id,
+                event_key,
+                event_type,
+                severity,
+                title,
+                summary,
+                recommended_action,
+                source_type,
+                source_id,
+                equipment_id,
+                work_order_id,
+                alert_id,
+                recommendation_id,
+                actor_user_id,
+                actor_display_name,
+                recipient_roles,
+                recipient_user_ids,
+                metadata,
+                llm_provider,
+                llm_used_live_provider
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(event_key) DO NOTHING
+            """,
+            (
+                notification_id,
+                payload["event_key"],
+                payload["event_type"],
+                payload.get("severity") or "info",
+                payload["title"],
+                payload["summary"],
+                payload["recommended_action"],
+                payload["source_type"],
+                payload["source_id"],
+                payload.get("equipment_id"),
+                payload.get("work_order_id"),
+                payload.get("alert_id"),
+                payload.get("recommendation_id"),
+                payload.get("actor_user_id"),
+                payload.get("actor_display_name"),
+                recipient_roles,
+                recipient_user_ids,
+                metadata,
+                payload.get("llm_provider") or "mock",
+                1 if payload.get("llm_used_live_provider") else 0,
+            ),
+        )
+    event = get_notification_event_by_key(payload["event_key"])
+    if not event:
+        raise RuntimeError("Notification event was not persisted")
+    sync_plant_records_index([_notification_event_plant_record(event)])
+    return event
+
+
+def get_notification_event_by_key(event_key: str) -> Optional[dict[str, Any]]:
+    row = _fetch_one("SELECT * FROM notification_events WHERE event_key = ?", (event_key,))
+    return _decode_notification_event(row) if row else None
+
+
+def list_notifications_for_user(
+    user_id: str,
+    role: str,
+    *,
+    unseen_only: bool = False,
+    limit: int = 50,
+    event_type: Optional[str] = None,
+    severity: Optional[str] = None,
+    source_type: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    rows = _fetch_all(
+        """
+        SELECT n.*, v.first_seen_at AS seen_at, v.dismissed_at AS dismissed_at
+        FROM notification_events n
+        LEFT JOIN user_notification_views v
+            ON v.notification_id = n.id
+            AND v.user_id = ?
+        ORDER BY
+            CASE n.severity
+                WHEN 'critical' THEN 5
+                WHEN 'high' THEN 4
+                WHEN 'medium' THEN 3
+                WHEN 'low' THEN 2
+                ELSE 1
+            END DESC,
+            n.created_at DESC
+        LIMIT ?
+        """,
+        (user_id, max(limit * 4, limit)),
+    )
+    notifications = [_decode_notification_event(row) for row in rows]
+    filtered = [
+        notification
+        for notification in notifications
+        if _notification_targets_user(notification, user_id, role)
+        and (not unseen_only or not notification.get("seen_at"))
+        and (event_type is None or notification["event_type"] == event_type)
+        and (severity is None or notification["severity"] == severity)
+        and (source_type is None or notification["source_type"] == source_type)
+    ]
+    return filtered[:limit]
+
+
+def list_all_notification_events(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
+    if equipment_id:
+        rows = _fetch_all(
+            "SELECT * FROM notification_events WHERE equipment_id = ? ORDER BY created_at DESC",
+            (equipment_id,),
+        )
+    else:
+        rows = _fetch_all("SELECT * FROM notification_events ORDER BY created_at DESC")
+    return [_decode_notification_event(row) for row in rows]
+
+
+def mark_notification_seen(user_id: str, notification_id: str, dismissed: bool = False) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    if not _fetch_one("SELECT id FROM notification_events WHERE id = ?", (notification_id,)):
+        return None
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO user_notification_views (user_id, notification_id, dismissed_at)
+            VALUES (?, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END)
+            ON CONFLICT(user_id, notification_id) DO UPDATE SET
+                dismissed_at = CASE
+                    WHEN excluded.dismissed_at IS NOT NULL THEN excluded.dismissed_at
+                    ELSE user_notification_views.dismissed_at
+                END
+            """,
+            (user_id, notification_id, 1 if dismissed else 0),
+        )
+    row = _fetch_one(
+        """
+        SELECT n.*, v.first_seen_at AS seen_at, v.dismissed_at AS dismissed_at
+        FROM notification_events n
+        JOIN user_notification_views v
+            ON v.notification_id = n.id
+            AND v.user_id = ?
+        WHERE n.id = ?
+        """,
+        (user_id, notification_id),
+    )
+    return _decode_notification_event(row) if row else None
+
+
 def list_spares(equipment_id: str) -> list[dict[str, Any]]:
     return _fetch_all(
         """
@@ -1288,6 +1442,8 @@ def list_plant_rag_records(equipment_id: Optional[str] = None) -> list[dict[str,
             records.append(_asset_reliability_metric_plant_record(metric))
     for alert in list_alerts(equipment_id):
         records.append(_alert_plant_record(alert))
+    for notification in list_all_notification_events(equipment_id=equipment_id):
+        records.append(_notification_event_plant_record(notification))
     sensor_rows = list_sensor_readings(equipment_id)
     for reading in sensor_rows[-200:]:
         records.append(_sensor_reading_plant_record(reading))
@@ -1451,6 +1607,31 @@ def _alert_plant_record(alert: dict[str, Any]) -> dict[str, Any]:
             f"{alert['severity'].title()} active alert {alert['id']} for {alert['equipment_id']} at {alert.get('timestamp')}: "
             f"{alert.get('message')}. Signal {alert['signal']} value {alert['value']} {alert['unit']} "
             f"against threshold {alert['threshold']}."
+        ),
+    }
+
+
+def _notification_event_plant_record(notification: dict[str, Any]) -> dict[str, Any]:
+    source_bits = [
+        f"source {notification.get('source_type')}:{notification.get('source_id')}",
+        f"event {notification.get('event_type')}",
+    ]
+    if notification.get("work_order_id"):
+        source_bits.append(f"work order {notification['work_order_id']}")
+    if notification.get("alert_id"):
+        source_bits.append(f"alert {notification['alert_id']}")
+    return {
+        "id": f"notification_event:{notification['id']}",
+        "source_type": "notification_event",
+        "equipment_id": notification.get("equipment_id"),
+        "title": f"{notification['severity'].title()} notification {notification['title']}",
+        "timestamp": notification.get("created_at"),
+        "content": (
+            f"Role notification {notification['id']} for {', '.join(source_bits)}. "
+            f"Title: {notification.get('title')}. Summary: {notification.get('summary')}. "
+            f"Recommended action: {notification.get('recommended_action')}. "
+            f"Recipients roles {', '.join(notification.get('recipient_roles') or [])}; "
+            f"recipient users {', '.join(notification.get('recipient_user_ids') or [])}."
         ),
     }
 
@@ -3330,6 +3511,23 @@ def _json_load_any(value: Any) -> Any:
         return json.loads(value)
     except (TypeError, ValueError):
         return None
+
+
+def _decode_notification_event(row: dict[str, Any]) -> dict[str, Any]:
+    event = dict(row)
+    event["recipient_roles"] = _json_load_list(event.get("recipient_roles"))
+    event["recipient_user_ids"] = _json_load_list(event.get("recipient_user_ids"))
+    event["metadata"] = _json_load_dict(event.get("metadata"))
+    event["llm_used_live_provider"] = bool(event.get("llm_used_live_provider"))
+    event["seen_at"] = event.get("seen_at")
+    event["dismissed_at"] = event.get("dismissed_at")
+    return event
+
+
+def _notification_targets_user(notification: dict[str, Any], user_id: str, role: str) -> bool:
+    recipient_user_ids = set(notification.get("recipient_user_ids") or [])
+    recipient_roles = set(notification.get("recipient_roles") or [])
+    return user_id in recipient_user_ids or role in recipient_roles
 
 
 def _decode_document_intelligence(row: dict[str, Any]) -> dict[str, Any]:
