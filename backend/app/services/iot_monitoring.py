@@ -125,12 +125,12 @@ class IoTMonitoringScheduler:
 
     async def _run_anomaly_scans(self) -> None:
         while True:
-            await asyncio.sleep(self.settings.iot_anomaly_scan_interval_seconds)
             try:
                 self._last_anomaly_scan = run_anomaly_alert_scan()
                 self._last_error = None
             except Exception as exc:
                 self._last_error = str(exc)
+            await asyncio.sleep(self.settings.iot_anomaly_scan_interval_seconds)
 
     async def _run_purges(self) -> None:
         while True:

@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     nats_reconnect_time_wait_seconds: float = Field(default=2.0, ge=0.1, alias="NATS_RECONNECT_TIME_WAIT_SECONDS")
     nats_max_reconnect_attempts: int = Field(default=60, ge=0, alias="NATS_MAX_RECONNECT_ATTEMPTS")
     iot_anomaly_scan_enabled: bool = Field(default=True, alias="IOT_ANOMALY_SCAN_ENABLED")
-    iot_anomaly_scan_interval_seconds: int = Field(default=180, ge=30, alias="IOT_ANOMALY_SCAN_INTERVAL_SECONDS")
+    iot_anomaly_scan_interval_seconds: int = Field(default=120, ge=30, alias="IOT_ANOMALY_SCAN_INTERVAL_SECONDS")
     iot_sensor_reading_purge_enabled: bool = Field(default=True, alias="IOT_SENSOR_READING_PURGE_ENABLED")
     iot_sensor_reading_purge_interval_seconds: int = Field(default=900, ge=60, alias="IOT_SENSOR_READING_PURGE_INTERVAL_SECONDS")
     iot_purge_on_session_end: bool = Field(default=True, alias="IOT_PURGE_ON_SESSION_END")

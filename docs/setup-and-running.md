@@ -90,7 +90,10 @@ This starts:
 - React/Vite frontend at `http://127.0.0.1:5173`
 - NATS JetStream for IoT and learning jobs
 - Qdrant for RAG/vector retrieval
+- IoT simulator publishing dummy sensor readings into NATS
 - Learning worker when async learning is enabled
+
+The IoT simulator starts automatically after backend streaming ingestion reports connected. Set `IOT_SIMULATOR_ENABLED=false` to disable it, or tune `IOT_SIMULATOR_INTERVAL_SECONDS`, `IOT_SIMULATOR_ANOMALY_EVERY_SECONDS`, `IOT_SIMULATOR_SCENARIO`, and `IOT_SIMULATOR_ASSETS` before running the script.
 
 Check stack status:
 

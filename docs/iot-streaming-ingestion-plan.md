@@ -94,9 +94,10 @@ For `alert` and `sensor_reading` messages, the backend may derive `payload.id` f
 
 The current monitoring layer extends the ingestion foundation into a live telemetry demo:
 
+- `scripts/run-local-stack.sh start` starts `scripts/publish-dummy-iot-readings.py` automatically once backend streaming ingestion is connected.
 - `scripts/publish-dummy-iot-readings.py` continuously publishes readings for every seeded asset.
-- The simulator generates normal readings most of the time and injects configurable anomaly scenarios every few minutes.
-- A backend anomaly scanner runs every 3 minutes by calling the anomaly service directly, not by making internal HTTP requests to the anomalies endpoint.
+- The simulator generates normal readings most of the time and injects configurable anomaly scenarios every 2 minutes by default.
+- A backend anomaly scanner runs at startup and then every 2 minutes by calling the anomaly service directly, not by making internal HTTP requests to the anomalies endpoint.
 - High and critical IoT anomaly findings register or update stable alert records.
 - Per-user alert popup visibility lets every logged-in user see each alert once without hiding it from other users.
 - The Monitoring view shows per-asset live telemetry status, sensor time-series graphs, threshold lines, anomaly markers, stale/no-data indicators, and links back to asset detail.
@@ -107,14 +108,22 @@ Backend alert registration and UI popup display are separate concerns. Stable al
 
 Raw IoT readings are intentionally short-lived demo telemetry. For longer trend history, add downsampled `sensor_window_summaries` such as 1-minute min/max/avg per equipment and signal; those summaries can be retained longer and indexed into RAG instead of every raw sensor point.
 
-Run the simulator against a running local stack:
+For normal local demos, use the stack script and let it start the simulator:
+
+```bash
+scripts/run-local-stack.sh start
+```
+
+Simulator startup can be tuned with `IOT_SIMULATOR_ENABLED`, `IOT_SIMULATOR_INTERVAL_SECONDS`, `IOT_SIMULATOR_ANOMALY_EVERY_SECONDS`, `IOT_SIMULATOR_SCENARIO`, and `IOT_SIMULATOR_ASSETS`.
+
+For isolated simulator debugging only, run it directly against a running local stack:
 
 ```bash
 scripts/publish-dummy-iot-readings.py \
   --nats-url nats://127.0.0.1:4222 \
   --assets all \
   --interval-seconds 5 \
-  --anomaly-every-seconds 180 \
+  --anomaly-every-seconds 120 \
   --scenario mixed
 ```
 
