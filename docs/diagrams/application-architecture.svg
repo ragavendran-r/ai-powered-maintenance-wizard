@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
   <title id="title">AI-Powered Maintenance Wizard Application Architecture</title>
-  <desc id="desc">A layered architecture diagram showing the React frontend, FastAPI backend, deterministic maintenance services, AI and RAG services, NATS async workers, Qdrant, SQLite, artifacts, and local LLM runtime.</desc>
+  <desc id="desc">A layered architecture diagram showing the React frontend, Monitoring UI, FastAPI backend, deterministic maintenance services, IoT simulator and NATS ingestion, AI and RAG services, Trinity work execution, Qdrant, SQLite, artifacts, and llama-server local adapter runtime.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#eef7ff"/>
@@ -65,7 +65,7 @@
   <circle cx="1220" cy="850" r="200" fill="#ddd6fe" opacity="0.18"/>
 
   <text x="60" y="58" class="title">AI-Powered Maintenance Wizard Architecture</text>
-  <text x="62" y="87" class="subtitle">Role-aware UI, deterministic maintenance core, evidence-grounded AI, async workers, and governed learning.</text>
+  <text x="62" y="87" class="subtitle">Role-aware UI, live monitoring, deterministic maintenance core, evidence-grounded AI, async workers, and governed learning.</text>
 
   <g transform="translate(60 130)">
     <rect class="card" x="0" y="0" width="260" height="685" rx="18" fill="#ffffff" opacity="0.92"/>
@@ -84,7 +84,7 @@
 
     <rect class="nodeSoft" x="22" y="332" width="216" height="102" rx="14" fill="#fff7ed"/>
     <text x="42" y="362" class="label">IoT and historians</text>
-    <text x="42" y="389" class="small">PLCs, gateways, sensors,</text>
+    <text x="42" y="389" class="small">PLCs, gateways, dummy simulator,</text>
     <text x="42" y="409" class="small">alerts, readings, spares</text>
 
     <rect class="nodeSoft" x="22" y="462" width="216" height="128" rx="14" fill="#f8fafc"/>
@@ -107,12 +107,12 @@
     <text x="44" y="143" class="small">Plant KPIs, Neo, risk queue</text>
 
     <rect class="node" x="24" y="178" width="262" height="68" rx="14"/>
-    <text x="44" y="207" class="label">Assets and Diagnosis</text>
-    <text x="44" y="231" class="small">Data-backed tabs, Morpheus, Smith</text>
+    <text x="44" y="207" class="label">Assets, Monitoring, Diagnosis</text>
+    <text x="44" y="231" class="small">Live charts, popups, Morpheus, Smith</text>
 
     <rect class="node" x="24" y="266" width="262" height="76" rx="14"/>
     <text x="44" y="295" class="label">Work Execution</text>
-    <text x="44" y="319" class="small">Technician and supervisor Neo modes</text>
+    <text x="44" y="319" class="small">Trinity technician and supervisor modes</text>
 
     <rect class="node" x="24" y="362" width="262" height="76" rx="14"/>
     <text x="44" y="391" class="label">Planning and Reports</text>
@@ -146,14 +146,14 @@
 
       <rect class="nodeSoft" x="0" y="92" width="164" height="72" rx="14" fill="#ffffff"/>
       <text x="18" y="120" class="label">Ingestion APIs</text>
-      <text x="18" y="143" class="small">Files, JSON, records</text>
+      <text x="18" y="143" class="small">Files, JSON, IoT records</text>
       <rect class="nodeSoft" x="188" y="92" width="164" height="72" rx="14" fill="#ffffff"/>
-      <text x="206" y="120" class="label">Reports API</text>
-      <text x="206" y="143" class="small">Insights, Markdown</text>
+      <text x="206" y="120" class="label">Monitoring API</text>
+      <text x="206" y="143" class="small">Live graphs, unseen alert popups</text>
 
       <rect class="nodeSoft" x="0" y="184" width="164" height="78" rx="14" fill="#ffffff"/>
       <text x="18" y="211" class="label">Risk Engine</text>
-      <text x="18" y="234" class="small">Anomaly, RUL, spares</text>
+      <text x="18" y="234" class="small">Anomaly scan, RUL, spares</text>
       <rect class="nodeSoft" x="188" y="184" width="164" height="78" rx="14" fill="#ffffff"/>
       <text x="206" y="211" class="label">RCA and PM</text>
       <text x="206" y="234" class="small">Morpheus drafts</text>
@@ -182,7 +182,7 @@
 
     <rect class="node" x="24" y="186" width="312" height="76" rx="14"/>
     <text x="44" y="215" class="label">Local Runtime</text>
-    <text x="44" y="239" class="small">llama.cpp Qwen + LoRA, LM Studio, or Ollama</text>
+    <text x="44" y="239" class="small">llama-server Qwen2.5 base + LoRA adapter</text>
 
     <rect class="node" x="24" y="282" width="312" height="82" rx="14"/>
     <text x="44" y="311" class="label">Retrieval Service</text>
@@ -217,17 +217,16 @@
 
   <g transform="translate(1040 28)">
     <rect class="card" x="0" y="0" width="500" height="70" rx="18" fill="url(#asyncGrad)"/>
-    <text x="24" y="30" class="bandTitle">NATS JetStream Async Backbone</text>
-    <text x="24" y="53" class="small">MW_IOT telemetry and MW_LEARNING jobs</text>
-    <rect x="310" y="18" width="82" height="32" rx="16" fill="#ffffff" opacity="0.9"/>
-    <text x="328" y="40" class="pillText">DLQ</text>
-    <rect x="406" y="18" width="70" height="32" rx="16" fill="#ffffff" opacity="0.9"/>
-    <text x="419" y="40" class="pillText">Workers</text>
+    <text x="24" y="30" class="bandTitle">NATS JetStream</text>
+    <text x="24" y="53" class="small">MW_IOT simulator telemetry and MW_LEARNING jobs</text>
+    <rect x="348" y="18" width="62" height="32" rx="16" fill="#ffffff" opacity="0.9"/>
+    <text x="366" y="40" class="pillText">DLQ</text>
+    <rect x="424" y="18" width="58" height="32" rx="16" fill="#ffffff" opacity="0.9"/>
+    <text x="434" y="40" class="pillText">Jobs</text>
   </g>
 
   <path class="arrow" d="M 320 220 C 345 220, 345 220, 370 220"/>
   <path class="arrowThin" d="M 320 360 C 345 360, 345 594, 370 594"/>
-  <path class="arrowAsync" d="M 280 520 C 308 500, 330 484, 330 448 L 330 118 L 1004 118 C 1028 118, 1024 76, 1040 70"/>
   <path class="arrow" d="M 680 472 C 707 472, 705 250, 730 250"/>
   <path class="arrow" d="M 680 594 C 705 594, 705 594, 730 594"/>
   <path class="arrowAi" d="M 1130 360 C 1154 360, 1154 324, 1180 324"/>
@@ -236,7 +235,7 @@
   <path class="arrow" d="M 930 762 C 930 800, 930 820, 930 850"/>
   <path class="arrowThin" d="M 1285 412 C 1238 660, 850 690, 850 850"/>
   <path class="arrowAsync" d="M 930 130 C 930 112, 1120 112, 1120 98"/>
-  <path class="arrowAsync" d="M 1210 64 C 1308 64, 1308 478, 1215 514"/>
+  <path class="arrowAsync" d="M 1288 98 C 1548 112, 1550 548, 1492 568"/>
   <path class="arrowThin" d="M 1210 70 C 1260 90, 1260 305, 1180 326"/>
   <path class="arrow" d="M 730 700 C 705 700, 705 520, 680 520"/>
 

@@ -9,20 +9,21 @@
 ```mermaid
 flowchart LR
   users["Plant Users<br/>Admin, engineers, planners, operators"] --> authUi["Login And Role-Gated UI"]
-  authUi --> frontend["React Frontend<br/>Dashboard, ingestion, diagnosis, chat, reports, feedback"]
-  iot["Steel Plant IoT Apps<br/>PLCs, gateways, historians"] --> nats["NATS JetStream<br/>MW_IOT stream"]
+  authUi --> frontend["React Frontend<br/>Dashboard, monitoring, ingestion, diagnosis, chat, reports, feedback"]
+  iot["Steel Plant IoT Apps<br/>PLCs, gateways, historians, dummy simulator"] --> nats["NATS JetStream<br/>MW_IOT stream"]
   nats --> streamIngest["Async IoT Ingestion Worker<br/>Durable pull consumer"]
   frontend --> api["FastAPI Backend<br/>Typed HTTP API"]
   api --> auth["Auth/RBAC Layer<br/>JWT validation, current user, role guards"]
 
   auth --> dashboard["Dashboard And Equipment APIs"]
   auth --> ingest["Ingestion APIs<br/>Documents, files, structured records"]
+  auth --> monitoring["Monitoring API<br/>Live sensor graphs, unseen alert popups"]
   auth --> streamStatus["Streaming Status API"]
   auth --> diagnosis["Diagnosis, Chat, And Recommendation APIs"]
   auth --> prediction["Prediction API"]
   auth --> workOrders["Work Order APIs<br/>Queue, planning, dispatch, logs, lifecycle"]
   auth --> pmPlans["PM Plan APIs<br/>Templates, triggers, Smith steps, planned work conversion"]
-  auth --> assistants["Neo Work Order AI Modes<br/>Technician and supervisor"]
+  auth --> assistants["Neo and Trinity AI Modes<br/>Dashboard, technician, supervisor"]
   auth --> report["Markdown Report API"]
   auth --> feedback["Feedback API<br/>Root cause, action, outcome"]
   auth --> learningReview["Learning Review API<br/>Judge, approve, export"]
@@ -34,6 +35,7 @@ flowchart LR
   parser --> qdrant["Qdrant Vector DB<br/>maintenance_wizard_documents"]
   ingest --> repo
   streamIngest --> repo
+  monitoring --> repo
   streamStatus --> streamIngest
 
   diagnosis --> retrieval
@@ -42,6 +44,7 @@ flowchart LR
   anomaly --> anomalyContext["Anomaly Context<br/>LLM/SLM classification and inspection steps"]
   diagnosis --> risk["Risk And Prediction Services<br/>Criticality, alerts, spares, history, labels, RUL"]
   diagnosis --> llm["LLM Adapter<br/>Mock, OpenAI-compatible, Ollama"]
+  llm --> llama["llama-server Runtime<br/>Qwen2.5 base + LoRA adapter"]
   assistants --> llm
   pmPlans --> retrieval
   pmPlans --> risk
@@ -96,10 +99,10 @@ flowchart LR
 
 ## Components
 
-- React frontend: operational dashboard, company Assets table, lazy-loaded data-backed asset detail views, work-order queue/detail/execution/review screens, left-nav ingestion view, maintenance chat, recommendation, report, detailed feedback, and Learning Review views.
+- React frontend: operational dashboard, continuous Monitoring view, company Assets table, lazy-loaded data-backed asset detail views, work-order queue/detail/execution/review screens, left-nav ingestion view, maintenance chat, recommendation, report, detailed feedback, and Learning Review views.
 - Auth/RBAC layer: local login, JWT validation, current-user context, role guards, and role-aware navigation for admin, maintenance engineer, maintenance technician, maintenance supervisor, reliability engineer, planner, operator, and API-only IoT service users.
 - FastAPI backend: HTTP API layer for dashboard data, work orders, preventive-maintenance plans, planning/scheduling/dispatch, role-specific assistants, ingestion, diagnosis, prediction, chat, reports, and feedback.
-- Async IoT streaming ingestion: optional NATS JetStream durable consumer for plant applications, PLC gateways, and historians that publish alerts, sensor readings, equipment, spares, and maintenance events.
+- Async IoT streaming ingestion and monitoring: optional NATS JetStream durable consumer for plant applications, PLC gateways, historians, and the local dummy simulator that publish alerts, sensor readings, equipment, spares, and maintenance events. The Monitoring API groups recent readings into per-asset live charts, tracks stale telemetry gaps, registers occurrence-specific high/critical anomaly alerts, and uses per-user unseen state for centered anomaly popups.
 - Data services: seed SQLite from five sample steel-plant assets and expose repository functions for equipment, asset profiles, asset metrics, seeded asset recommendations, subsystems, reliability metrics, alerts, sensor readings, spares, work-order spare reservations, PM templates, PM plans, maintenance history, related work orders, SOP/manual/log/history documents, document chunks, and feedback.
 - Document parser: extracts text from uploaded text-like files and embedded-text PDFs before indexing.
 - Document intelligence service: optional LLM/SLM extraction of uploaded document summary, assets, components, failure modes, symptoms, safety constraints, spares, and thresholds, with deterministic fallback.
@@ -110,9 +113,9 @@ flowchart LR
 - Learning service: captures assistant interactions, converts feedback/labels/work-order outcomes/documents into candidate examples, scores them with an LLM-as-a-Judge rubric, preserves human approval state, exports judge-qualified JSONL snapshots for local adapter tuning, and provides reviewer controls for adapter versions, evaluation runs, artifact storage, adapter promotion/rollback, runtime deployment tracking/gating, and active serving-alias resolution.
 - Async learning workers: NATS JetStream subjects under `maintenance.learning.*` drive judge, dataset, evaluation, and PEFT preparation jobs outside the FastAPI request path with retries, DLQ handling, persisted job status, and filesystem or S3-compatible artifact registration.
 - Recommendation service: combines retrieved evidence, approved judge-qualified learning examples, risk scoring, prediction, normalized labels, prior engineer feedback, reasoning explanations, and optional LLM-adapter context.
-- Work-order and planning services: persist work-order lifecycle state plus planner-owned planned start/end, outage window, material readiness, material blocker status/notes, spare reservations, reorder request state, procurement lead time, expected availability, substitute options, dispatch notes, and dispatch timestamp fields. Planner, supervisor, and admin users can schedule and dispatch work after deterministic validation; dispatch is blocked by waiting approval, missing planned start, blocked material readiness, or unresolved top-level/per-spare material blockers. Preventive-maintenance planning persists PM templates and generated PM plans with recurring or condition/risk triggers, monitoring thresholds, generated task lists, Smith technician-ready steps, spares strategy, RAG evidence, adjustment notes from repeated failures or feedback, and conversion from a PM plan into a planned PM work order. Technicians see only assigned work and cannot mutate planning or procurement metadata. Work-order assistant service combines persisted work-order state, spare/procurement state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM output to suggest live directions, material-blocker explanations, substitute considerations, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work. Neo has role-aware dashboard, technician, and supervisor modes backed by grounded app context and the shared LLM provider, model, token-limit, and streaming configuration. Dashboard Neo streams the role-aware welcome and user prompts as readable LLM text while final structured events apply app-owned tables or actions. If the live LLM is unavailable, Neo shows only an apology rather than deterministic assistant prose.
+- Work-order and planning services: persist work-order lifecycle state plus planner-owned planned start/end, outage window, material readiness, material blocker status/notes, spare reservations, reorder request state, procurement lead time, expected availability, substitute options, dispatch notes, and dispatch timestamp fields. Planner, supervisor, and admin users can schedule and dispatch work after deterministic validation; dispatch is blocked by waiting approval, missing planned start, blocked material readiness, or unresolved top-level/per-spare material blockers. Preventive-maintenance planning persists PM templates and generated PM plans with recurring or condition/risk triggers, monitoring thresholds, generated task lists, Smith technician-ready steps, spares strategy, RAG evidence, adjustment notes from repeated failures or feedback, and conversion from a PM plan into a planned PM work order. Technicians see only assigned work and cannot mutate planning or procurement metadata. Work-order assistant service combines persisted work-order state, spare/procurement state, asset health, alerts, retrieved evidence, technician observations, and optional LLM/SLM output to suggest live directions, material-blocker explanations, substitute considerations, problem codes, completion summaries, supervisor follow-ups, and draft follow-up work. Neo owns dashboard command-center assistance; Trinity owns technician and supervisor work-execution modes. Both use grounded app context and the shared LLM provider, model, token-limit, and streaming configuration. If the live LLM is unavailable, user-visible assistant paths show explicit degraded-mode messaging rather than deterministic assistant prose.
 - Report service: formats recommendations as structured Markdown for supervisor handoff or demo export, including learning notes.
-- LLM adapter: common structured interface for mock, OpenAI-compatible chat completions, and Ollama chat providers.
+- LLM adapter: common structured interface for mock, OpenAI-compatible chat completions, and Ollama chat providers. The recommended local adapter-serving runtime is llama.cpp `llama-server` with a Qwen2.5 GGUF base model plus GGUF LoRA adapter served under the alias used by Neo, Trinity, Morpheus, Smith, recommendations, RAG reranking, and learning judge flows.
 
 ## API Surface
 
@@ -128,6 +131,7 @@ flowchart LR
   - `POST /api/ingest/document-file` parses and stores uploaded `.txt`, `.md`, `.markdown`, `.csv`, `.log`, `.json`, and embedded-text `.pdf` files, then extracts document intelligence.
   - `POST /api/ingest/records` upserts structured equipment, alert, spare, work-order spare reservation, sensor reading, and maintenance event records.
   - `GET /api/streaming/status` reports NATS JetStream ingestion state, processed count, failed count, last message timestamp, and last error.
+  - `GET /api/monitoring/assets` returns live per-asset IoT sensor series, thresholds, stale telemetry state, and alert counts for the Monitoring dashboard.
 - Decision support:
   - `GET /api/dashboard/summary` returns plant-level health and all tracked assets sorted by risk priority.
   - `GET /api/assets` returns the company asset table with location, criticality, health, risk, work-order count, and supervisor fields.
