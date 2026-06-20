@@ -20,6 +20,8 @@ ALERT_ROLES = [
     "admin",
 ]
 RELIABILITY_REVIEW_ROLES = ["reliability_engineer", "maintenance_supervisor", "admin"]
+MATERIAL_BLOCKER_STATUSES = {"blocked", "waiting_procurement", "reorder_requested"}
+MATERIAL_UNREADY_STATUSES = {"blocked", "pending"}
 
 
 def notify_work_order_created(work_order: dict[str, Any], actor: Optional[UserPublic] = None) -> list[dict[str, Any]]:
@@ -200,6 +202,8 @@ def _status_notifications(
     events: list[dict[str, Any]] = []
     assignee = _active_user_for_display_name(after.get("assigned_to"))
     if status == "APPR":
+        if _work_order_has_material_blocker(after):
+            return _material_wait_notifications(after, actor, timestamp_key)
         reason = "materials cleared" if previous == "WMATL" else "approved"
         if assignee:
             events.append(
@@ -242,19 +246,7 @@ def _status_notifications(
             )
         )
     elif status == "WMATL":
-        events.append(
-            _emit_notification(
-                event_key=f"work_order_waiting_material:{after['id']}:planner:{timestamp_key}",
-                event_type="work_order_waiting_material",
-                audience="planner",
-                title=f"Material blocker: {after['id']}",
-                summary=f"{after['title']} is waiting for material.",
-                fallback_action="Resolve reservations, procurement status, substitute availability, and expected material date.",
-                work_order=after,
-                recipient_roles=PLANNER_ROLES + SUPERVISOR_ROLES,
-                actor=actor,
-            )
-        )
+        events.extend(_material_wait_notifications(after, actor, timestamp_key))
     elif status == "INPRG":
         events.append(
             _emit_notification(
@@ -284,6 +276,26 @@ def _status_notifications(
             )
         )
     return events
+
+
+def _material_wait_notifications(
+    work_order: dict[str, Any],
+    actor: Optional[UserPublic],
+    timestamp_key: str,
+) -> list[dict[str, Any]]:
+    return [
+        _emit_notification(
+            event_key=f"work_order_waiting_material:{work_order['id']}:planner:{timestamp_key}",
+            event_type="work_order_waiting_material",
+            audience="planner",
+            title=f"Material blocker: {work_order['id']}",
+            summary=f"{work_order['title']} is waiting for material.",
+            fallback_action="Resolve reservations, procurement status, substitute availability, and expected material date.",
+            work_order=work_order,
+            recipient_roles=PLANNER_ROLES + SUPERVISOR_ROLES,
+            actor=actor,
+        )
+    ]
 
 
 def _dispatch_notifications(
@@ -494,6 +506,22 @@ def _material_changed(before: dict[str, Any], after: dict[str, Any]) -> bool:
         before.get(field) != after.get(field)
         for field in ("material_readiness", "material_blocker_status", "material_blocker_note")
     )
+
+
+def _work_order_has_material_blocker(work_order: dict[str, Any]) -> bool:
+    if work_order.get("material_readiness") in MATERIAL_UNREADY_STATUSES:
+        return True
+    if work_order.get("material_blocker_status") in MATERIAL_BLOCKER_STATUSES:
+        return True
+    for reservation in work_order.get("spare_reservations", []):
+        if reservation.get("blocker_status") in MATERIAL_BLOCKER_STATUSES:
+            return True
+        required_qty = int(reservation.get("required_qty") or 0)
+        reserved_qty = int(reservation.get("reserved_qty") or 0)
+        available_qty = int(reservation.get("available_qty") or reservation.get("on_hand_qty") or 0)
+        if required_qty and reserved_qty < required_qty and available_qty < required_qty:
+            return True
+    return False
 
 
 def _event_key(event_type: str, work_order: dict[str, Any], audience: str, subject: Optional[str] = None) -> str:

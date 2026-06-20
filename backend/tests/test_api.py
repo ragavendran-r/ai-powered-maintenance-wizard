@@ -816,6 +816,54 @@ def test_work_order_approval_notification_creation_does_not_call_llm(monkeypatch
     assert approved_notification["llm_status"] == "not_requested"
 
 
+def test_approving_material_pending_work_order_notifies_waiting_material_not_ready():
+    supervisor_headers = auth_headers("supervisor@plant.local")
+    create_response = client.post(
+        "/api/work-orders",
+        json={
+            "equipment_id": "BF-BLOWER-02",
+            "title": "PM: Blower proactive material-gated plan",
+            "description": "Review latest sensor trend and active alerts before scheduling.",
+            "priority": 1,
+            "work_type": "PM",
+            "failure_class": "CTRL",
+            "problem_code": "IGVACT",
+            "classification": "Control actuator",
+            "assigned_to": "Guna",
+            "supervisor": "Dhruv",
+            "due_date": "2026-06-14T09:00:00+05:30",
+            "material_readiness": "pending",
+            "material_blocker_status": "waiting_procurement",
+            "material_blocker_note": "Actuator procurement is still pending.",
+            "recommended_action": "Keep the work order material-gated until actuator readiness is confirmed.",
+        },
+        headers=supervisor_headers,
+    )
+    assert create_response.status_code == 201, create_response.text
+    work_order_id = create_response.json()["id"]
+
+    approval_response = client.patch(
+        f"/api/work-orders/{work_order_id}",
+        json={"status": "APPR"},
+        headers=supervisor_headers,
+    )
+
+    assert approval_response.status_code == 200, approval_response.text
+    assert approval_response.json()["status"] == "WMATL"
+    supervisor = repository.get_user_by_email("supervisor@plant.local")
+    notifications = repository.list_notifications_for_user(
+        supervisor["id"],
+        supervisor["role"],
+        unseen_only=True,
+    )
+    work_order_notifications = [item for item in notifications if item["work_order_id"] == work_order_id]
+    assert any(item["event_type"] == "work_order_waiting_material" for item in work_order_notifications)
+    assert all(item["event_type"] != "work_order_approved" for item in work_order_notifications)
+    material_notification = next(item for item in work_order_notifications if item["event_type"] == "work_order_waiting_material")
+    assert material_notification["title"] == f"Material blocker: {work_order_id}"
+    assert "waiting for material" in material_notification["summary"]
+
+
 def test_supervisor_reassigning_seeded_work_order_notifies_vinoth():
     supervisor_headers = auth_headers("supervisor@plant.local")
     technician_headers = auth_headers("technician@plant.local")
