@@ -158,7 +158,7 @@ def test_health_check():
 def test_database_status_reports_seeded_tables():
     status = database_status()
     assert Path(status["database_path"]) == TEST_DATABASE_PATH
-    assert status["schema_version"] == "23"
+    assert status["schema_version"] == "24"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["asset_profiles"] == 5
     assert status["counts"]["asset_metric_snapshots"] == 15
@@ -788,6 +788,34 @@ def test_role_notifications_are_created_for_assigned_work_order_and_seen_per_use
     assert any(item["id"] == assigned_notification["id"] for item in history_after_dismiss.json())
 
 
+def test_work_order_approval_notification_creation_does_not_call_llm(monkeypatch):
+    def fail_if_called():
+        raise AssertionError("Work-order actions must not block on notification LLM enrichment")
+
+    monkeypatch.setattr(notifications_module, "configured_llm_client", fail_if_called)
+    supervisor_headers = auth_headers("supervisor@plant.local")
+
+    response = client.patch("/api/work-orders/WO-8311", json={"status": "APPR"}, headers=supervisor_headers)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "APPR"
+    supervisor = repository.get_user_by_email("supervisor@plant.local")
+    notifications = repository.list_notifications_for_user(
+        supervisor["id"],
+        supervisor["role"],
+        unseen_only=True,
+    )
+    approved_notification = next(
+        item
+        for item in notifications
+        if item["event_type"] == "work_order_approved" and item["work_order_id"] == "WO-8311"
+    )
+    assert approved_notification["recommended_action"] == (
+        "Review shift priority, owner readiness, and whether the work should be released now."
+    )
+    assert approved_notification["llm_status"] == "not_requested"
+
+
 def test_supervisor_reassigning_seeded_work_order_notifies_vinoth():
     supervisor_headers = auth_headers("supervisor@plant.local")
     technician_headers = auth_headers("technician@plant.local")
@@ -891,6 +919,53 @@ def test_anomaly_alert_notifications_use_fallback_without_live_llm(monkeypatch):
     )
     assert events[0]["llm_provider"] == "deterministic"
     assert events[0]["llm_used_live_provider"] is False
+    assert events[0]["llm_status"] == "not_requested"
+
+
+def test_notification_display_triggers_nonblocking_llm_enrichment(monkeypatch):
+    class FakeNotificationClient:
+        provider_name = "openai"
+
+        def complete_text(self, prompt, system_prompt, fallback_factory, max_tokens=600):
+            return LLMTextResponse(
+                content="LLM recommends assigning an owner and checking the live trend before escalation.",
+                used_live_provider=True,
+                provider="openai",
+            )
+
+    monkeypatch.setattr(notifications_module, "configured_llm_client", lambda: FakeNotificationClient())
+    alert_id = f"ALT-DISPLAY-ENRICH-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+    events = notify_alerts_registered(
+        [
+            {
+                "id": alert_id,
+                "equipment_id": "BF-BLOWER-02",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "signal": "outlet_pressure_variance",
+                "value": 18.4,
+                "unit": "kPa",
+                "threshold": 12.0,
+                "severity": "high",
+                "message": "IoT anomaly detected: outlet pressure variance exceeded the rolling threshold.",
+            }
+        ]
+    )
+    assert events[0]["llm_status"] == "not_requested"
+
+    response = client.get("/api/notifications", headers=auth_headers("operator@plant.local"))
+
+    assert response.status_code == 200
+    displayed = next(item for item in response.json() if item["alert_id"] == alert_id)
+    assert displayed["recommended_action"] == (
+        "Review the live sensor trend, confirm whether production load should be reduced, and assign an owner."
+    )
+    enriched = repository.get_notification_event_by_key(f"alert_registered:{alert_id}")
+    assert enriched["llm_status"] == "completed"
+    assert enriched["llm_provider"] == "openai"
+    assert enriched["llm_used_live_provider"] is True
+    assert enriched["recommended_action"] == (
+        "LLM recommends assigning an owner and checking the live trend before escalation."
+    )
 
 
 def test_duplicate_work_order_assignment_notifications_collapse_to_latest():

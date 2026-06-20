@@ -23,6 +23,7 @@ RcaCorrectiveActionStatus = Literal["proposed", "approved", "in_progress", "comp
 PmPlanStatus = Literal["draft", "active", "converted", "paused"]
 PmTriggerType = Literal["recurring", "condition", "risk_prediction"]
 NotificationSeverity = Literal["info", "low", "medium", "high", "critical"]
+NotificationLlmStatus = Literal["not_requested", "pending", "completed", "failed"]
 AnomalyContextClass = Literal[
     "requires_investigation",
     "startup_transient",
@@ -625,6 +626,10 @@ class NotificationEvent(BaseModel):
     metadata: dict[str, Any] = {}
     llm_provider: str = "mock"
     llm_used_live_provider: bool = False
+    llm_status: NotificationLlmStatus = "not_requested"
+    llm_error: Optional[str] = None
+    llm_requested_at: Optional[str] = None
+    llm_completed_at: Optional[str] = None
     created_at: str
     seen_at: Optional[str] = None
     dismissed_at: Optional[str] = None

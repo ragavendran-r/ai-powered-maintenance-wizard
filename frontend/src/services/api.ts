@@ -189,6 +189,10 @@ export interface NotificationEvent {
   metadata: Record<string, unknown>
   llm_provider: string
   llm_used_live_provider: boolean
+  llm_status: 'not_requested' | 'pending' | 'completed' | 'failed'
+  llm_error?: string | null
+  llm_requested_at?: string | null
+  llm_completed_at?: string | null
   created_at: string
   seen_at?: string | null
   dismissed_at?: string | null
