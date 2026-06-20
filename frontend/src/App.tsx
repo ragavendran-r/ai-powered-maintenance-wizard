@@ -106,6 +106,7 @@ import { RcaWorkspace } from './routes/RcaWorkspace'
 import { UsersRoute } from './routes/Users'
 import { ReportsRoute } from './routes/Reports'
 import { MonitoringRoute } from './routes/Monitoring'
+import { MlWorkspaceRoute } from './routes/MlWorkspace'
 
 const WORK_EXECUTION_NEO_STREAM_TIMEOUT_MS = 60_000
 const LEARNING_JUDGE_REQUEST_TIMEOUT_MS = 95_000
@@ -550,6 +551,8 @@ function navigationIcon(icon: NavigationIcon) {
       return <CalendarClock size={17} />
     case 'reports':
       return <FileText size={17} />
+    case 'ml':
+      return <Bot size={17} />
     case 'reliability':
       return <Gauge size={17} />
     case 'learning':
@@ -3859,6 +3862,12 @@ export function App() {
         selectedEquipment={selectedEquipment}
         structuredReports={structuredReports}
         summary={maintenanceInsightSummary}
+      />
+    ) : activeView === 'mlWorkspace' ? (
+      <MlWorkspaceRoute
+        assets={assets}
+        selectedEquipment={selectedEquipment}
+        setSelectedEquipment={setSelectedEquipment}
       />
     ) : activeView === 'reliability' ? (
       <section className="reliabilityRouteStack" aria-label="Reliability workspace">

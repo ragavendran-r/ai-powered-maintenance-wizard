@@ -1499,6 +1499,232 @@ h3 {
   padding: 12px;
 }
 
+.mlWorkspace {
+  align-content: start;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius);
+  display: grid;
+  gap: 14px;
+  max-width: 100%;
+  min-width: 0;
+  padding: var(--panel-padding);
+}
+
+.mlWorkspaceToolbar {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.mlWorkspaceToolbar .field {
+  min-width: min(360px, 100%);
+}
+
+.mlLoadingPanel {
+  align-items: center;
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-section);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  min-height: 190px;
+  padding: 22px;
+  text-align: center;
+}
+
+.mlLoadingPanel .loadingSpinner {
+  height: 28px;
+  width: 28px;
+}
+
+.mlLoadingPanel strong {
+  color: var(--color-text-heading);
+  font-size: var(--font-size-section);
+}
+
+.mlLoadingPanel small {
+  color: var(--color-text-subtle);
+}
+
+.mlSummaryGrid,
+.mlModelGrid,
+.mlWorkspaceStack {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mlSummaryGrid,
+.mlModelGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mlWorkspaceStack {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mlWidePanel {
+  grid-column: 1 / -1;
+}
+
+.mlFailurePanel {
+  align-content: start;
+}
+
+.mlSummaryCard {
+  align-content: start;
+}
+
+.mlSummaryCard > div {
+  display: grid;
+  gap: 8px;
+}
+
+.mlModelBadge {
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-section);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.mlModelBadge strong,
+.mlComparisonTable strong,
+.mlMaintenanceItem strong {
+  color: var(--color-text-heading);
+}
+
+.mlModelBadge span,
+.mlComparisonTable small,
+.mlMaintenanceItem small {
+  color: var(--color-text-subtle);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.mlMaintenanceList {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mlMaintenanceItem {
+  border: 1px solid var(--color-border-row);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.mlMaintenanceItem p {
+  color: var(--color-text-body);
+  margin: 0;
+}
+
+.mlComparisonTableWrap {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.mlComparisonTable {
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 760px;
+  width: 100%;
+}
+
+.mlComparisonTable th,
+.mlComparisonTable td {
+  border-bottom: 1px solid var(--color-border-row);
+  padding: 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.mlComparisonTable th {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.mlComparisonTable td {
+  background: var(--color-surface);
+}
+
+.mlComparisonTable td:first-child,
+.mlComparisonTable td:nth-child(2),
+.mlComparisonTable td:nth-child(3),
+.mlComparisonTable td:nth-child(4) {
+  display: table-cell;
+}
+
+.mlComparisonTable td > strong,
+.mlComparisonTable td > small,
+.mlComparisonTable td > p {
+  display: block;
+  margin: 0 0 6px;
+}
+
+.mlComparisonTable td > small:last-child,
+.mlComparisonTable td > p:last-child {
+  margin-bottom: 0;
+}
+
+.mlHorizonGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mlHorizonGrid div {
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-row);
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  min-height: 92px;
+  padding: 10px;
+}
+
+.mlHorizonGrid span,
+.chip {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.chip {
+  background: var(--color-brand-chip-bg);
+  border: 1px solid var(--color-border-brand-chip);
+  border-radius: var(--radius-pill);
+  color: var(--color-brand-chip-text);
+  justify-self: start;
+  padding: 3px 8px;
+}
+
+.mlMaintenanceItem > span {
+  background: var(--state-success-bg-soft);
+  border: 1px solid var(--state-success-border);
+  border-radius: var(--radius-pill);
+  color: var(--state-success-text);
+  font-size: 0.78rem;
+  font-weight: 800;
+  justify-self: start;
+  padding: 4px 8px;
+}
+
 .rcaCaseGrid {
   display: grid;
   gap: 12px;
@@ -5076,6 +5302,10 @@ h3 {
   .reportTwoColumn,
   .reportFactGrid,
   .rcaToolbar,
+  .mlSummaryGrid,
+  .mlModelGrid,
+  .mlWorkspaceStack,
+  .mlHorizonGrid,
   .monitoringGrid,
   .userCreateGrid,
   .userRow {

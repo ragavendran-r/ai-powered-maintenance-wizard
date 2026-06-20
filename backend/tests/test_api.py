@@ -5800,6 +5800,34 @@ def test_prediction_drivers_include_anomaly_explanations():
     assert payload["reasoning_explanation"]["driver_explanations"]
 
 
+def test_ml_comparison_endpoint_returns_shadow_model_outputs():
+    response = client.get("/api/ml/compare/RM-DRIVE-01", headers=auth_headers("reliability@plant.local"))
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "shadow"
+    assert payload["equipment_id"] == "RM-DRIVE-01"
+    assert payload["anomaly_model"]["status"] == "shadow"
+    assert payload["failure_model"]["id"] == "shadow-failure-rul-v1"
+    assert payload["maintenance_model"]["id"] == "shadow-pm-ranker-v1"
+    assert payload["anomalies"]
+    assert payload["anomalies"][0]["heuristic"]["signal"]
+    assert 0 <= payload["anomalies"][0]["ml_score"] <= 1
+    failure = payload["failure_prediction"]
+    assert failure["heuristic_prediction"]["model_version"]["id"] == "rul-risk-heuristic-v2"
+    assert 0 <= failure["ml_failure_probability"] <= 1
+    assert failure["ml_remaining_useful_life_days"] >= 0
+    assert {item["label"] for item in failure["horizons"]} == {"7-day", "30-day", "90-day"}
+    assert failure["model_evaluation"]["evaluation_id"] == "shadow-local-backtest-v1"
+    assert "probability_drift" in failure
+    assert payload["maintenance_recommendations"]
+    assert any("Shadow mode only" in note for note in payload["comparison_notes"])
+
+
+def test_ml_comparison_endpoint_is_not_available_to_operators():
+    response = client.get("/api/ml/compare/RM-DRIVE-01", headers=auth_headers("operator@plant.local"))
+    assert response.status_code == 403
+
+
 def test_prediction_drivers_include_feedback_history():
     headers = auth_headers("maintenance@plant.local")
     client.post(

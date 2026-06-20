@@ -10,6 +10,7 @@ export type NavigationIcon =
   | 'execution'
   | 'planning'
   | 'reports'
+  | 'ml'
   | 'reliability'
   | 'learning'
   | 'admin'
@@ -125,6 +126,18 @@ export const jobNavigationItems: JobNavigationItem[] = [
       reliability_engineer: 3,
       planner: 3,
       admin: 6,
+    },
+  },
+  {
+    id: 'mlWorkspace',
+    label: 'ML Workspace',
+    icon: 'ml',
+    purpose: 'Shadow ML comparison for anomalies, failure prediction, RUL, and PM ranking.',
+    roles: ['admin', 'maintenance_engineer', 'reliability_engineer'],
+    rolePriority: {
+      reliability_engineer: 2,
+      maintenance_engineer: 3,
+      admin: 7,
     },
   },
   {

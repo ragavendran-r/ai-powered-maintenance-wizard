@@ -71,6 +71,7 @@ from app.models.schemas import (
     MaintenanceDecisionSummary,
     MaintenanceInsightReportBundle,
     MaintenanceInsightReportSummary,
+    MlComparisonResponse,
     LoginRequest,
     MonitoringDashboard,
     NotificationCleanupRequest,
@@ -143,6 +144,7 @@ from app.services.learning import (
 )
 from app.services.vector_store import vector_store_status
 from app.services.maintenance_labeling import label_feedback, label_maintenance_event, label_maintenance_history, stored_labels
+from app.services.ml_models import ml_comparison as load_ml_comparison
 from app.services.neo_assistant import neo_assistance, neo_welcome, stream_neo_assistance, stream_neo_welcome
 from app.services.assistant_runtime import standardized_assistant_stream
 from app.services.pm_plans import PM_PLAN_ROLES
@@ -184,6 +186,7 @@ from app.services.work_order_assistant import (
 LEARNING_REVIEW_ROLES = ("admin",)
 LEARNING_ARTIFACT_CLEANUP_ROLES = {"admin"}
 RCA_WORKSPACE_ROLES = ("admin", "maintenance_engineer", "reliability_engineer", "maintenance_supervisor")
+ML_WORKSPACE_ROLES = ("admin", "maintenance_engineer", "reliability_engineer")
 MAINTENANCE_REPORT_ROLES = ("admin", "maintenance_engineer", "maintenance_supervisor", "reliability_engineer", "planner")
 MATERIAL_BLOCKER_STATUSES = {"blocked", "waiting_procurement", "reorder_requested"}
 MATERIAL_UNREADY_STATUSES = {"blocked", "pending"}
@@ -418,6 +421,15 @@ def asset_reliability_prediction_stream(equipment_id: str):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get(
+    "/api/ml/compare/{equipment_id}",
+    response_model=MlComparisonResponse,
+    dependencies=[Depends(require_roles(*ML_WORKSPACE_ROLES))],
+)
+def ml_compare(equipment_id: str):
+    return load_ml_comparison(equipment_id)
 
 
 @app.get(
