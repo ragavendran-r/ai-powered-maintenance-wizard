@@ -17,7 +17,7 @@ The app helps maintenance engineers review plant health, diagnose equipment issu
 The AI layer is an audited maintenance copilot layered after deterministic backend controls. Raw IoT ingestion, anomaly scoring, risk calculation, role permissions, and persisted work-order updates stay in deterministic flows; AI explains, retrieves evidence, guides role-specific work, and helps turn reviewed outcomes into reusable learning material.
 
 - Provider modes: `mock` for deterministic offline development/tests, `openai` for OpenAI-compatible runtimes such as llama.cpp, LM Studio, or vLLM, and `ollama` for local Ollama. Live providers share structured-output validation, token limits, timeouts, streaming support, and explicit error/degraded-mode handling; user-visible assistant prose streams from the configured live model when one is available.
-- Role-aware assistants: Neo supports command-center workflows, Trinity supports technician and supervisor work-order execution, Morpheus supports diagnosis/RCA/PM planning, and Smith explains reliability prediction and technician-ready preventive-maintenance steps.
+- Role-aware assistants: Neo supports dashboard command-center workflows, Trinity supports technician and supervisor work-order execution, Morpheus supports diagnosis/RCA/PM planning, and Smith explains reliability prediction and technician-ready preventive-maintenance steps.
 - Local LLM runtime: The recommended adapter-serving setup is llama.cpp with a Qwen2.5 GGUF base model and a GGUF LoRA adapter served through the OpenAI-compatible endpoint at `http://127.0.0.1:8080/v1`. LM Studio remains supported as an optional OpenAI-compatible runtime for base models or fused adapter models:
 
   ```env
@@ -49,7 +49,7 @@ The AI layer is an audited maintenance copilot layered after deterministic backe
 | Auth | Local SQLite users, bcrypt password hashes, JWT bearer tokens, FastAPI role guards, React session storage |
 | AI provider adapters | Mock deterministic provider, OpenAI-compatible chat completions, Ollama-compatible chat completions |
 | Local LLM runtime | llama.cpp OpenAI-compatible server for base GGUF + LoRA adapter serving; LM Studio remains optional for base or fused-model serving |
-| Assistants | Neo for dashboard command-center workflows, Trinity for technician/supervisor work execution, Morpheus for diagnosis/RCA/PM planning, Smith for reliability prediction and technician-ready planning |
+| Assistants | Neo for dashboard command-center workflows, Trinity for technician/supervisor work-order execution, Morpheus for diagnosis/RCA/PM planning, Smith for reliability prediction and technician-ready planning |
 | RAG/vector search | Qdrant for production-like document and approved-learning retrieval, deterministic hashed embeddings, SQLite/local-vector fallback |
 | Streaming and async jobs | NATS JetStream for IoT ingestion and learning jobs, durable consumers, explicit acknowledgments, DLQ handling |
 | Learning and tuning | LLM-as-a-Judge scoring, reviewer approval gates, JSONL dataset snapshots, PEFT/LoRA and QLoRA worker hooks, artifact registry |
@@ -225,7 +225,7 @@ scripts/run-local-stack.sh status
 scripts/run-local-stack.sh stop
 ```
 
-The script requires Docker for the temporary `nats:2` and `qdrant/qdrant` containers, an installed backend venv, and installed frontend `node_modules`. It writes backend, IoT simulator, worker, and frontend logs under `.local-stack/`.
+The script requires Docker for the temporary `nats:2` and `qdrant/qdrant` containers, an installed backend venv, and installed frontend `node_modules`. It writes backend, IoT simulator, worker, and frontend logs under `.local-stack/`. The script intentionally starts the backend with `STREAMING_ENABLED=true` and `LEARNING_ASYNC_ENABLED=true`, even though `.env.example` keeps streaming disabled by default for separate backend-only runs.
 
 The local stack starts `scripts/publish-dummy-iot-readings.py` automatically after backend streaming ingestion reports connected. Set `IOT_SIMULATOR_ENABLED=false` for quiet runs, or tune `IOT_SIMULATOR_INTERVAL_SECONDS`, `IOT_SIMULATOR_ANOMALY_EVERY_SECONDS`, `IOT_SIMULATOR_SCENARIO`, and `IOT_SIMULATOR_ASSETS`.
 
@@ -266,6 +266,8 @@ Copy `.env.example` to `.env` when configuring real providers.
 cp .env.example .env
 ```
 
+Review local runtime paths after copying. The example llama.cpp settings include placeholder or maintainer-machine paths for GGUF base models and adapter artifacts; update `LLAMA_CPP_BASE_MODEL_PATH`, `LLAMA_CPP_HF_REPO`, `LLAMA_CPP_HF_FILE`, `MW_ADAPTER_ARTIFACT_URI`, and related adapter settings for your workstation before starting a live adapter runtime.
+
 Supported LLM provider values:
 
 - `mock`: deterministic local fallback for development.
@@ -296,7 +298,7 @@ Set `LEARNING_ARTIFACT_RETENTION_DAYS` above `0` to report expired local learnin
 
 Production RAG uses Qdrant as the vector database. Set `RAG_VECTOR_STORE=qdrant`, `RAG_QDRANT_URL=http://localhost:6333`, and `RAG_QDRANT_COLLECTION=maintenance_wizard_documents`. `RAG_EMBEDDING_PROVIDER`, `RAG_EMBEDDING_MODEL`, `RAG_EMBEDDING_VERSION`, `RAG_EMBEDDING_DIMENSIONS`, and `RAG_EMBEDDING_DISTANCE` describe the embedding profile attached to indexed chunks and surfaced in Learning Review. Uploaded and seeded document chunks are indexed into Qdrant when it is available. Approved, judge-qualified learning examples are synchronized into Qdrant as separate RAG entries during learning refresh, approval changes, rejudge, and reviewer reindex flows. Operational plant records such as equipment, alerts, sensor readings, spares, work orders, logs, RCA cases, PM plans, documents, learning records, users, audit events, and shared role-notification events are also indexed as plant-record entries for assistant grounding. Retrieval queries Qdrant for plant documents, approved learning examples, and plant records, then falls back to SQLite-local vectors only when the vector DB is unavailable or explicitly disabled for tests. Learning Review includes a reviewer-only RAG reindex action for rebuilding chunks and repopulating the configured collection after an embedding profile or collection migration.
 
-The current SQLite schema version is `22`. Lightweight startup migrations add `feedback.equipment_id`, create asset detail tables, `document_intelligence`, `maintenance_labels`, `streaming_messages`, per-user alert view state, shared notification events, per-user notification view state, local auth tables, work orders, work-order planning/dispatch metadata, work-order spare reservations with reorder/procurement/substitute/blocker fields, work-order logs, RCA cases, PM templates and PM plans, learning interactions, assistant sessions and persisted assistant message history, judged examples, dataset snapshots, model versions, prompt versions, evaluation runs, learning jobs, learning artifacts, model promotion audit records, adapter runtime deployment records, and RAG embedding profile metadata for older local databases.
+The current SQLite schema version is `23`. Lightweight startup migrations add `feedback.equipment_id`, create asset detail tables, `document_intelligence`, `maintenance_labels`, `streaming_messages`, per-user alert view state, shared notification events, per-user notification view state, local auth tables, work orders, work-order planning/dispatch metadata, work-order spare reservations with reorder/procurement/substitute/blocker fields, work-order logs, RCA cases, PM templates and PM plans, learning interactions, assistant sessions and persisted assistant message history, judged examples, dataset snapshots, model versions, prompt versions, evaluation runs, learning jobs, learning artifacts, model promotion audit records, adapter runtime deployment records, and RAG embedding profile metadata for older local databases.
 
 The current production-aligned learning scope is intentionally constrained to what can run on the local Mac stack: SQLite, Qdrant, NATS, filesystem/S3-compatible artifact registration, local PEFT trainer hooks, llama.cpp adapter serving, and OpenAI-compatible or Ollama-style LLM serving. Future production phases track Postgres migration, bucket-native object-store lifecycle/access hardening, and hardened environment-specific adapter-loader automation for llama.cpp, LM Studio, Ollama, or another serving runtime.
 
@@ -310,8 +312,8 @@ Demo users are loaded from `assets/sample_data/users_seed.sql` when `AUTH_SEED_D
 | --- | --- |
 | `admin@plant.local` | Full access and user management |
 | `maintenance@plant.local` | Diagnosis, reports, predictions, feedback |
-| `technician@plant.local` | Work-order execution and Neo technician AI assistant |
-| `supervisor@plant.local` | Work-order review and Neo supervisor AI assistant |
+| `technician@plant.local` | Work-order execution and Trinity technician AI assistant |
+| `supervisor@plant.local` | Work-order review and Trinity supervisor AI assistant |
 | `reliability@plant.local` | Diagnosis, reports, feedback, ingestion, streaming status |
 | `planner@plant.local` | Dashboard, predictions, recommendations, reports, maintenance scheduling and dispatch |
 | `operator@plant.local` | Read-only dashboard, alerts, health, anomalies |

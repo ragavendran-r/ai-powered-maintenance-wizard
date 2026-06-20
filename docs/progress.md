@@ -24,6 +24,8 @@ Implement and maintain a working AI-powered Maintenance Wizard prototype using F
 
 ## Latest Session Update
 
+- Fixed README review findings on `docs/readme-review-fixes`: clarified that Neo is the dashboard command-center assistant and Trinity is the technician/supervisor work-order assistant, updated the documented SQLite schema version to 23, added a warning to replace local llama.cpp/model artifact paths after copying `.env.example`, and documented that `scripts/run-local-stack.sh` intentionally overrides streaming and async learning to enabled for full-stack runs.
+
 - Continued the Pydantic AI assistant-runtime migration locally: corrected the backend dependency pin to installable `pydantic-ai-slim[openai]==0.8.1`, installed and import-verified it in the backend virtualenv, and fed persisted `assistant_messages` history into Trinity technician and supervisor stream prompts so Work Execution follow-up turns use server-side session continuity. Verification passed with backend compile and focused Pydantic runtime plus Trinity continuity regressions (`5 passed`), plus focused Trinity stream coverage (`6 passed`).
 
 - Continued the Pydantic AI assistant-runtime migration locally: removed the unused generic Neo asset/work-order/user table resolver functions, routed Neo's compatibility assignment/status/material-readiness action handlers through the shared guarded assistant action tools, and deleted duplicate Neo-only status/material helper code now owned by `assistant_tools.py`. Verification passed with backend compile and focused Neo table-leak/action-tool regressions (`7 passed`).
