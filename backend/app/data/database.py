@@ -659,7 +659,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "22"
+SCHEMA_VERSION = "23"
 _INITIALIZING = False
 
 
@@ -721,6 +721,7 @@ def initialize_database(seed: bool = True) -> None:
             _ensure_column(connection, "rca_cases", "morpheus_fishbone_text", "TEXT")
             _ensure_column(connection, "pm_plans", "smith_steps", "TEXT NOT NULL DEFAULT '[]'")
             _ensure_column(connection, "pm_plans", "converted_work_order_id", "TEXT")
+            _backfill_technician_alert_notification_recipients(connection)
             connection.execute(
                 """
                 UPDATE document_chunks
@@ -1339,6 +1340,31 @@ def _ensure_column(connection: sqlite3.Connection, table: str, column: str, defi
     existing = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in existing:
         connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _backfill_technician_alert_notification_recipients(connection: sqlite3.Connection) -> None:
+    rows = connection.execute(
+        """
+        SELECT id, recipient_roles
+        FROM notification_events
+        WHERE event_type = 'anomaly_alert_registered'
+            AND instr(recipient_roles, '"maintenance_technician"') = 0
+        """
+    ).fetchall()
+    for row in rows:
+        try:
+            roles = json.loads(row["recipient_roles"] or "[]")
+        except (TypeError, ValueError):
+            roles = []
+        if not isinstance(roles, list):
+            roles = []
+        normalized_roles = [str(role).strip() for role in roles if str(role).strip()]
+        if "maintenance_technician" not in normalized_roles:
+            normalized_roles.append("maintenance_technician")
+        connection.execute(
+            "UPDATE notification_events SET recipient_roles = ? WHERE id = ?",
+            (json.dumps(normalized_roles, separators=(",", ":")), row["id"]),
+        )
 
 
 def _execute_seed_sql(connection: sqlite3.Connection, filename: str) -> None:

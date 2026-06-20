@@ -634,6 +634,25 @@ class NotificationSeenRequest(BaseModel):
     dismissed: bool = False
 
 
+class NotificationCleanupRequest(BaseModel):
+    dry_run: bool = True
+    dismissed_retention_days: int = Field(default=7, ge=0, le=365)
+    delete_superseded_assignments: bool = True
+    delete_dismissed_direct_notifications: bool = True
+
+
+class NotificationCleanupResult(BaseModel):
+    dry_run: bool
+    dismissed_retention_days: int
+    delete_superseded_assignments: bool
+    delete_dismissed_direct_notifications: bool
+    candidate_count: int
+    deleted_count: int
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
+    deleted_ids: list[str] = Field(default_factory=list)
+    vector_index_result: Optional[dict[str, Any]] = None
+
+
 class MonitoringSensorPoint(BaseModel):
     id: str
     timestamp: str

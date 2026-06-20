@@ -26,6 +26,7 @@ QDRANT_PORT="${QDRANT_PORT:-6333}"
 QDRANT_URL="${QDRANT_URL:-http://${QDRANT_HOST}:${QDRANT_PORT}}"
 BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
+BACKEND_RELOAD="${BACKEND_RELOAD:-false}"
 FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 IOT_SIMULATOR_ENABLED="${IOT_SIMULATOR_ENABLED:-true}"
@@ -61,7 +62,7 @@ Commands:
 Environment overrides:
   NATS_CONTAINER, NATS_IMAGE, NATS_HOST, NATS_PORT, NATS_MONITOR_PORT
   QDRANT_CONTAINER, QDRANT_IMAGE, QDRANT_HOST, QDRANT_PORT
-  BACKEND_HOST, BACKEND_PORT, FRONTEND_HOST, FRONTEND_PORT
+  BACKEND_HOST, BACKEND_PORT, BACKEND_RELOAD, FRONTEND_HOST, FRONTEND_PORT
   IOT_SIMULATOR_ENABLED, IOT_SIMULATOR_INTERVAL_SECONDS
   IOT_SIMULATOR_ANOMALY_EVERY_SECONDS, IOT_SIMULATOR_SCENARIO, IOT_SIMULATOR_ASSETS
 
@@ -238,6 +239,11 @@ start_backend() {
     echo "Backend already responding: http://${BACKEND_HOST}:${BACKEND_PORT}"
     return 0
   fi
+  if pid_running "$BACKEND_PID_FILE"; then
+    echo "Stopping stale backend process $(cat "$BACKEND_PID_FILE") before restart"
+    stop_process_tree "$(cat "$BACKEND_PID_FILE")" "backend"
+    rm -f "$BACKEND_PID_FILE"
+  fi
   if [[ ! -x "${BACKEND_DIR}/.venv/bin/uvicorn" ]]; then
     echo "Backend venv is missing. Run: cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt" >&2
     exit 1
@@ -246,12 +252,16 @@ start_backend() {
   (
     cd "$BACKEND_DIR"
     load_root_env
+    uvicorn_args=(app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT")
+    if [[ "$BACKEND_RELOAD" == "true" ]]; then
+      uvicorn_args+=(--reload)
+    fi
     env STREAMING_ENABLED=true \
       LEARNING_ASYNC_ENABLED=true \
       NATS_URL="$NATS_URL" \
       RAG_VECTOR_STORE=qdrant \
       RAG_QDRANT_URL="$QDRANT_URL" \
-      .venv/bin/uvicorn app.main:app --reload --host "$BACKEND_HOST" --port "$BACKEND_PORT"
+      .venv/bin/uvicorn "${uvicorn_args[@]}"
   ) >"$BACKEND_LOG" 2>&1 &
   echo "$!" >"$BACKEND_PID_FILE"
   STARTED_BACKEND=1

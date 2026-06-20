@@ -129,7 +129,7 @@ class IoTMonitoringScheduler:
     async def _run_anomaly_scans(self) -> None:
         while True:
             try:
-                self._last_anomaly_scan = run_anomaly_alert_scan()
+                self._last_anomaly_scan = await asyncio.to_thread(run_anomaly_alert_scan)
                 self._last_error = None
             except Exception as exc:
                 self._last_error = str(exc)
@@ -139,7 +139,7 @@ class IoTMonitoringScheduler:
         while True:
             await asyncio.sleep(self.settings.iot_sensor_reading_purge_interval_seconds)
             try:
-                self._last_purge = purge_iot_sensor_readings("scheduled")
+                self._last_purge = await asyncio.to_thread(purge_iot_sensor_readings, "scheduled")
                 self._last_error = None
             except Exception as exc:
                 self._last_error = str(exc)

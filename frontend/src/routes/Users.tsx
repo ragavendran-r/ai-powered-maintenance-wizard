@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { KeyRound, UserPlus, Users } from 'lucide-react'
-import type { AuthUser, UserRole } from '../services/api'
+import { Bell, KeyRound, Trash2, UserPlus, Users } from 'lucide-react'
+import type { AuthUser, NotificationCleanupResult, UserRole } from '../services/api'
 import { roleLabels, roleOptions } from '../appModel'
 
 export function UsersRoute({
@@ -10,10 +10,16 @@ export function UsersRoute({
   newUserName,
   newUserPassword,
   newUserRole,
+  notificationCleanupLoading,
+  notificationCleanupResult,
+  notificationCleanupRetentionDays,
   openResetPassword,
+  previewNotificationCleanup,
   resetPassword,
   resetPasswordValue,
   resetUser,
+  runNotificationCleanup,
+  setNotificationCleanupRetentionDays,
   setNewUserEmail,
   setNewUserName,
   setNewUserPassword,
@@ -28,10 +34,16 @@ export function UsersRoute({
   newUserName: string
   newUserPassword: string
   newUserRole: UserRole
+  notificationCleanupLoading: boolean
+  notificationCleanupResult: NotificationCleanupResult | null
+  notificationCleanupRetentionDays: number
   openResetPassword: (user: AuthUser) => void
+  previewNotificationCleanup: () => void
   resetPassword: () => void
   resetPasswordValue: string
   resetUser: AuthUser | null
+  runNotificationCleanup: () => void
+  setNotificationCleanupRetentionDays: (value: number) => void
   setNewUserEmail: (value: string) => void
   setNewUserName: (value: string) => void
   setNewUserPassword: (value: string) => void
@@ -88,6 +100,61 @@ export function UsersRoute({
           </div>
         ))}
       </div>
+      <section className="adminMaintenancePanel" aria-label="Notification cleanup">
+        <div className="sectionHeader compactHeader">
+          <span className="sectionTitleGroup">
+            <Bell size={18} />
+            <h3>Notification cleanup</h3>
+          </span>
+        </div>
+        <div className="notificationCleanupGrid">
+          <label className="field">
+            <span>Dismissed retention days</span>
+            <input
+              min={0}
+              max={365}
+              type="number"
+              value={notificationCleanupRetentionDays}
+              onChange={(event) => setNotificationCleanupRetentionDays(Number(event.target.value))}
+            />
+          </label>
+          <div className="cleanupActionRow">
+            <button
+              className="outlineButton"
+              disabled={notificationCleanupLoading}
+              onClick={previewNotificationCleanup}
+              type="button"
+            >
+              Preview
+            </button>
+            <button
+              className="iconTextButton dangerButton"
+              disabled={notificationCleanupLoading || !notificationCleanupResult?.candidate_count}
+              onClick={runNotificationCleanup}
+              type="button"
+            >
+              <Trash2 size={16} />
+              Delete candidates
+            </button>
+          </div>
+        </div>
+        {notificationCleanupResult && (
+          <div className="cleanupResultPanel">
+            <span>
+              <strong>{notificationCleanupResult.candidate_count}</strong>
+              <small>candidates</small>
+            </span>
+            <span>
+              <strong>{notificationCleanupResult.deleted_count}</strong>
+              <small>deleted</small>
+            </span>
+            <span>
+              <strong>{notificationCleanupResult.dry_run ? 'Preview' : 'Applied'}</strong>
+              <small>mode</small>
+            </span>
+          </div>
+        )}
+      </section>
       {isCreateUserOpen && (
         <div className="modalOverlay" role="presentation">
           <section className="modalPanel" role="dialog" aria-modal="true" aria-labelledby="create-user-title">

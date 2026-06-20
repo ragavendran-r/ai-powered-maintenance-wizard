@@ -31,10 +31,16 @@ function renderMockedUsers(overrides: Record<string, unknown> = {}) {
     newUserName: '',
     newUserPassword: '',
     newUserRole: 'operator',
+    notificationCleanupLoading: false,
+    notificationCleanupResult: null,
+    notificationCleanupRetentionDays: 7,
     openResetPassword: vi.fn(),
+    previewNotificationCleanup: vi.fn(),
     resetPassword: vi.fn(),
     resetPasswordValue: '',
     resetUser: null,
+    runNotificationCleanup: vi.fn(),
+    setNotificationCleanupRetentionDays: vi.fn(),
     setNewUserEmail: vi.fn(),
     setNewUserName: vi.fn(),
     setNewUserPassword: vi.fn(),
@@ -104,4 +110,30 @@ it('routes password reset dialog input and cancel actions', () => {
 
   fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
   expect(props.closeResetPassword).toHaveBeenCalled()
+})
+
+it('routes notification cleanup preview and delete actions', () => {
+  const props = renderMockedUsers({
+    notificationCleanupResult: {
+      dry_run: true,
+      dismissed_retention_days: 7,
+      delete_superseded_assignments: true,
+      delete_dismissed_direct_notifications: true,
+      candidate_count: 2,
+      deleted_count: 0,
+      candidates: [],
+      deleted_ids: [],
+      vector_index_result: null,
+    },
+  })
+
+  fireEvent.change(screen.getByLabelText('Dismissed retention days'), { target: { value: '14' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Delete candidates' }))
+
+  expect(props.setNotificationCleanupRetentionDays).toHaveBeenCalledWith(14)
+  expect(props.previewNotificationCleanup).toHaveBeenCalled()
+  expect(props.runNotificationCleanup).toHaveBeenCalled()
+  expect(screen.getByText('2')).toBeInTheDocument()
+  expect(screen.getByText('candidates')).toBeInTheDocument()
 })

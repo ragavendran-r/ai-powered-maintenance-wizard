@@ -19,7 +19,7 @@ os.environ["RAG_VECTOR_STORE"] = "sqlite"
 
 from app.core.config import get_settings
 from app.data import repository
-from app.data.database import database_status, reset_database
+from app.data.database import connect, database_status, reset_database
 from app.main import app
 from app.services.iot_streaming import (
     InvalidIoTMessage,
@@ -27,7 +27,9 @@ from app.services.iot_streaming import (
     build_dead_letter_payload,
     process_iot_message,
 )
+import app.services.notifications as notifications_module
 from app.services.iot_monitoring import purge_iot_sensor_readings, run_anomaly_alert_scan
+from app.services.notifications import notify_alerts_registered
 from app.services.llm import LLMTextResponse
 from app.services.retrieval import retrieve_evidence
 from app.services.document_intelligence import document_intelligence
@@ -156,7 +158,7 @@ def test_health_check():
 def test_database_status_reports_seeded_tables():
     status = database_status()
     assert Path(status["database_path"]) == TEST_DATABASE_PATH
-    assert status["schema_version"] == "22"
+    assert status["schema_version"] == "23"
     assert status["counts"]["equipment"] == 5
     assert status["counts"]["asset_profiles"] == 5
     assert status["counts"]["asset_metric_snapshots"] == 15
@@ -776,6 +778,343 @@ def test_role_notifications_are_created_for_assigned_work_order_and_seen_per_use
     unseen_after_seen = client.get("/api/notifications/unseen", headers=technician_headers)
     assert unseen_after_seen.status_code == 200
     assert all(item["id"] != assigned_notification["id"] for item in unseen_after_seen.json())
+
+    feed_after_dismiss = client.get("/api/notifications", headers=technician_headers)
+    assert feed_after_dismiss.status_code == 200
+    assert all(item["id"] != assigned_notification["id"] for item in feed_after_dismiss.json())
+
+    history_after_dismiss = client.get("/api/notifications?include_dismissed=true", headers=technician_headers)
+    assert history_after_dismiss.status_code == 200
+    assert any(item["id"] == assigned_notification["id"] for item in history_after_dismiss.json())
+
+
+def test_supervisor_reassigning_seeded_work_order_notifies_vinoth():
+    supervisor_headers = auth_headers("supervisor@plant.local")
+    technician_headers = auth_headers("technician@plant.local")
+
+    update_response = client.patch(
+        "/api/work-orders/WO-8311",
+        json={"assigned_to": "Vinoth"},
+        headers=supervisor_headers,
+    )
+    assert update_response.status_code == 200, update_response.text
+    assert update_response.json()["assigned_to"] == "Vinoth"
+
+    unseen_response = client.get("/api/notifications/unseen", headers=technician_headers)
+    assert unseen_response.status_code == 200
+    assigned_notification = next(
+        item
+        for item in unseen_response.json()
+        if item["work_order_id"] == "WO-8311" and item["event_type"] == "work_order_assigned"
+    )
+    assert assigned_notification["recipient_user_ids"] == ["USER-TECHNICIAN"]
+    assert assigned_notification["actor_display_name"] == "Dhruv"
+
+
+def test_technician_notification_feed_includes_anomalies_and_reassignments():
+    supervisor_headers = auth_headers("supervisor@plant.local")
+    technician_headers = auth_headers("technician@plant.local")
+    alert_id = f"ALT-TECH-VISIBLE-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+
+    notify_alerts_registered(
+        [
+            {
+                "id": alert_id,
+                "equipment_id": "BF-BLOWER-02",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "signal": "outlet_pressure_variance",
+                "value": 18.4,
+                "unit": "kPa",
+                "threshold": 12.0,
+                "severity": "high",
+                "message": "IoT anomaly detected: outlet pressure variance exceeded the rolling threshold.",
+            }
+        ]
+    )
+    update_response = client.patch(
+        "/api/work-orders/WO-8311",
+        json={"assigned_to": "Vinoth"},
+        headers=supervisor_headers,
+    )
+    assert update_response.status_code == 200, update_response.text
+
+    notifications_response = client.get("/api/notifications", headers=technician_headers)
+    assert notifications_response.status_code == 200
+    notifications = notifications_response.json()
+
+    assert any(
+        item["event_type"] == "anomaly_alert_registered"
+        and item["alert_id"] == alert_id
+        and "maintenance_technician" in item["recipient_roles"]
+        for item in notifications
+    )
+    assert any(
+        item["event_type"] == "work_order_assigned"
+        and item["work_order_id"] == "WO-8311"
+        and item["recipient_user_ids"] == ["USER-TECHNICIAN"]
+        for item in notifications
+    )
+
+    first_notification_response = client.get("/api/notifications?limit=1", headers=technician_headers)
+    assert first_notification_response.status_code == 200
+    assert first_notification_response.json()[0]["event_type"] == "work_order_assigned"
+    assert first_notification_response.json()[0]["work_order_id"] == "WO-8311"
+
+
+def test_anomaly_alert_notifications_use_fallback_without_live_llm(monkeypatch):
+    def fail_if_called():
+        raise AssertionError("Anomaly alert notifications must not call the live LLM")
+
+    monkeypatch.setattr(notifications_module, "configured_llm_client", fail_if_called)
+    alert_id = f"ALT-NO-LIVE-LLM-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+
+    events = notify_alerts_registered(
+        [
+            {
+                "id": alert_id,
+                "equipment_id": "BF-BLOWER-02",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "signal": "outlet_pressure_variance",
+                "value": 18.4,
+                "unit": "kPa",
+                "threshold": 12.0,
+                "severity": "high",
+                "message": "IoT anomaly detected: outlet pressure variance exceeded the rolling threshold.",
+            }
+        ]
+    )
+
+    assert len(events) == 1
+    assert events[0]["alert_id"] == alert_id
+    assert events[0]["recommended_action"] == (
+        "Review the live sensor trend, confirm whether production load should be reduced, and assign an owner."
+    )
+    assert events[0]["llm_provider"] == "deterministic"
+    assert events[0]["llm_used_live_provider"] is False
+
+
+def test_duplicate_work_order_assignment_notifications_collapse_to_latest():
+    older = repository.create_notification_event(
+        {
+            "event_key": "test_duplicate_assignment:older",
+            "event_type": "work_order_assigned",
+            "severity": "high",
+            "title": "Work order assigned: WO-8311",
+            "summary": "Verify inlet guide vane actuator response is now assigned to you.",
+            "recommended_action": "Older assignment action.",
+            "source_type": "work_order",
+            "source_id": "WO-8311",
+            "equipment_id": "BF-BLOWER-02",
+            "work_order_id": "WO-8311",
+            "recipient_roles": [],
+            "recipient_user_ids": ["USER-TECHNICIAN"],
+            "metadata": {},
+        }
+    )
+    latest = repository.create_notification_event(
+        {
+            "event_key": "test_duplicate_assignment:latest",
+            "event_type": "work_order_assigned",
+            "severity": "high",
+            "title": "Work order assigned: WO-8311",
+            "summary": "Verify inlet guide vane actuator response is now assigned to you.",
+            "recommended_action": "Latest assignment action.",
+            "source_type": "work_order",
+            "source_id": "WO-8311",
+            "equipment_id": "BF-BLOWER-02",
+            "work_order_id": "WO-8311",
+            "recipient_roles": [],
+            "recipient_user_ids": ["USER-TECHNICIAN"],
+            "metadata": {},
+        }
+    )
+    with connect() as connection:
+        connection.execute("UPDATE notification_events SET created_at = ? WHERE id = ?", ("2026-06-20 01:00:00", older["id"]))
+        connection.execute("UPDATE notification_events SET created_at = ? WHERE id = ?", ("2026-06-20 02:00:00", latest["id"]))
+
+    response = client.get("/api/notifications?event_type=work_order_assigned", headers=auth_headers("technician@plant.local"))
+    assert response.status_code == 200
+    assignment_rows = [item for item in response.json() if item["work_order_id"] == "WO-8311"]
+    assert [item["id"] for item in assignment_rows] == [latest["id"]]
+    assert assignment_rows[0]["recommended_action"] == "Latest assignment action."
+
+    unseen_response = client.get("/api/notifications/unseen", headers=auth_headers("technician@plant.local"))
+    assert unseen_response.status_code == 200
+    unseen_assignment_rows = [
+        item
+        for item in unseen_response.json()
+        if item["event_type"] == "work_order_assigned" and item["work_order_id"] == "WO-8311"
+    ]
+    assert [item["id"] for item in unseen_assignment_rows] == [latest["id"]]
+
+
+def test_notification_cleanup_prunes_superseded_and_dismissed_direct_rows(monkeypatch):
+    deleted_vector_ids: list[str] = []
+
+    def fake_delete_plant_records(source_ids, *, collection_name=None):
+        deleted_vector_ids.extend(source_ids)
+        return {"deleted_count": len(source_ids), "collection": collection_name or "plant_records"}
+
+    monkeypatch.setattr(repository, "delete_plant_records_index", fake_delete_plant_records)
+    technician_headers = auth_headers("technician@plant.local")
+    older = repository.create_notification_event(
+        {
+            "event_key": "test_cleanup_assignment:older",
+            "event_type": "work_order_assigned",
+            "severity": "high",
+            "title": "Work order assigned: WO-8311",
+            "summary": "Older assignment.",
+            "recommended_action": "Older assignment action.",
+            "source_type": "work_order",
+            "source_id": "WO-8311",
+            "equipment_id": "BF-BLOWER-02",
+            "work_order_id": "WO-8311",
+            "recipient_roles": [],
+            "recipient_user_ids": ["USER-TECHNICIAN"],
+            "metadata": {},
+        }
+    )
+    latest = repository.create_notification_event(
+        {
+            "event_key": "test_cleanup_assignment:latest",
+            "event_type": "work_order_assigned",
+            "severity": "high",
+            "title": "Work order assigned: WO-8311",
+            "summary": "Latest assignment.",
+            "recommended_action": "Latest assignment action.",
+            "source_type": "work_order",
+            "source_id": "WO-8311",
+            "equipment_id": "BF-BLOWER-02",
+            "work_order_id": "WO-8311",
+            "recipient_roles": [],
+            "recipient_user_ids": ["USER-TECHNICIAN"],
+            "metadata": {},
+        }
+    )
+    dismissed = repository.create_notification_event(
+        {
+            "event_key": "test_cleanup_dismissed_direct",
+            "event_type": "work_order_material_changed",
+            "severity": "medium",
+            "title": "Material state changed: WO-8311",
+            "summary": "Dismissed direct notification.",
+            "recommended_action": "Dismissed direct action.",
+            "source_type": "work_order",
+            "source_id": "WO-8311",
+            "equipment_id": "BF-BLOWER-02",
+            "work_order_id": "WO-8311",
+            "recipient_roles": [],
+            "recipient_user_ids": ["USER-TECHNICIAN"],
+            "metadata": {},
+        }
+    )
+    with connect() as connection:
+        connection.execute("UPDATE notification_events SET created_at = ? WHERE id = ?", ("2026-06-20 01:00:00", older["id"]))
+        connection.execute("UPDATE notification_events SET created_at = ? WHERE id = ?", ("2026-06-20 02:00:00", latest["id"]))
+    seen_response = client.post(
+        f"/api/notifications/{dismissed['id']}/seen",
+        json={"dismissed": True},
+        headers=technician_headers,
+    )
+    assert seen_response.status_code == 200
+    with connect() as connection:
+        connection.execute(
+            "UPDATE user_notification_views SET dismissed_at = ? WHERE notification_id = ?",
+            ("2026-06-01 00:00:00", dismissed["id"]),
+        )
+
+    dry_run = client.post(
+        "/api/notifications/cleanup",
+        json={"dry_run": True, "dismissed_retention_days": 7},
+        headers=auth_headers("admin@plant.local"),
+    )
+    assert dry_run.status_code == 200
+    assert dry_run.json()["deleted_count"] == 0
+    candidate_ids = {item["id"] for item in dry_run.json()["candidates"]}
+    assert {older["id"], dismissed["id"]}.issubset(candidate_ids)
+    assert latest["id"] not in candidate_ids
+
+    forbidden = client.post(
+        "/api/notifications/cleanup",
+        json={"dry_run": True},
+        headers=auth_headers("planner@plant.local"),
+    )
+    assert forbidden.status_code == 403
+
+    cleanup = client.post(
+        "/api/notifications/cleanup",
+        json={"dry_run": False, "dismissed_retention_days": 7},
+        headers=auth_headers("admin@plant.local"),
+    )
+    assert cleanup.status_code == 200
+    assert cleanup.json()["deleted_count"] >= 2
+    assert f"notification_event:{older['id']}" in deleted_vector_ids
+    assert f"notification_event:{dismissed['id']}" in deleted_vector_ids
+
+    remaining_ids = {item["id"] for item in repository.list_all_notification_events()}
+    assert older["id"] not in remaining_ids
+    assert dismissed["id"] not in remaining_ids
+    assert latest["id"] in remaining_ids
+
+
+def test_notification_feed_targets_all_human_roles_and_direct_users():
+    role_users = [
+        ("admin@plant.local", "admin", "USER-ADMIN"),
+        ("supervisor@plant.local", "maintenance_supervisor", "USER-SUPERVISOR"),
+        ("maintenance@plant.local", "maintenance_engineer", "USER-MAINTENANCE"),
+        ("reliability@plant.local", "reliability_engineer", "USER-RELIABILITY"),
+        ("planner@plant.local", "planner", "USER-PLANNER"),
+        ("operator@plant.local", "operator", "USER-OPERATOR"),
+        ("technician@plant.local", "maintenance_technician", "USER-TECHNICIAN"),
+    ]
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+    shared_event = repository.create_notification_event(
+        {
+            "event_key": f"test_all_roles:{run_id}",
+            "event_type": "test_all_roles",
+            "severity": "medium",
+            "title": "All-role notification smoke test",
+            "summary": "Every human role should receive this notification.",
+            "recommended_action": "Open the notification feed and verify role visibility.",
+            "source_type": "test",
+            "source_id": run_id,
+            "recipient_roles": [role for _, role, _ in role_users],
+            "recipient_user_ids": [],
+            "metadata": {},
+        }
+    )
+    direct_events = {
+        email: repository.create_notification_event(
+            {
+                "event_key": f"test_direct_user:{user_id}:{run_id}",
+                "event_type": "test_direct_user",
+                "severity": "high",
+                "title": f"Direct notification for {role}",
+                "summary": "Direct user targets should outrank shared role notifications.",
+                "recommended_action": "Review this direct user-targeted notification first.",
+                "source_type": "test",
+                "source_id": f"{run_id}:{user_id}",
+                "recipient_roles": [],
+                "recipient_user_ids": [user_id],
+                "metadata": {},
+            }
+        )
+        for email, role, user_id in role_users
+    }
+
+    for email, role, _user_id in role_users:
+        response = client.get("/api/notifications", headers=auth_headers(email))
+        assert response.status_code == 200, email
+        notifications = response.json()
+        assert any(item["id"] == shared_event["id"] and role in item["recipient_roles"] for item in notifications), email
+        assert any(item["id"] == direct_events[email]["id"] for item in notifications), email
+
+        top_response = client.get("/api/notifications?limit=1", headers=auth_headers(email))
+        assert top_response.status_code == 200, email
+        assert top_response.json()[0]["id"] == direct_events[email]["id"], email
+
+    iot_response = client.get("/api/notifications", headers=auth_headers("iot-service@plant.local"))
+    assert iot_response.status_code == 403
 
 
 def test_admin_and_supervisor_can_list_assignment_technicians():

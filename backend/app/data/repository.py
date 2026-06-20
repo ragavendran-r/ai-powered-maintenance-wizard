@@ -1,5 +1,6 @@
 from typing import Any, Optional
 
+from datetime import datetime, timedelta, timezone
 import json
 import sqlite3
 from threading import Lock
@@ -235,6 +236,7 @@ def list_notifications_for_user(
     role: str,
     *,
     unseen_only: bool = False,
+    include_dismissed: bool = False,
     limit: int = 50,
     event_type: Optional[str] = None,
     severity: Optional[str] = None,
@@ -242,35 +244,70 @@ def list_notifications_for_user(
 ) -> list[dict[str, Any]]:
     rows = _fetch_all(
         """
-        SELECT n.*, v.first_seen_at AS seen_at, v.dismissed_at AS dismissed_at
-        FROM notification_events n
-        LEFT JOIN user_notification_views v
-            ON v.notification_id = n.id
-            AND v.user_id = ?
+        WITH targeted AS (
+            SELECT
+                n.*,
+                v.first_seen_at AS seen_at,
+                v.dismissed_at AS dismissed_at,
+                CASE WHEN instr(n.recipient_user_ids, ?) > 0 THEN 1 ELSE 0 END AS direct_target,
+                CASE
+                    WHEN n.event_type = 'work_order_assigned' AND n.work_order_id IS NOT NULL
+                    THEN n.event_type || ':' || n.work_order_id || ':' || n.recipient_user_ids
+                    ELSE n.id
+                END AS display_group_key
+            FROM notification_events n
+            LEFT JOIN user_notification_views v
+                ON v.notification_id = n.id
+                AND v.user_id = ?
+            WHERE
+                (instr(n.recipient_user_ids, ?) > 0 OR instr(n.recipient_roles, ?) > 0)
+                AND (? = 0 OR v.notification_id IS NULL)
+                AND (? = 1 OR v.dismissed_at IS NULL)
+                AND (? IS NULL OR n.event_type = ?)
+                AND (? IS NULL OR n.severity = ?)
+                AND (? IS NULL OR n.source_type = ?)
+        ),
+        ranked AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY display_group_key
+                    ORDER BY created_at DESC, id DESC
+                ) AS display_rank
+            FROM targeted
+        )
+        SELECT *
+        FROM ranked
+        WHERE display_rank = 1
         ORDER BY
-            CASE n.severity
+            direct_target DESC,
+            CASE severity
                 WHEN 'critical' THEN 5
                 WHEN 'high' THEN 4
                 WHEN 'medium' THEN 3
                 WHEN 'low' THEN 2
                 ELSE 1
             END DESC,
-            n.created_at DESC
+            created_at DESC
         LIMIT ?
         """,
-        (user_id, max(limit * 4, limit)),
+        (
+            f'"{user_id}"',
+            user_id,
+            f'"{user_id}"',
+            f'"{role}"',
+            1 if unseen_only else 0,
+            1 if include_dismissed else 0,
+            event_type,
+            event_type,
+            severity,
+            severity,
+            source_type,
+            source_type,
+            limit,
+        ),
     )
-    notifications = [_decode_notification_event(row) for row in rows]
-    filtered = [
-        notification
-        for notification in notifications
-        if _notification_targets_user(notification, user_id, role)
-        and (not unseen_only or not notification.get("seen_at"))
-        and (event_type is None or notification["event_type"] == event_type)
-        and (severity is None or notification["severity"] == severity)
-        and (source_type is None or notification["source_type"] == source_type)
-    ]
-    return filtered[:limit]
+    return [_decode_notification_event(row) for row in rows]
 
 
 def list_all_notification_events(equipment_id: Optional[str] = None) -> list[dict[str, Any]]:
@@ -282,6 +319,56 @@ def list_all_notification_events(equipment_id: Optional[str] = None) -> list[dic
     else:
         rows = _fetch_all("SELECT * FROM notification_events ORDER BY created_at DESC")
     return [_decode_notification_event(row) for row in rows]
+
+
+def cleanup_notification_events(
+    *,
+    dry_run: bool = True,
+    dismissed_retention_days: int = 7,
+    delete_superseded_assignments: bool = True,
+    delete_dismissed_direct_notifications: bool = True,
+) -> dict[str, Any]:
+    ensure_ready()
+    dismissed_cutoff = datetime.now(timezone.utc) - timedelta(days=dismissed_retention_days)
+    candidates_by_id: dict[str, dict[str, Any]] = {}
+
+    if delete_superseded_assignments:
+        for candidate in _superseded_assignment_notification_candidates():
+            candidates_by_id[candidate["id"]] = candidate
+
+    if delete_dismissed_direct_notifications:
+        for candidate in _dismissed_direct_notification_candidates(dismissed_cutoff):
+            candidates_by_id[candidate["id"]] = candidate
+
+    candidates = sorted(candidates_by_id.values(), key=lambda item: (item["reason"], item["created_at"], item["id"]))
+    deleted_ids: list[str] = []
+    vector_index_result: Optional[dict[str, Any]] = None
+    if not dry_run and candidates:
+        deleted_ids = [candidate["id"] for candidate in candidates]
+        with connect() as connection:
+            connection.executemany(
+                "DELETE FROM user_notification_views WHERE notification_id = ?",
+                [(notification_id,) for notification_id in deleted_ids],
+            )
+            connection.executemany(
+                "DELETE FROM notification_events WHERE id = ?",
+                [(notification_id,) for notification_id in deleted_ids],
+            )
+        vector_index_result = delete_plant_records_index(
+            [f"notification_event:{notification_id}" for notification_id in deleted_ids]
+        )
+
+    return {
+        "dry_run": dry_run,
+        "dismissed_retention_days": dismissed_retention_days,
+        "delete_superseded_assignments": delete_superseded_assignments,
+        "delete_dismissed_direct_notifications": delete_dismissed_direct_notifications,
+        "candidate_count": len(candidates),
+        "deleted_count": len(deleted_ids),
+        "candidates": candidates,
+        "deleted_ids": deleted_ids,
+        "vector_index_result": vector_index_result,
+    }
 
 
 def mark_notification_seen(user_id: str, notification_id: str, dismissed: bool = False) -> Optional[dict[str, Any]]:
@@ -3522,6 +3609,95 @@ def _decode_notification_event(row: dict[str, Any]) -> dict[str, Any]:
     event["seen_at"] = event.get("seen_at")
     event["dismissed_at"] = event.get("dismissed_at")
     return event
+
+
+def _superseded_assignment_notification_candidates() -> list[dict[str, Any]]:
+    rows = _fetch_all(
+        """
+        SELECT *
+        FROM notification_events
+        WHERE event_type = 'work_order_assigned'
+            AND work_order_id IS NOT NULL
+            AND recipient_user_ids <> '[]'
+        ORDER BY created_at DESC, id DESC
+        """
+    )
+    grouped: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = {}
+    for row in rows:
+        event = _decode_notification_event(row)
+        key = (str(event.get("work_order_id")), tuple(event.get("recipient_user_ids") or []))
+        grouped.setdefault(key, []).append(event)
+
+    candidates: list[dict[str, Any]] = []
+    for group in grouped.values():
+        if len(group) <= 1:
+            continue
+        for event in group[1:]:
+            candidates.append(_notification_cleanup_candidate(event, "superseded_assignment"))
+    return candidates
+
+
+def _dismissed_direct_notification_candidates(cutoff: datetime) -> list[dict[str, Any]]:
+    rows = _fetch_all(
+        """
+        SELECT *
+        FROM notification_events
+        WHERE recipient_roles = '[]'
+            AND recipient_user_ids <> '[]'
+        """
+    )
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        event = _decode_notification_event(row)
+        recipient_user_ids = event.get("recipient_user_ids") or []
+        if not recipient_user_ids:
+            continue
+        views = _fetch_all(
+            """
+            SELECT user_id, dismissed_at
+            FROM user_notification_views
+            WHERE notification_id = ?
+            """,
+            (event["id"],),
+        )
+        dismissed_by_user = {
+            view["user_id"]: _parse_sqlite_timestamp(view["dismissed_at"])
+            for view in views
+            if view.get("dismissed_at")
+        }
+        if all(
+            dismissed_by_user.get(user_id) and dismissed_by_user[user_id] <= cutoff
+            for user_id in recipient_user_ids
+        ):
+            candidates.append(_notification_cleanup_candidate(event, "dismissed_direct_notification"))
+    return candidates
+
+
+def _notification_cleanup_candidate(event: dict[str, Any], reason: str) -> dict[str, Any]:
+    return {
+        "id": event["id"],
+        "event_type": event["event_type"],
+        "reason": reason,
+        "title": event["title"],
+        "work_order_id": event.get("work_order_id"),
+        "alert_id": event.get("alert_id"),
+        "recipient_roles": event.get("recipient_roles") or [],
+        "recipient_user_ids": event.get("recipient_user_ids") or [],
+        "created_at": event["created_at"],
+    }
+
+
+def _parse_sqlite_timestamp(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    text = str(value).replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _notification_targets_user(notification: dict[str, Any], user_id: str, role: str) -> bool:
