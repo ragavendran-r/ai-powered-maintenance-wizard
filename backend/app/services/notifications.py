@@ -138,7 +138,6 @@ def notify_alerts_registered(alerts: list[dict[str, Any]]) -> list[dict[str, Any
                 fallback_action="Review the live sensor trend, confirm whether production load should be reduced, and assign an owner.",
                 alert=alert,
                 recipient_roles=ALERT_ROLES,
-                use_live_recommendation=False,
             )
         )
     return [event for event in events if event]
@@ -157,6 +156,37 @@ def notify_recommendation_generated(recommendation: Recommendation) -> Optional[
         recommendation=recommendation,
         recipient_roles=ENGINEERING_ROLES + PLANNER_ROLES,
     )
+
+
+def enqueue_notification_enrichment(notifications: list[dict[str, Any]]) -> None:
+    for notification in notifications:
+        if notification.get("llm_status") != "not_requested":
+            continue
+        enrich_notification(notification["id"])
+
+
+def enrich_notification(notification_id: str) -> Optional[dict[str, Any]]:
+    notification = repository.claim_notification_enrichment(notification_id)
+    if not notification:
+        return None
+    try:
+        text = _recommended_action_text(
+            audience=str(notification.get("metadata", {}).get("audience") or notification.get("event_type") or "notification"),
+            title=notification["title"],
+            summary=notification["summary"],
+            fallback_action=notification["recommended_action"],
+            work_order=repository.get_work_order(notification["work_order_id"]) if notification.get("work_order_id") else None,
+            alert=_alert_for_notification(notification),
+            recommendation=None,
+        )
+        return repository.complete_notification_enrichment(
+            notification_id,
+            recommended_action=text.content.strip() or notification["recommended_action"],
+            provider=text.provider,
+            used_live_provider=text.used_live_provider,
+        )
+    except Exception as exc:
+        return repository.fail_notification_enrichment(notification_id, str(exc))
 
 
 def _status_notifications(
@@ -349,7 +379,14 @@ def _material_notifications(
     ]
 
 
-def _emit_notification(
+def _emit_notification(**kwargs: Any) -> dict[str, Any]:
+    try:
+        return _emit_notification_unchecked(**kwargs)
+    except Exception:
+        return {}
+
+
+def _emit_notification_unchecked(
     *,
     event_key: str,
     event_type: str,
@@ -363,7 +400,6 @@ def _emit_notification(
     alert: Optional[dict[str, Any]] = None,
     recommendation: Optional[Recommendation] = None,
     actor: Optional[UserPublic] = None,
-    use_live_recommendation: bool = True,
 ) -> dict[str, Any]:
     recipient_roles = _unique(recipient_roles or [])
     recipient_user_ids = _unique(recipient_user_ids or [])
@@ -371,18 +407,6 @@ def _emit_notification(
         return {}
     equipment_id = _equipment_id(work_order, alert, recommendation)
     source_type, source_id = _source(work_order, alert, recommendation)
-    if use_live_recommendation:
-        text = _recommended_action_text(
-            audience=audience,
-            title=title,
-            summary=summary,
-            fallback_action=fallback_action,
-            work_order=work_order,
-            alert=alert,
-            recommendation=recommendation,
-        )
-    else:
-        text = LLMTextResponse(content=fallback_action, used_live_provider=False, provider="deterministic")
     return repository.create_notification_event(
         {
             "event_key": event_key,
@@ -390,7 +414,7 @@ def _emit_notification(
             "severity": _severity(work_order, alert, recommendation),
             "title": title,
             "summary": summary,
-            "recommended_action": text.content.strip() or fallback_action,
+            "recommended_action": fallback_action,
             "source_type": source_type,
             "source_id": source_id,
             "equipment_id": equipment_id,
@@ -406,8 +430,9 @@ def _emit_notification(
                 "status": work_order.get("status") if work_order else None,
                 "planning_status": work_order.get("planning_status") if work_order else None,
             },
-            "llm_provider": text.provider,
-            "llm_used_live_provider": text.used_live_provider,
+            "llm_provider": "deterministic",
+            "llm_used_live_provider": False,
+            "llm_status": "not_requested",
         }
     )
 
@@ -450,6 +475,14 @@ def _active_user_for_display_name(display_name: Optional[str]) -> Optional[dict[
         if user.get("is_active") and str(user.get("display_name") or "").casefold() == normalized:
             return user
     return None
+
+
+def _alert_for_notification(notification: dict[str, Any]) -> Optional[dict[str, Any]]:
+    alert_id = notification.get("alert_id")
+    equipment_id = notification.get("equipment_id")
+    if not alert_id or not equipment_id:
+        return None
+    return next((alert for alert in repository.list_alerts(equipment_id) if alert["id"] == alert_id), None)
 
 
 def _schedule_changed(before: dict[str, Any], after: dict[str, Any]) -> bool:

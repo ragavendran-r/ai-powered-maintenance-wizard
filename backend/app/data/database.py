@@ -430,6 +430,10 @@ SCHEMA_STATEMENTS = [
         metadata TEXT NOT NULL DEFAULT '{}',
         llm_provider TEXT NOT NULL DEFAULT 'mock',
         llm_used_live_provider INTEGER NOT NULL DEFAULT 0,
+        llm_status TEXT NOT NULL DEFAULT 'not_requested',
+        llm_error TEXT,
+        llm_requested_at TEXT,
+        llm_completed_at TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
@@ -659,7 +663,7 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
-SCHEMA_VERSION = "23"
+SCHEMA_VERSION = "24"
 _INITIALIZING = False
 
 
@@ -721,6 +725,10 @@ def initialize_database(seed: bool = True) -> None:
             _ensure_column(connection, "rca_cases", "morpheus_fishbone_text", "TEXT")
             _ensure_column(connection, "pm_plans", "smith_steps", "TEXT NOT NULL DEFAULT '[]'")
             _ensure_column(connection, "pm_plans", "converted_work_order_id", "TEXT")
+            _ensure_column(connection, "notification_events", "llm_status", "TEXT NOT NULL DEFAULT 'not_requested'")
+            _ensure_column(connection, "notification_events", "llm_error", "TEXT")
+            _ensure_column(connection, "notification_events", "llm_requested_at", "TEXT")
+            _ensure_column(connection, "notification_events", "llm_completed_at", "TEXT")
             _backfill_technician_alert_notification_recipients(connection)
             connection.execute(
                 """

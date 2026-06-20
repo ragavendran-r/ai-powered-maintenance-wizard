@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Optional
 
-from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile, status
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -152,7 +152,7 @@ from app.services.pm_plans import list_plans as list_pm_plan_records
 from app.services.pm_plans import list_templates as list_pm_template_records
 from app.services.pm_plans import stream_draft_plan as stream_pm_plan_draft
 from app.services.recommendations import generate_recommendation, stream_recommendation
-from app.services.notifications import notify_work_order_changed, notify_work_order_created
+from app.services.notifications import enqueue_notification_enrichment, notify_work_order_changed, notify_work_order_created
 from app.services.rca import create_case as create_rca_case_record
 from app.services.rca import draft_case as draft_rca_case_record
 from app.services.rca import get_case as get_rca_case_record
@@ -452,6 +452,7 @@ def mark_alert_seen(alert_id: str, request: AlertSeenRequest, current_user: User
 
 @app.get("/api/notifications", response_model=list[NotificationEvent], dependencies=[Depends(require_roles(*READ_ROLES))])
 def get_notifications(
+    background_tasks: BackgroundTasks,
     event_type: Optional[str] = None,
     severity: Optional[str] = None,
     source_type: Optional[str] = None,
@@ -460,7 +461,7 @@ def get_notifications(
     limit: int = Query(default=50, ge=1, le=100),
     current_user: UserPublic = Depends(get_current_user),
 ):
-    return repository.list_notifications_for_user(
+    notifications = repository.list_notifications_for_user(
         current_user.id,
         current_user.role,
         unseen_only=unread_only,
@@ -470,14 +471,19 @@ def get_notifications(
         severity=severity,
         source_type=source_type,
     )
+    background_tasks.add_task(enqueue_notification_enrichment, notifications)
+    return notifications
 
 
 @app.get("/api/notifications/unseen", response_model=list[NotificationEvent], dependencies=[Depends(require_roles(*READ_ROLES))])
 def get_unseen_notifications(
+    background_tasks: BackgroundTasks,
     limit: int = Query(default=20, ge=1, le=50),
     current_user: UserPublic = Depends(get_current_user),
 ):
-    return repository.list_notifications_for_user(current_user.id, current_user.role, unseen_only=True, limit=limit)
+    notifications = repository.list_notifications_for_user(current_user.id, current_user.role, unseen_only=True, limit=limit)
+    background_tasks.add_task(enqueue_notification_enrichment, notifications)
+    return notifications
 
 
 @app.post(

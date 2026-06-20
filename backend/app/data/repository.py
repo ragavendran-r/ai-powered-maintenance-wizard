@@ -191,9 +191,13 @@ def create_notification_event(payload: dict[str, Any]) -> dict[str, Any]:
                 recipient_user_ids,
                 metadata,
                 llm_provider,
-                llm_used_live_provider
+                llm_used_live_provider,
+                llm_status,
+                llm_error,
+                llm_requested_at,
+                llm_completed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(event_key) DO NOTHING
             """,
             (
@@ -217,6 +221,10 @@ def create_notification_event(payload: dict[str, Any]) -> dict[str, Any]:
                 metadata,
                 payload.get("llm_provider") or "mock",
                 1 if payload.get("llm_used_live_provider") else 0,
+                payload.get("llm_status") or "not_requested",
+                payload.get("llm_error"),
+                payload.get("llm_requested_at"),
+                payload.get("llm_completed_at"),
             ),
         )
     event = get_notification_event_by_key(payload["event_key"])
@@ -319,6 +327,76 @@ def list_all_notification_events(equipment_id: Optional[str] = None) -> list[dic
     else:
         rows = _fetch_all("SELECT * FROM notification_events ORDER BY created_at DESC")
     return [_decode_notification_event(row) for row in rows]
+
+
+def claim_notification_enrichment(notification_id: str) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    with connect() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE notification_events
+            SET
+                llm_status = 'pending',
+                llm_error = NULL,
+                llm_requested_at = CURRENT_TIMESTAMP,
+                llm_completed_at = NULL
+            WHERE id = ?
+                AND llm_status = 'not_requested'
+            """,
+            (notification_id,),
+        )
+        if cursor.rowcount == 0:
+            return None
+    row = _fetch_one("SELECT * FROM notification_events WHERE id = ?", (notification_id,))
+    return _decode_notification_event(row) if row else None
+
+
+def complete_notification_enrichment(
+    notification_id: str,
+    *,
+    recommended_action: str,
+    provider: str,
+    used_live_provider: bool,
+) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE notification_events
+            SET
+                recommended_action = ?,
+                llm_provider = ?,
+                llm_used_live_provider = ?,
+                llm_status = 'completed',
+                llm_error = NULL,
+                llm_completed_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (recommended_action, provider, 1 if used_live_provider else 0, notification_id),
+        )
+    row = _fetch_one("SELECT * FROM notification_events WHERE id = ?", (notification_id,))
+    event = _decode_notification_event(row) if row else None
+    if event:
+        sync_plant_records_index([_notification_event_plant_record(event)])
+    return event
+
+
+def fail_notification_enrichment(notification_id: str, error: str) -> Optional[dict[str, Any]]:
+    ensure_ready()
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE notification_events
+            SET
+                llm_status = 'failed',
+                llm_error = ?,
+                llm_completed_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (error[:500], notification_id),
+        )
+    row = _fetch_one("SELECT * FROM notification_events WHERE id = ?", (notification_id,))
+    return _decode_notification_event(row) if row else None
 
 
 def cleanup_notification_events(
@@ -3606,6 +3684,10 @@ def _decode_notification_event(row: dict[str, Any]) -> dict[str, Any]:
     event["recipient_user_ids"] = _json_load_list(event.get("recipient_user_ids"))
     event["metadata"] = _json_load_dict(event.get("metadata"))
     event["llm_used_live_provider"] = bool(event.get("llm_used_live_provider"))
+    event["llm_status"] = event.get("llm_status") or "not_requested"
+    event["llm_error"] = event.get("llm_error")
+    event["llm_requested_at"] = event.get("llm_requested_at")
+    event["llm_completed_at"] = event.get("llm_completed_at")
     event["seen_at"] = event.get("seen_at")
     event["dismissed_at"] = event.get("dismissed_at")
     return event
