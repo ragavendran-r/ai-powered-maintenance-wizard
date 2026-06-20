@@ -93,7 +93,7 @@ import {
   usePinnedStreamScroll,
   type AssistantTurn,
 } from './assistantContent'
-import { hasWorkOrderMaterialBlocker, workOrderStartBlockReason, workOrderStatusLabel } from './workOrderStatus'
+import { effectiveWorkOrderStatus, hasWorkOrderMaterialBlocker, workOrderStartBlockReason, workOrderStatusLabel } from './workOrderStatus'
 import { Metric } from './sharedComponents'
 import { AuthLoadingRoute, ApiOnlyRoute, LoginRoute } from './routes/Auth'
 import { DashboardRoute } from './routes/Dashboard'
@@ -2946,13 +2946,18 @@ export function App() {
   async function approveWorkOrder(workOrderId: string) {
     try {
       const updated = await api.updateWorkOrder(workOrderId, { status: 'APPR' })
+      const effectiveStatus = effectiveWorkOrderStatus(updated)
       setWorkOrders((items) => (
         items.some((item) => item.id === updated.id)
           ? items.map((item) => (item.id === updated.id ? updated : item))
           : [updated, ...items]
       ))
       setSelectedWorkOrderId(updated.id)
-      setWorkOrderMessage(`${updated.id} approved`)
+      setWorkOrderMessage(
+        effectiveStatus === 'WMATL'
+          ? `${updated.id} waiting for material`
+          : `${updated.id} approved`
+      )
       void loadPlanningBacklogPage(planningBacklogPage.offset)
     } catch {
       setWorkOrderMessage('Work order approval could not be saved')
@@ -2994,11 +2999,21 @@ export function App() {
 
     try {
       const updated = await api.updateWorkOrder(workOrderId, { status: 'APPR' })
+      const effectiveStatus = effectiveWorkOrderStatus(updated)
+      const effectiveStatusLabel = workOrderStatusLabel(effectiveStatus)
+      const summary =
+        effectiveStatus === 'WMATL'
+          ? `${namePrefix}approved ${updated.id}, but it remains ${effectiveStatusLabel} because material readiness is blocked or pending.`
+          : `${namePrefix}approved ${updated.id}. It is now ${effectiveStatusLabel} and ready for planning, dispatch, or technician execution once materials and permits are clear.`
       setWorkOrders((items) => items.map((item) => (item.id === updated.id ? updated : item)))
       setSelectedWorkOrderId(updated.id)
       const response: SupervisorAssistantResponse = {
-        summary: `${namePrefix}approved ${updated.id}. It is now ${workOrderStatusLabel(updated.status)} and ready for planning, dispatch, or technician execution once materials and permits are clear.`,
-        follow_up_actions: [`Review planning, assignment, and material readiness for ${updated.id}.`],
+        summary,
+        follow_up_actions: [
+          effectiveStatus === 'WMATL'
+            ? `Resolve material readiness for ${updated.id} before dispatch or technician execution.`
+            : `Review planning, assignment, and material readiness for ${updated.id}.`,
+        ],
         risks: [],
         draft_work_order: null,
         referenced_work_orders: [updated.id],
@@ -3006,7 +3021,11 @@ export function App() {
         provider: 'work_order_tool',
       }
       appendActionResponse(response)
-      setWorkOrderMessage(`${updated.id} approved`)
+      setWorkOrderMessage(
+        effectiveStatus === 'WMATL'
+          ? `${updated.id} waiting for material`
+          : `${updated.id} approved`
+      )
     } catch {
       const response: SupervisorAssistantResponse = {
         summary: `${namePrefix}I could not approve ${workOrderId}. Confirm the work order exists, is waiting for approval, and has no approval blocker.`,

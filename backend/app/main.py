@@ -904,7 +904,7 @@ def _normalize_material_blocked_work_order_status(
     existing_work_order: dict[str, Any],
     merged_work_order: Optional[dict[str, Any]] = None,
 ) -> None:
-    material_fields = {"material_readiness", "material_blocker_status", "spare_reservations"}
+    material_fields = {"status", "material_readiness", "material_blocker_status", "spare_reservations"}
     if not material_fields.intersection(payload):
         return
     merged_work_order = merged_work_order or _merged_work_order(existing_work_order, payload)

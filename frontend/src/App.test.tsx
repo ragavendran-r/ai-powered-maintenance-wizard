@@ -4,6 +4,7 @@ import { App } from './App'
 import { FormattedAssistantContent, normalizePmDraftMarkdown } from './assistantContent'
 import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type NotificationCleanupResult, type NotificationEvent, type PmPlan, type PmPlanDraftResponse, type PmPlanDraftStreamEvent, type PmTemplate, type PredictionResponse, type RcaMorpheusDraftResponse, type RcaMorpheusDraftStreamEvent, type Recommendation, type UserRole, type WorkOrder } from './services/api'
 import { StatusTimeline, TechnicianExecutionCard } from './sharedComponents'
+import { hasWorkOrderMaterialBlocker } from './workOrderStatus'
 
 let neoResponseDelayMs = 0
 let delayedNeoWelcomeEmails = new Set<string>()
@@ -2249,10 +2250,13 @@ beforeEach(() => {
           const body = JSON.parse((init.body as string) ?? '{}')
           const workOrderId = url.match(/\/api\/work-orders\/([^/?]+)/)?.[1]
           const original = apiWorkOrders.find((item) => item.id === workOrderId) ?? { ...apiWorkOrders[0], id: workOrderId ?? apiWorkOrders[0].id }
-          const updated = {
+          const updated: WorkOrder = {
             ...original,
             ...body,
             dispatched_at: body.planning_status === 'dispatched' ? '2026-06-12T13:45:00+05:30' : original.dispatched_at,
+          }
+          if (body.status === 'APPR' && hasWorkOrderMaterialBlocker(updated)) {
+            updated.status = 'WMATL'
           }
           apiWorkOrders = apiWorkOrders.some((item) => item.id === updated.id)
             ? apiWorkOrders.map((item) => (item.id === updated.id ? updated : item))
@@ -3394,6 +3398,38 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     const approveCall = vi
       .mocked(fetch)
       .mock.calls.find(([url, init]) => url.toString().includes('/api/work-orders/WO-8311') && init?.method === 'PATCH')
+    expect(JSON.parse((approveCall?.[1] as RequestInit).body as string)).toEqual({ status: 'APPR' })
+  })
+
+  it('keeps supervisor approval copy material-blocked when approved work is waiting for material', async () => {
+    const materialPendingWorkOrder: WorkOrder = {
+      ...workOrders[1],
+      id: 'WO-8321',
+      equipment_id: 'BF-BLOWER-02',
+      title: 'PM: Blast Furnace Combustion Air Blower proactive PM plan',
+      status: 'WAPPR',
+      assigned_to: 'Guna',
+      material_readiness: 'pending',
+      material_blocker_status: 'waiting_procurement',
+      material_blocker_note: 'Actuator procurement is still pending.',
+      spare_reservations: [],
+    }
+    apiWorkOrders = [materialPendingWorkOrder, ...apiWorkOrders]
+    await renderAuthenticated('supervisor@plant.local')
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Work Execution' }))[0])
+    const transcript = await screen.findByLabelText('Trinity supervisor chat')
+    await within(transcript).findByText(/Trinity reviewed/)
+
+    fireEvent.change(screen.getByLabelText('Supervisor question'), { target: { value: 'Approve WO-8321' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await within(transcript).findByText(/approved WO-8321, but it remains Waiting for material/i)).toBeInTheDocument()
+    expect(within(transcript).queryByText(/WO-8321.*ready for planning, dispatch, or technician execution/i)).not.toBeInTheDocument()
+    expect(await screen.findByText('WO-8321 waiting for material')).toBeInTheDocument()
+    const approveCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url, init]) => url.toString().includes('/api/work-orders/WO-8321') && init?.method === 'PATCH')
     expect(JSON.parse((approveCall?.[1] as RequestInit).body as string)).toEqual({ status: 'APPR' })
   })
 
