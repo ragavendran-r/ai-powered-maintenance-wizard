@@ -990,6 +990,65 @@ class PredictionResponse(BaseModel):
     reasoning_explanation: Optional["ReasoningExplanation"] = None
 
 
+class MlFailureHorizon(BaseModel):
+    label: str
+    days: int = Field(ge=1)
+    probability: float = Field(ge=0, le=1)
+
+
+class MlAnomalyComparison(BaseModel):
+    heuristic: AnomalyFinding
+    ml_score: float = Field(ge=0, le=1)
+    ml_risk_level: RiskLevel
+    ml_confidence: float = Field(ge=0, le=1)
+    top_contributing_signals: list[str] = Field(default_factory=list)
+    inspection_category: str
+    model_version: PredictionModelVersion
+    drift_delta: float
+    decision: str
+
+
+class MlFailurePredictionComparison(BaseModel):
+    heuristic_prediction: PredictionResponse
+    ml_failure_probability: float = Field(ge=0, le=1)
+    ml_remaining_useful_life_days: int = Field(ge=0)
+    ml_risk_level: RiskLevel
+    horizons: list[MlFailureHorizon] = Field(default_factory=list)
+    confidence_interval: PredictionConfidenceInterval
+    model_version: PredictionModelVersion
+    model_evaluation: PredictionModelEvaluation
+    prediction_evidence: list[PredictionEvidence] = Field(default_factory=list)
+    drivers: list[str] = Field(default_factory=list)
+    probability_drift: float
+    rul_drift_days: int
+
+
+class MlMaintenanceRecommendation(BaseModel):
+    id: str
+    title: str
+    trigger_type: PmTriggerType
+    action_category: str
+    recommended_due_days: int = Field(ge=0)
+    risk_reduction_score: float = Field(ge=0, le=1)
+    source_model: PredictionModelVersion
+    rationale: str
+    evidence: list[str] = Field(default_factory=list)
+
+
+class MlComparisonResponse(BaseModel):
+    equipment_id: str
+    equipment_name: str
+    generated_at: str
+    mode: Literal["shadow"] = "shadow"
+    anomaly_model: PredictionModelVersion
+    failure_model: PredictionModelVersion
+    maintenance_model: PredictionModelVersion
+    anomalies: list[MlAnomalyComparison] = Field(default_factory=list)
+    failure_prediction: MlFailurePredictionComparison
+    maintenance_recommendations: list[MlMaintenanceRecommendation] = Field(default_factory=list)
+    comparison_notes: list[str] = Field(default_factory=list)
+
+
 class DocumentIntelligence(BaseModel):
     document_id: str
     summary: str

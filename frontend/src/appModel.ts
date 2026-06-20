@@ -19,6 +19,7 @@ export type AppView =
   | 'workExecution'
   | 'planning'
   | 'reports'
+  | 'mlWorkspace'
   | 'reliability'
   | 'learningReview'
   | 'admin'

@@ -405,6 +405,65 @@ export interface PredictionResponse {
   reasoning_explanation?: ReasoningExplanation | null
 }
 
+export interface MlFailureHorizon {
+  label: string
+  days: number
+  probability: number
+}
+
+export interface MlAnomalyComparison {
+  heuristic: AnomalyFinding
+  ml_score: number
+  ml_risk_level: RiskLevel
+  ml_confidence: number
+  top_contributing_signals: string[]
+  inspection_category: string
+  model_version: PredictionModelVersion
+  drift_delta: number
+  decision: string
+}
+
+export interface MlFailurePredictionComparison {
+  heuristic_prediction: PredictionResponse
+  ml_failure_probability: number
+  ml_remaining_useful_life_days: number
+  ml_risk_level: RiskLevel
+  horizons: MlFailureHorizon[]
+  confidence_interval: PredictionConfidenceInterval
+  model_version: PredictionModelVersion
+  model_evaluation: PredictionModelEvaluation
+  prediction_evidence: PredictionEvidence[]
+  drivers: string[]
+  probability_drift: number
+  rul_drift_days: number
+}
+
+export interface MlMaintenanceRecommendation {
+  id: string
+  title: string
+  trigger_type: PmTriggerType
+  action_category: string
+  recommended_due_days: number
+  risk_reduction_score: number
+  source_model: PredictionModelVersion
+  rationale: string
+  evidence: string[]
+}
+
+export interface MlComparisonResponse {
+  equipment_id: string
+  equipment_name: string
+  generated_at: string
+  mode: 'shadow'
+  anomaly_model: PredictionModelVersion
+  failure_model: PredictionModelVersion
+  maintenance_model: PredictionModelVersion
+  anomalies: MlAnomalyComparison[]
+  failure_prediction: MlFailurePredictionComparison
+  maintenance_recommendations: MlMaintenanceRecommendation[]
+  comparison_notes: string[]
+}
+
 export interface PredictionConfidenceInterval {
   lower_probability: number
   upper_probability: number
@@ -1387,6 +1446,7 @@ export const api = {
   dashboard: () => request<DashboardSummary>('/api/dashboard/summary'),
   monitoring: () => request<MonitoringDashboard>('/api/monitoring/assets'),
   streamingStatus: () => request<StreamingStatus>('/api/streaming/status'),
+  mlComparison: (equipmentId: string) => request<MlComparisonResponse>(`/api/ml/compare/${equipmentId}`),
   health: (equipmentId: string) => request<HealthSummary>(`/api/equipment/${equipmentId}/health`),
   alerts: () => request<Alert[]>('/api/alerts'),
   unseenAlerts: () => request<Alert[]>('/api/alerts/unseen'),

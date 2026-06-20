@@ -1011,6 +1011,144 @@ const assetDetail = {
   },
 }
 
+const mlComparison = {
+  equipment_id: 'RM-DRIVE-01',
+  equipment_name: 'Hot Strip Mill Main Drive Motor',
+  generated_at: '2026-06-14T12:00:00+00:00',
+  mode: 'shadow',
+  anomaly_model: {
+    id: 'shadow-robust-anomaly-v1',
+    name: 'Shadow Robust Anomaly Detector',
+    version: '1.0.0',
+    algorithm: 'robust rolling median and threshold-distance ensemble',
+    feature_set: ['per-asset signal history', 'threshold distance'],
+    trained_on: 'current SQLite sensor history; demo shadow inference only',
+    status: 'shadow',
+  },
+  failure_model: {
+    id: 'shadow-failure-rul-v1',
+    name: 'Shadow Failure And RUL Model',
+    version: '1.0.0',
+    algorithm: 'calibrated local risk ensemble',
+    feature_set: ['ML anomaly severity', 'active alert severity', 'spare availability'],
+    trained_on: 'seeded plant data and engineer feedback labels; demo shadow inference only',
+    status: 'shadow',
+  },
+  maintenance_model: {
+    id: 'shadow-pm-ranker-v1',
+    name: 'Shadow Predictive Maintenance Ranker',
+    version: '1.0.0',
+    algorithm: 'risk-reduction action ranker',
+    feature_set: ['ML failure probability', 'RUL', 'spares'],
+    trained_on: 'current SQLite work history, spares, and feedback; demo shadow inference only',
+    status: 'shadow',
+  },
+  anomalies: [
+    {
+      heuristic: {
+        equipment_id: 'RM-DRIVE-01',
+        signal: 'drive_end_vibration',
+        timestamp: '2026-06-12T10:00:00+05:30',
+        value: 9.8,
+        unit: 'mm/s',
+        baseline_mean: 5.9,
+        z_score: 4.2,
+        threshold: 7.1,
+        threshold_breached: true,
+        trend_delta: 3.9,
+        risk_level: 'critical',
+        explanation: 'drive_end_vibration is critical risk.',
+        context_class: null,
+        context_rationale: null,
+        recommended_inspection_steps: [],
+      },
+      ml_score: 0.88,
+      ml_risk_level: 'critical',
+      ml_confidence: 0.86,
+      top_contributing_signals: ['drive_end_vibration'],
+      inspection_category: 'rotating-equipment inspection',
+      model_version: {
+        id: 'shadow-robust-anomaly-v1',
+        name: 'Shadow Robust Anomaly Detector',
+        version: '1.0.0',
+        algorithm: 'robust rolling median and threshold-distance ensemble',
+        feature_set: ['per-asset signal history', 'threshold distance'],
+        trained_on: 'current SQLite sensor history; demo shadow inference only',
+        status: 'shadow',
+      },
+      drift_delta: -0.12,
+      decision: 'ML shadow model agrees with the current critical heuristic risk band.',
+    },
+  ],
+  failure_prediction: {
+    heuristic_prediction: assetDetail.prediction,
+    ml_failure_probability: 0.82,
+    ml_remaining_useful_life_days: 18,
+    ml_risk_level: 'high',
+    horizons: [
+      { label: '7-day', days: 7, probability: 0.34 },
+      { label: '30-day', days: 30, probability: 0.62 },
+      { label: '90-day', days: 90, probability: 0.89 },
+    ],
+    confidence_interval: {
+      lower_probability: 0.72,
+      upper_probability: 0.9,
+      lower_rul_days: 13,
+      upper_rul_days: 23,
+      confidence_level: 0.78,
+      rationale: 'Shadow interval narrows as evidence increases.',
+    },
+    model_version: {
+      id: 'shadow-failure-rul-v1',
+      name: 'Shadow Failure And RUL Model',
+      version: '1.0.0',
+      algorithm: 'calibrated local risk ensemble',
+      feature_set: ['ML anomaly severity', 'active alert severity', 'spare availability'],
+      trained_on: 'seeded plant data and engineer feedback labels; demo shadow inference only',
+      status: 'shadow',
+    },
+    model_evaluation: {
+      evaluation_id: 'shadow-local-backtest-v1',
+      backtest_window_days: 90,
+      sample_count: 12,
+      precision: 0.72,
+      recall: 0.68,
+      mean_absolute_rul_error_days: 9,
+      calibration_error: 0.11,
+      summary: 'Demo evaluation placeholder from seeded plant history.',
+    },
+    prediction_evidence: [],
+    drivers: ['ML anomaly severity contribution: 88%.', 'Spare constraint contribution: 40%.'],
+    probability_drift: 0.05,
+    rul_drift_days: -5,
+  },
+  maintenance_recommendations: [
+    {
+      id: 'ML-PM-RM-DRIVE-01-RISK',
+      title: 'Schedule ML-triggered condition inspection',
+      trigger_type: 'risk_prediction',
+      action_category: 'inspection',
+      recommended_due_days: 0,
+      risk_reduction_score: 0.67,
+      source_model: {
+        id: 'shadow-pm-ranker-v1',
+        name: 'Shadow Predictive Maintenance Ranker',
+        version: '1.0.0',
+        algorithm: 'risk-reduction action ranker',
+        feature_set: ['ML failure probability', 'RUL', 'spares'],
+        trained_on: 'current SQLite work history, spares, and feedback; demo shadow inference only',
+        status: 'shadow',
+      },
+      rationale: 'ML failure probability is 82% with 18 days estimated RUL.',
+      evidence: ['ML anomaly severity contribution: 88%.'],
+    },
+  ],
+  comparison_notes: [
+    'Shadow mode only: ML outputs are not feeding existing alerts, work orders, PM plans, Reliability, or dashboards.',
+    'LLMs remain explanation and guidance tools; this workspace demonstrates numeric scoring outside direct LLM calls.',
+  ],
+}
+
 const learningExample = {
   id: 'LEX-FEEDBACK-1',
   source_type: 'feedback',
@@ -1947,6 +2085,19 @@ beforeEach(() => {
       }
       if (url.endsWith('/api/assets')) {
         return Promise.resolve(new Response(JSON.stringify(assets), { status: 200 }))
+      }
+      if (url.includes('/api/ml/compare/')) {
+        const equipmentId = url.match(/\/api\/ml\/compare\/([^/?]+)/)?.[1] ?? 'RM-DRIVE-01'
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...mlComparison,
+              equipment_id: equipmentId,
+              equipment_name: assets.find((asset) => asset.id === equipmentId)?.name ?? mlComparison.equipment_name,
+            }),
+            { status: 200 },
+          ),
+        )
       }
       if (url.includes('/api/assets/') && url.endsWith('/reliability/stream')) {
         return Promise.resolve(reliabilityPredictionStreamResponse(assetDetail.prediction))
@@ -3567,6 +3718,35 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(screen.queryByRole('button', { name: 'Admin' })).not.toBeInTheDocument()
   })
 
+  it('opens ML Workspace as a separate route without changing Reliability RCA', async () => {
+    await renderAuthenticated('reliability@plant.local')
+
+    const navigation = screen.getByLabelText('Maintenance navigation')
+    expect(within(navigation).getByRole('button', { name: 'Reliability' })).toBeInTheDocument()
+    fireEvent.click(within(navigation).getByRole('button', { name: 'ML Workspace' }))
+
+    const workspace = await screen.findByRole('region', { name: 'ML Workspace' })
+    expect(within(workspace).getByRole('heading', { name: 'ML Workspace' })).toBeInTheDocument()
+    expect(await within(workspace).findByText(/Baseline is the current app heuristic output, not an LLM numeric prediction/i)).toBeInTheDocument()
+    const summary = within(workspace).getByLabelText('ML comparison summary')
+    expect(within(summary).getByText('Shadow ML output')).toBeInTheDocument()
+    expect(within(workspace).getByText('82% failure probability')).toBeInTheDocument()
+    expect(within(summary).getByText('Current app baseline')).toBeInTheDocument()
+    expect(within(workspace).getByText('77% failure probability')).toBeInTheDocument()
+    expect(within(workspace).getByText(/not LLM output/i)).toBeInTheDocument()
+    expect(within(workspace).getByRole('table', { name: 'Anomaly heuristic and ML comparison' })).toBeInTheDocument()
+    expect(within(workspace).getByText('Shadow Robust Anomaly Detector 1.0.0')).toBeInTheDocument()
+    expect(within(workspace).getByText('Schedule ML-triggered condition inspection')).toBeInTheDocument()
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) => url.toString().includes('/api/ml/compare/RM-DRIVE-01')),
+    ).toBe(true)
+
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Reliability' }))
+    expect(await screen.findByLabelText('RCA workspace')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'RCA Workspace' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'ML Workspace' })).not.toBeInTheDocument()
+  })
+
   it('hides restricted actions for operators', async () => {
     await renderAuthenticated('operator@plant.local')
 
@@ -3576,6 +3756,7 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
     expect(within(navigation).getByRole('button', { name: 'Assets' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Admin' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Reliability' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'ML Workspace' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Learning and Tuning' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Planning' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Work Execution' })).not.toBeInTheDocument()
