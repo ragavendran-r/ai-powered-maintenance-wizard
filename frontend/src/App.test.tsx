@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { FormattedAssistantContent, normalizePmDraftMarkdown } from './assistantContent'
-import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type NotificationEvent, type PmPlan, type PmPlanDraftResponse, type PmPlanDraftStreamEvent, type PmTemplate, type PredictionResponse, type RcaMorpheusDraftResponse, type RcaMorpheusDraftStreamEvent, type Recommendation, type UserRole, type WorkOrder } from './services/api'
+import { api, type AssistantStreamEvent, type AssetReliabilityPredictionStreamEvent, type DiagnosisStreamEvent, type NeoChatResponse, type NeoStreamEvent, type NotificationCleanupResult, type NotificationEvent, type PmPlan, type PmPlanDraftResponse, type PmPlanDraftStreamEvent, type PmTemplate, type PredictionResponse, type RcaMorpheusDraftResponse, type RcaMorpheusDraftStreamEvent, type Recommendation, type UserRole, type WorkOrder } from './services/api'
 import { StatusTimeline, TechnicianExecutionCard } from './sharedComponents'
 
 let neoResponseDelayMs = 0
@@ -13,6 +13,7 @@ let maintenanceInsightsDelayMs = 0
 let supervisorAssistantRequests: Array<{ work_order_id?: string; queue_name?: string; question?: string }> = []
 let notificationsResponse: NotificationEvent[] = []
 let unseenNotificationsResponse: NotificationEvent[] = []
+let notificationCleanupResponse: NotificationCleanupResult
 
 function notificationFixture(overrides: Partial<NotificationEvent> = {}): NotificationEvent {
   return {
@@ -1433,6 +1434,17 @@ beforeEach(() => {
   supervisorAssistantRequests = []
   notificationsResponse = []
   unseenNotificationsResponse = []
+  notificationCleanupResponse = {
+    dry_run: true,
+    dismissed_retention_days: 7,
+    delete_superseded_assignments: true,
+    delete_dismissed_direct_notifications: true,
+    candidate_count: 2,
+    deleted_count: 0,
+    candidates: [],
+    deleted_ids: [],
+    vector_index_result: null,
+  }
   window.sessionStorage.clear()
   api.setSession(null)
   api.onUnauthorized(null)
@@ -1468,7 +1480,21 @@ beforeEach(() => {
       if (url.endsWith('/api/auth/session-expired')) {
         return Promise.resolve(new Response(JSON.stringify({ status: 'purged' }), { status: 200 }))
       }
-      if (url.endsWith('/api/notifications')) {
+      if (url.endsWith('/api/notifications/cleanup')) {
+        const body = JSON.parse((init?.body as string) ?? '{}')
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...notificationCleanupResponse,
+              dry_run: body.dry_run ?? true,
+              dismissed_retention_days: body.dismissed_retention_days ?? 7,
+              deleted_count: body.dry_run === false ? notificationCleanupResponse.candidate_count : 0,
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (new URL(url, window.location.origin).pathname === '/api/notifications') {
         return Promise.resolve(new Response(JSON.stringify(notificationsResponse), { status: 200 }))
       }
       if (url.endsWith('/api/notifications/unseen')) {
@@ -2358,27 +2384,139 @@ afterEach(() => {
 })
 
 describe('Intelligent Maintenance Wizard dashboard', () => {
+  it.each([
+    'admin@plant.local',
+    'supervisor@plant.local',
+    'maintenance@plant.local',
+    'reliability@plant.local',
+    'planner@plant.local',
+    'operator@plant.local',
+    'technician@plant.local',
+  ])('refreshes the role notification feed when %s opens the bell menu', async (email) => {
+    notificationsResponse = [
+      notificationFixture({
+        title: 'Role notification visibility check',
+        summary: 'The notification feed is available for this signed-in role.',
+        recipient_roles: [userFor(email).role],
+      }),
+    ]
+    unseenNotificationsResponse = []
+
+    await renderAuthenticated(email)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }))
+
+    expect(await screen.findByText('Role notification visibility check')).toBeInTheDocument()
+    expect(screen.getByText('The notification feed is available for this signed-in role.')).toBeInTheDocument()
+    cleanup()
+  })
+
+  it('refreshes the role notification feed when the technician opens the bell menu', async () => {
+    notificationsResponse = [
+      notificationFixture({
+        recipient_roles: ['maintenance_technician'],
+      }),
+    ]
+    unseenNotificationsResponse = []
+
+    await renderAuthenticated('technician@plant.local')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }))
+
+    expect(await screen.findByText('Critical alert on HYD-SYS-04')).toBeInTheDocument()
+    expect(screen.getByText('IoT anomaly detected: hydraulic oil temperature exceeded the rolling threshold.')).toBeInTheDocument()
+    expect(screen.getByText('1 recent')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification NTF-IOT-ANOMALY-HYD-SYS-04' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('Critical alert on HYD-SYS-04')).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('No role notifications yet.')).toBeInTheDocument()
+  })
+
+  it('closes the notification feed when clicking outside it', async () => {
+    notificationsResponse = [notificationFixture()]
+    unseenNotificationsResponse = []
+
+    await renderAuthenticated('technician@plant.local')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications' }))
+    expect(await screen.findByRole('region', { name: 'Notifications' })).toBeInTheDocument()
+
+    fireEvent.pointerDown(document.body)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('region', { name: 'Notifications' })).not.toBeInTheDocument()
+    })
+  })
+
   it('shows unseen role notifications as centered popups instead of toast notifications', async () => {
     unseenNotificationsResponse = [notificationFixture()]
     notificationsResponse = [notificationFixture()]
 
     await renderAuthenticated()
 
-    const dialog = await screen.findByRole('alertdialog', { name: 'Action required' })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Action required' }, { timeout: 2_000 })
     expect(within(dialog).getByText('CRITICAL Critical alert on HYD-SYS-04')).toBeInTheDocument()
     expect(within(dialog).getByText(/hydraulic oil temperature exceeded/i)).toBeInTheDocument()
     expect(within(dialog).getByText(/Review the live sensor trend/i)).toBeInTheDocument()
     expect(screen.queryByLabelText('Application notifications')).not.toBeInTheDocument()
+    expect(fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining('/api/notifications/NTF-IOT-ANOMALY-HYD-SYS-04/seen'),
+      expect.objectContaining({ method: 'POST' }),
+    )
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /dismiss notification/i }))
+
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/notifications/NTF-IOT-ANOMALY-HYD-SYS-04/seen'),
         expect.objectContaining({ method: 'POST' }),
       )
     })
-
-    fireEvent.click(within(dialog).getByRole('button', { name: /dismiss notification/i }))
-
     expect(screen.queryByRole('alertdialog', { name: 'Action required' })).not.toBeInTheDocument()
+  })
+
+  it('layers multiple role notification popups with the newest alert in front', async () => {
+    unseenNotificationsResponse = [
+      notificationFixture({
+        id: 'NTF-WO-8311',
+        event_key: 'work_order_assigned:WO-8311:technician',
+        event_type: 'work_order_assigned',
+        severity: 'high',
+        title: 'Work order assigned: WO-8311',
+        summary: 'Verify inlet guide vane actuator response is now assigned to you.',
+        source_type: 'work_order',
+        source_id: 'WO-8311',
+        work_order_id: 'WO-8311',
+        alert_id: null,
+      }),
+      notificationFixture({
+        id: 'NTF-WO-8304',
+        event_key: 'work_order_assigned:WO-8304:technician',
+        event_type: 'work_order_assigned',
+        severity: 'critical',
+        title: 'Work order assigned: WO-8304',
+        summary: 'Inspect main drive bearing vibration is now assigned to you.',
+        source_type: 'work_order',
+        source_id: 'WO-8304',
+        work_order_id: 'WO-8304',
+        alert_id: null,
+      }),
+    ]
+    notificationsResponse = unseenNotificationsResponse
+
+    await renderAuthenticated()
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Action required' }, { timeout: 2_000 })
+    const cards = dialog.querySelectorAll('.anomalyAlertCard')
+    expect(cards).toHaveLength(2)
+    expect(cards[0]).toHaveAttribute('aria-hidden', 'false')
+    expect(cards[1]).toHaveAttribute('aria-hidden', 'true')
+    expect(cards[0]).toHaveStyle({ zIndex: '2' })
+    expect(cards[1]).toHaveStyle({ zIndex: '1' })
+    expect(cards[0]).toHaveTextContent('Work order assigned: WO-8311')
   })
 
   it('polls unseen notifications every 2 minutes', async () => {
@@ -2478,6 +2616,43 @@ describe('Intelligent Maintenance Wizard dashboard', () => {
       work_type: 'CM',
       problem_code: 'INVESTIGATE',
       assigned_to: '',
+    })
+  })
+
+  it('exposes notification cleanup controls in the Admin Users tab', async () => {
+    await renderAuthenticated('admin@plant.local')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'User management' }))
+
+    const cleanupPanel = await screen.findByRole('region', { name: 'Notification cleanup' })
+    expect(cleanupPanel).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Dismissed retention days'), { target: { value: '14' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/notifications/cleanup'),
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('"dry_run":true'),
+        }),
+      )
+    })
+    await waitFor(() => {
+      expect(within(cleanupPanel).getByText('candidates')).toBeInTheDocument()
+      expect(within(cleanupPanel).getByText('mode')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete candidates' }))
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/notifications/cleanup'),
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('"dry_run":false'),
+        }),
+      )
     })
   })
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { CSSProperties, FormEvent } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -36,6 +36,7 @@ import {
   type LearningRagMigrationPlan,
   type LearningModelDeployment,
   type MonitoringDashboard,
+  type NotificationCleanupResult,
   type NotificationEvent,
   type AbnormalAlertReport,
   type DigitalMaintenanceLogEntry,
@@ -245,36 +246,54 @@ function NotificationPopupCenter({
             <h2 id="notification-popup-title">Action required</h2>
           </div>
         </div>
-        <div className="anomalyAlertList">
-          {notifications.map((notification) => (
-            <article className={`anomalyAlertCard ${notification.severity}`} key={notification.id}>
-              <div>
-                <strong>{notification.severity.toUpperCase()} {notification.title}</strong>
-                <p>{notification.summary}</p>
-              </div>
-              <dl>
+        <div className="anomalyAlertStack">
+          {notifications.map((notification, index) => {
+            const stackStyle = {
+              '--stack-index': index,
+              zIndex: notifications.length - index,
+            } as CSSProperties
+            const isFront = index === 0
+            return (
+              <article
+                aria-hidden={!isFront}
+                className={`anomalyAlertCard ${notification.severity}`}
+                key={notification.id}
+                style={stackStyle}
+              >
                 <div>
-                  <dt>Source</dt>
-                  <dd>{notification.source_type.replace(/_/g, ' ')}</dd>
+                  <strong>{notification.severity.toUpperCase()} {notification.title}</strong>
+                  <p>{notification.summary}</p>
                 </div>
-                <div>
-                  <dt>Asset</dt>
-                  <dd>{notification.equipment_id ?? 'n/a'}</dd>
-                </div>
-                <div>
-                  <dt>Reference</dt>
-                  <dd>{notification.work_order_id ?? notification.alert_id ?? notification.recommendation_id ?? 'n/a'}</dd>
-                </div>
-                <div className="notificationRecommendation">
-                  <dt>Recommendation</dt>
-                  <dd>{notification.recommended_action}</dd>
-                </div>
-              </dl>
-              <button type="button" onClick={() => onDismiss(notification.id)} aria-label={`Dismiss notification ${notification.id}`}>
-                <X size={16} />
-              </button>
-            </article>
-          ))}
+                <dl>
+                  <div>
+                    <dt>Source</dt>
+                    <dd>{notification.source_type.replace(/_/g, ' ')}</dd>
+                  </div>
+                  <div>
+                    <dt>Asset</dt>
+                    <dd>{notification.equipment_id ?? 'n/a'}</dd>
+                  </div>
+                  <div>
+                    <dt>Reference</dt>
+                    <dd>{notification.work_order_id ?? notification.alert_id ?? notification.recommendation_id ?? 'n/a'}</dd>
+                  </div>
+                  <div className="notificationRecommendation">
+                    <dt>Recommendation</dt>
+                    <dd>{notification.recommended_action}</dd>
+                  </div>
+                </dl>
+                <button
+                  aria-label={`Dismiss notification ${notification.id}`}
+                  disabled={!isFront}
+                  tabIndex={isFront ? 0 : -1}
+                  type="button"
+                  onClick={() => onDismiss(notification.id)}
+                >
+                  <X size={16} />
+                </button>
+              </article>
+            )
+          })}
         </div>
       </section>
     </div>
@@ -817,6 +836,10 @@ export function App() {
   const [notificationPopups, setNotificationPopups] = useState<NotificationEvent[]>([])
   const [notifications, setNotifications] = useState<NotificationEvent[]>([])
   const [notificationFeedOpen, setNotificationFeedOpen] = useState(false)
+  const [notificationCleanupRetentionDays, setNotificationCleanupRetentionDays] = useState(7)
+  const [notificationCleanupLoading, setNotificationCleanupLoading] = useState(false)
+  const [notificationCleanupResult, setNotificationCleanupResult] = useState<NotificationCleanupResult | null>(null)
+  const notificationMenuRef = useRef<HTMLDivElement | null>(null)
   const neoTranscriptRef = useRef<HTMLDivElement | null>(null)
   const morpheusProgressRef = useRef<HTMLDivElement | null>(null)
   const reliabilityStreamRef = useRef<HTMLDivElement | null>(null)
@@ -856,11 +879,18 @@ export function App() {
     setToasts((current) => current.filter((toast) => toast.id !== toastId))
   }, [])
 
+  const refreshNotifications = useCallback(() => (
+    api
+      .notifications()
+      .then((items) => {
+        setNotifications(items)
+      })
+      .catch(() => undefined)
+  ), [])
+
   const dismissNotificationPopup = useCallback((notificationId: string) => {
     setNotificationPopups((current) => current.filter((notification) => notification.id !== notificationId))
-    setNotifications((current) => current.map((notification) => (
-      notification.id === notificationId ? { ...notification, seen_at: notification.seen_at ?? new Date().toISOString(), dismissed_at: new Date().toISOString() } : notification
-    )))
+    setNotifications((current) => current.filter((notification) => notification.id !== notificationId))
     void api.markNotificationSeen(notificationId, true).catch(() => undefined)
   }, [])
 
@@ -1804,6 +1834,19 @@ export function App() {
   }, [activeAdminTab, activeView, canAdminUsers])
 
   useEffect(() => {
+    if (!notificationFeedOpen) return
+    const closeOnOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (!notificationMenuRef.current?.contains(target)) {
+        setNotificationFeedOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointerDown)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointerDown)
+  }, [notificationFeedOpen])
+
+  useEffect(() => {
     if (activeView === 'planning' && canAssignWorkOrders) {
       void loadPmPlanning()
     }
@@ -1839,22 +1882,14 @@ export function App() {
             const nextItems = unseen.filter((notification) => !visibleIds.has(notification.id))
             return [...nextItems, ...current].slice(0, 3)
           })
-          unseen.forEach((notification) => {
-            void api.markNotificationSeen(notification.id).catch(() => undefined)
-          })
-          const seenAt = new Date().toISOString()
-          setNotifications((current) => current.map((notification) => (
-            unseen.some((item) => item.id === notification.id)
-              ? { ...notification, seen_at: notification.seen_at ?? seenAt }
-              : notification
-          )))
         })
         .catch(() => undefined)
     }
-    pollNotifications()
+    const initialPollId = window.setTimeout(pollNotifications, 750)
     const intervalId = window.setInterval(pollNotifications, NOTIFICATION_POLL_INTERVAL_MS)
     return () => {
       cancelled = true
+      window.clearTimeout(initialPollId)
       window.clearInterval(intervalId)
     }
   }, [authReady, session?.user.id])
@@ -3467,6 +3502,39 @@ export function App() {
     }
   }
 
+  async function previewNotificationCleanup() {
+    setNotificationCleanupLoading(true)
+    try {
+      const result = await api.cleanupNotifications({
+        dry_run: true,
+        dismissed_retention_days: notificationCleanupRetentionDays,
+      })
+      setNotificationCleanupResult(result)
+      setUserMessage(`Notification cleanup preview found ${result.candidate_count} candidate(s)`)
+    } catch {
+      setUserMessage('Notification cleanup preview could not be completed')
+    } finally {
+      setNotificationCleanupLoading(false)
+    }
+  }
+
+  async function runNotificationCleanup() {
+    setNotificationCleanupLoading(true)
+    try {
+      const result = await api.cleanupNotifications({
+        dry_run: false,
+        dismissed_retention_days: notificationCleanupRetentionDays,
+      })
+      setNotificationCleanupResult(result)
+      setUserMessage(`Notification cleanup deleted ${result.deleted_count} row(s)`)
+      void refreshNotifications()
+    } catch {
+      setUserMessage('Notification cleanup could not be completed')
+    } finally {
+      setNotificationCleanupLoading(false)
+    }
+  }
+
   const passedEvaluationForModel = (modelId: string) =>
     learningSummary?.evaluation_runs.find((run) => run.model_version_id === modelId && run.passed)
 
@@ -3870,10 +3938,16 @@ export function App() {
               newUserName={newUserName}
               newUserPassword={newUserPassword}
               newUserRole={newUserRole}
+              notificationCleanupLoading={notificationCleanupLoading}
+              notificationCleanupResult={notificationCleanupResult}
+              notificationCleanupRetentionDays={notificationCleanupRetentionDays}
               openResetPassword={openResetPassword}
+              previewNotificationCleanup={previewNotificationCleanup}
               resetPassword={resetPassword}
               resetPasswordValue={resetPasswordValue}
               resetUser={resetUser}
+              runNotificationCleanup={runNotificationCleanup}
+              setNotificationCleanupRetentionDays={setNotificationCleanupRetentionDays}
               setNewUserEmail={setNewUserEmail}
               setNewUserName={setNewUserName}
               setNewUserPassword={setNewUserPassword}
@@ -3956,11 +4030,15 @@ export function App() {
           <h1>{applicationTitle}</h1>
         </div>
         <div className="statusCluster">
-          <div className="notificationMenu">
+          <div className="notificationMenu" ref={notificationMenuRef}>
             <button
               type="button"
               className={`notificationButton ${unreadNotificationCount ? 'hasUnread' : ''}`}
-              onClick={() => setNotificationFeedOpen((open) => !open)}
+              onClick={() => {
+                const willOpen = !notificationFeedOpen
+                setNotificationFeedOpen(willOpen)
+                if (willOpen) void refreshNotifications()
+              }}
               aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`}
               title="Notifications"
             >

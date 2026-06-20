@@ -11,7 +11,14 @@ from app.services.llm import LLMTextResponse
 PLANNER_ROLES = ["planner"]
 SUPERVISOR_ROLES = ["maintenance_supervisor", "admin"]
 ENGINEERING_ROLES = ["maintenance_engineer", "reliability_engineer", "maintenance_supervisor", "admin"]
-ALERT_ROLES = ["operator", "maintenance_engineer", "reliability_engineer", "maintenance_supervisor", "admin"]
+ALERT_ROLES = [
+    "operator",
+    "maintenance_technician",
+    "maintenance_engineer",
+    "reliability_engineer",
+    "maintenance_supervisor",
+    "admin",
+]
 RELIABILITY_REVIEW_ROLES = ["reliability_engineer", "maintenance_supervisor", "admin"]
 
 
@@ -131,6 +138,7 @@ def notify_alerts_registered(alerts: list[dict[str, Any]]) -> list[dict[str, Any
                 fallback_action="Review the live sensor trend, confirm whether production load should be reduced, and assign an owner.",
                 alert=alert,
                 recipient_roles=ALERT_ROLES,
+                use_live_recommendation=False,
             )
         )
     return [event for event in events if event]
@@ -355,6 +363,7 @@ def _emit_notification(
     alert: Optional[dict[str, Any]] = None,
     recommendation: Optional[Recommendation] = None,
     actor: Optional[UserPublic] = None,
+    use_live_recommendation: bool = True,
 ) -> dict[str, Any]:
     recipient_roles = _unique(recipient_roles or [])
     recipient_user_ids = _unique(recipient_user_ids or [])
@@ -362,15 +371,18 @@ def _emit_notification(
         return {}
     equipment_id = _equipment_id(work_order, alert, recommendation)
     source_type, source_id = _source(work_order, alert, recommendation)
-    text = _recommended_action_text(
-        audience=audience,
-        title=title,
-        summary=summary,
-        fallback_action=fallback_action,
-        work_order=work_order,
-        alert=alert,
-        recommendation=recommendation,
-    )
+    if use_live_recommendation:
+        text = _recommended_action_text(
+            audience=audience,
+            title=title,
+            summary=summary,
+            fallback_action=fallback_action,
+            work_order=work_order,
+            alert=alert,
+            recommendation=recommendation,
+        )
+    else:
+        text = LLMTextResponse(content=fallback_action, used_live_provider=False, provider="deterministic")
     return repository.create_notification_event(
         {
             "event_key": event_key,

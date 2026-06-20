@@ -194,6 +194,28 @@ export interface NotificationEvent {
   dismissed_at?: string | null
 }
 
+export interface NotificationCleanupResult {
+  dry_run: boolean
+  dismissed_retention_days: number
+  delete_superseded_assignments: boolean
+  delete_dismissed_direct_notifications: boolean
+  candidate_count: number
+  deleted_count: number
+  candidates: Array<{
+    id: string
+    event_type: string
+    reason: string
+    title: string
+    work_order_id?: string | null
+    alert_id?: string | null
+    recipient_roles: UserRole[]
+    recipient_user_ids: string[]
+    created_at: string
+  }>
+  deleted_ids: string[]
+  vector_index_result?: Record<string, unknown> | null
+}
+
 export interface MonitoringSensorPoint {
   id: string
   timestamp: string
@@ -1369,8 +1391,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ dismissed }),
     }),
-  notifications: (unreadOnly = false) => {
-    const query = unreadOnly ? '?unread_only=true' : ''
+  notifications: (unreadOnly = false, includeDismissed = false) => {
+    const params = new URLSearchParams()
+    if (unreadOnly) params.set('unread_only', 'true')
+    if (includeDismissed) params.set('include_dismissed', 'true')
+    const query = params.toString() ? `?${params.toString()}` : ''
     return request<NotificationEvent[]>(`/api/notifications${query}`)
   },
   unseenNotifications: () => request<NotificationEvent[]>('/api/notifications/unseen'),
@@ -1378,6 +1403,16 @@ export const api = {
     request<NotificationEvent>(`/api/notifications/${encodeURIComponent(notificationId)}/seen`, {
       method: 'POST',
       body: JSON.stringify({ dismissed }),
+    }),
+  cleanupNotifications: (payload: {
+    dry_run?: boolean
+    dismissed_retention_days?: number
+    delete_superseded_assignments?: boolean
+    delete_dismissed_direct_notifications?: boolean
+  }) =>
+    request<NotificationCleanupResult>('/api/notifications/cleanup', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
   diagnose: (equipmentId: string, alertId?: string) =>
     request<Recommendation>('/api/diagnose', {

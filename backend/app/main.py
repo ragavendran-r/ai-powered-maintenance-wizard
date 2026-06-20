@@ -73,6 +73,8 @@ from app.models.schemas import (
     MaintenanceInsightReportSummary,
     LoginRequest,
     MonitoringDashboard,
+    NotificationCleanupRequest,
+    NotificationCleanupResult,
     NotificationEvent,
     NotificationSeenRequest,
     NeoChatRequest,
@@ -454,6 +456,7 @@ def get_notifications(
     severity: Optional[str] = None,
     source_type: Optional[str] = None,
     unread_only: bool = False,
+    include_dismissed: bool = False,
     limit: int = Query(default=50, ge=1, le=100),
     current_user: UserPublic = Depends(get_current_user),
 ):
@@ -461,6 +464,7 @@ def get_notifications(
         current_user.id,
         current_user.role,
         unseen_only=unread_only,
+        include_dismissed=include_dismissed,
         limit=limit,
         event_type=event_type,
         severity=severity,
@@ -474,6 +478,20 @@ def get_unseen_notifications(
     current_user: UserPublic = Depends(get_current_user),
 ):
     return repository.list_notifications_for_user(current_user.id, current_user.role, unseen_only=True, limit=limit)
+
+
+@app.post(
+    "/api/notifications/cleanup",
+    response_model=NotificationCleanupResult,
+    dependencies=[Depends(require_roles(*ADMIN_ROLES))],
+)
+def cleanup_notifications(request: NotificationCleanupRequest):
+    return repository.cleanup_notification_events(
+        dry_run=request.dry_run,
+        dismissed_retention_days=request.dismissed_retention_days,
+        delete_superseded_assignments=request.delete_superseded_assignments,
+        delete_dismissed_direct_notifications=request.delete_dismissed_direct_notifications,
+    )
 
 
 @app.post(

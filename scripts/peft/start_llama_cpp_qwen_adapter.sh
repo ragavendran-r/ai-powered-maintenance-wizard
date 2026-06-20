@@ -54,6 +54,7 @@ PEFT_ADAPTER_DIR="${MW_ADAPTER_ARTIFACT_URI:-${DEFAULT_PEFT_ADAPTER_DIR}}"
 ALIAS="${LLAMA_CPP_ALIAS:-${OPENAI_MODEL:-${DEFAULT_MODEL_ALIAS}}}"
 PID_FILE="${LLAMA_CPP_PID_FILE:-${ROOT_DIR}/backend/data/runtime/llama_cpp_adapter.pid}"
 LOG_FILE="${LLAMA_CPP_LOG_FILE:-${ROOT_DIR}/backend/data/runtime/llama_cpp_adapter.log}"
+LAUNCHD_LABEL="${LLAMA_CPP_LAUNCHD_LABEL:-ai-powered-maintenance-wizard-llama}"
 CTX_SIZE="${LLAMA_CPP_CTX_SIZE:-4096}"
 PARALLEL="${LLAMA_CPP_PARALLEL:-2}"
 N_GPU_LAYERS="${LLAMA_CPP_N_GPU_LAYERS:-}"
@@ -78,6 +79,7 @@ Useful variables:
   LLAMA_CPP_SERVER_BIN       llama-server binary path or command name
   LLAMA_CPP_CONVERT_PYTHON   Python executable for adapter conversion; defaults to .venv-peft/bin/python when present
   LLAMA_CPP_ALIAS            served model alias; defaults to OPENAI_MODEL or ${DEFAULT_MODEL_ALIAS}
+  LLAMA_CPP_LAUNCHD_LABEL    optional launchd label to stop first; default ai-powered-maintenance-wizard-llama
   LLAMA_CPP_HOST             default 127.0.0.1
   LLAMA_CPP_PORT             default 8080
   LLAMA_CPP_CTX_SIZE         default 4096
@@ -88,7 +90,7 @@ Useful variables:
 Commands:
   --check   Validate inputs and print the resolved llama-server command.
   --status  Check the local llama.cpp endpoint and model list.
-  --stop    Stop the pid recorded in LLAMA_CPP_PID_FILE.
+  --stop    Stop the launchd service, pid file, or matching llama-server endpoint.
 EOF
 }
 
@@ -102,8 +104,29 @@ require_command() {
 }
 
 stop_server() {
+  local stopped_launchd=0
+  if stop_launchd_service; then
+    stopped_launchd=1
+  fi
+
   if [[ ! -f "${PID_FILE}" ]]; then
+    local fallback_pids=()
+    while IFS= read -r pid; do
+      [[ -n "${pid}" ]] && fallback_pids+=("${pid}")
+    done < <(find_server_pids_by_endpoint)
+    if [[ "${#fallback_pids[@]}" -eq 0 ]]; then
+      echo "No llama.cpp pid file found: ${PID_FILE}"
+      if [[ "${stopped_launchd}" -eq 1 ]]; then
+        echo "No additional matching llama-server process found for ${HOST}:${PORT}"
+      else
+        echo "No matching llama-server process found for ${HOST}:${PORT}"
+      fi
+      return 0
+    fi
     echo "No llama.cpp pid file found: ${PID_FILE}"
+    for pid in "${fallback_pids[@]}"; do
+      stop_pid "${pid}"
+    done
     return 0
   fi
   local pid
@@ -113,13 +136,43 @@ stop_server() {
     rm -f "${PID_FILE}"
     return 0
   fi
+  stop_pid "${pid}"
+  rm -f "${PID_FILE}"
+}
+
+stop_launchd_service() {
+  [[ -n "${LAUNCHD_LABEL}" ]] || return 1
+  command -v launchctl >/dev/null 2>&1 || return 1
+
+  local target="gui/$(id -u)/${LAUNCHD_LABEL}"
+  launchctl print "${target}" >/dev/null 2>&1 || return 1
+
+  echo "Stopping launchd llama.cpp service ${LAUNCHD_LABEL}"
+  if launchctl bootout "${target}" >/dev/null 2>&1; then
+    return 0
+  fi
+  launchctl remove "${LAUNCHD_LABEL}" >/dev/null 2>&1 || true
+}
+
+stop_pid() {
+  local pid="$1"
   echo "Stopping llama.cpp process ${pid}"
   kill "${pid}" >/dev/null 2>&1 || true
   for _ in $(seq 1 30); do
     kill -0 "${pid}" >/dev/null 2>&1 || break
     sleep 0.2
   done
-  rm -f "${PID_FILE}"
+}
+
+find_server_pids_by_endpoint() {
+  local pid command
+  while read -r pid command; do
+    [[ -n "${pid}" && -n "${command}" ]] || continue
+    [[ "${command}" == *llama-server* ]] || continue
+    [[ "${command}" == *"--host ${HOST}"* ]] || continue
+    [[ "${command}" == *"--port ${PORT}"* ]] || continue
+    echo "${pid}"
+  done < <(ps -axo pid=,command=)
 }
 
 status_server() {
